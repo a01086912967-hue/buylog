@@ -4,17 +4,14 @@ const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] 
 });
 
-// 환경 변수 설정
 const TOKEN = process.env.TOKEN;
 const PURCHASE_LOG_CHANNEL_ID = process.env.PURCHASE_LOG_CHANNEL_ID;
-const GUILD_ID = process.env.GUILD_ID;
 
 client.once('ready', async () => {
-    console.log('봇 준비 완료! (지급 전용 모드)');
+    console.log('봇 준비 완료! (로그 전송 모드)');
 });
 
 client.on('interactionCreate', async interaction => {
-    // 지급완료 명령어 처리
     if (interaction.isChatInputCommand() && interaction.commandName === '지급완료') {
         await interaction.reply({ content: '처리를 시작합니다.', ephemeral: true });
 
@@ -26,7 +23,6 @@ client.on('interactionCreate', async interaction => {
         let itemName = "알 수 없음";
         let itemQty = "1";
 
-        // 아이템 정보 추출 로직 유지
         for (let i = 0; i < lines.length; i++) {
             if (lines[i].includes("구매할 아이템 이름")) itemName = lines[i + 1]?.replace(/[`'‘’()]/g, '').trim() || "알 수 없음";
             if (lines[i].includes("수량을 입력")) itemQty = lines[i + 1]?.replace(/[`'‘’()]/g, '').trim() || "1";
@@ -36,17 +32,23 @@ client.on('interactionCreate', async interaction => {
         const amount = interaction.options.getString('금액');
         const seller = interaction.options.getUser('판매자') || interaction.user;
 
-        // 로그 채널 전송
-        const logChannel = interaction.guild.channels.cache.get(PURCHASE_LOG_CHANNEL_ID);
-        if (logChannel) {
-            const logEmbed = new EmbedBuilder()
-                .setColor(0xFFD1DC)
-                .setDescription(`°.✩┈┈∘*┈˃̶ ୨<:star_IDS:1523988845735972874>୧˂̶┈*∘┈┈✩.°\n\n${buyer} 님, **${itemName} x ${itemQty}** 구매 감사합니다 .ᐟ.ᐟ\n\n-# 사용된 금액 : ${amount}\n\n-# 해당 관리 판매자: ${seller}\n\n°.✩┈┈∘*┈˃̶ ୨<:star_IDS:1523988845735972874>୧˂̶┈*∘┈┈✩.°\n࣪𓏲ּ ᥫ᭡ ₊ 𝑻𝒉𝒂𝒏𝒌 𝒚𝒐𝒖 ⊹ ˑ ִֶ 𓂃`)
-                .setImage('https://i.imgur.com/jokl6LQ.gif');
-            logChannel.send({ embeds: [logEmbed] });
+        // 로그 채널 강제 불러오기 시도
+        try {
+            const logChannel = await client.channels.fetch(PURCHASE_LOG_CHANNEL_ID);
+            if (logChannel) {
+                const logEmbed = new EmbedBuilder()
+                    .setColor(0xFFD1DC)
+                    .setDescription(`°.✩┈┈∘*┈˃̶ ୨<:star_IDS:1523988845735972874>୧˂̶┈*∘┈┈✩.°\n\n${buyer} 님, **${itemName} x ${itemQty}** 구매 감사합니다 .ᐟ.ᐟ\n\n-# 사용된 금액 : ${amount}\n\n-# 해당 관리 판매자: ${seller}\n\n°.✩┈┈∘*┈˃̶ ୨<:star_IDS:1523988845735972874>୧˂̶┈*∘┈┈✩.°\n࣪𓏲ּ ᥫ᭡ ₊ 𝑻𝒉𝒂𝒏𝒌 𝒚𝒐𝒖 ⊹ ˑ ִֶ 𓂃`)
+                    .setImage('https://i.imgur.com/jokl6LQ.gif');
+                await logChannel.send({ embeds: [logEmbed] });
+            } else {
+                console.error("로그 채널을 찾을 수 없습니다.");
+            }
+        } catch (error) {
+            console.error("로그 채널 전송 오류:", error);
         }
 
-        // DM 발송 (버튼 없음)
+        // DM 발송
         const dmEmbed = new EmbedBuilder()
             .setColor(0xFFD1DC)
             .setTitle("<a:check:1518257176811012217> 구매 완료")
@@ -55,7 +57,7 @@ client.on('interactionCreate', async interaction => {
         
         try { await buyer.send({ embeds: [dmEmbed] }); } catch (e) { }
 
-        // 채널 메시지 (버튼 없음)
+        // 채널 메시지
         await interaction.channel.send({
             embeds: [new EmbedBuilder().setColor(0xFFD1DC).setDescription(`${buyer}님, **${itemName} x ${itemQty}** 지급이 완료되었습니다.`)]
         });
