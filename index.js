@@ -1,10 +1,15 @@
 const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 
+// 봇 설정 (토큰 및 채널 ID를 환경 변수에서 불러옴)
 const client = new Client({ 
-    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] 
+    intents: [
+        GatewayIntentBits.Guilds, 
+        GatewayIntentBits.GuildMessages, 
+        GatewayIntentBits.MessageContent
+    ] 
 });
 
-// 환경 변수 사용 (Railway 배포용)
+// Railway Variables(환경변수) 설정값 불러오기
 const TOKEN = process.env.TOKEN;
 const REVIEW_CHANNEL_ID = process.env.REVIEW_CHANNEL_ID;
 const PURCHASE_LOG_CHANNEL_ID = process.env.PURCHASE_LOG_CHANNEL_ID;
@@ -71,10 +76,11 @@ client.on('interactionCreate', async interaction => {
             const logEmbed = new EmbedBuilder()
                 .setColor(0xFFD1DC)
                 .setDescription(`°.✩┈┈∘*┈˃̶ ୨<:star_IDS:1523988845735972874>୧˂̶┈*∘┈┈✩.°\n\n${buyer} 님, **${itemName} x ${itemQty}** 구매 감사합니다 .ᐟ.ᐟ\n\n-# 사용된 금액 : ${amount}\n\n-# 해당 관리 판매자: ${seller}\n\n°.✩┈┈∘*┈˃̶ ୨<:star_IDS:1523988845735972874>୧˂̶┈*∘┈┈✩.°\n࣪𓏲ּ ᥫ᭡ ₊ 𝑻𝒉𝒂𝒏𝒌 𝒚𝒐𝒖 ⊹ ˑ ִֶ 𓂃`)
-                .setImage('https://i.imgur.com/jokl6LQ.gif');
+            .setImage('https://i.imgur.com/jokl6LQ.gif');
             logChannel.send({ embeds: [logEmbed] });
         }
-        // DM 발송 (버튼 제거됨)
+
+        // DM 발송
         const dmEmbed = new EmbedBuilder()
             .setColor(0xFFD1DC)
             .setTitle("<a:check:1518257176811012217> 구매 완료")
