@@ -24,7 +24,7 @@ client.on('interactionCreate', async interaction => {
         let itemQty = "1";
 
         for (let i = 0; i < lines.length; i++) {
-            if (lines[i].includes("지급방식")) itemName = lines[i + 1]?.replace(/[`'‘’()]/g, '').trim() || "알 수 없음";
+            if (lines[i].includes("상품")) itemName = lines[i + 1]?.replace(/[`'‘’()]/g, '').trim() || "알 수 없음";
             if (lines[i].includes("수량")) itemQty = lines[i + 1]?.replace(/[`'‘’()]/g, '').trim() || "1";
         }
 
