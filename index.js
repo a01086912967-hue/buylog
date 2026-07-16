@@ -24,8 +24,8 @@ client.on('interactionCreate', async interaction => {
         let itemQty = "1";
 
         for (let i = 0; i < lines.length; i++) {
-            if (lines[i].includes("구매할 아이템 이름")) itemName = lines[i + 1]?.replace(/[`'‘’()]/g, '').trim() || "알 수 없음";
-            if (lines[i].includes("수량을 입력")) itemQty = lines[i + 1]?.replace(/[`'‘’()]/g, '').trim() || "1";
+            if (lines[i].includes("상품")) itemName = lines[i + 1]?.replace(/[`'‘’()]/g, '').trim() || "알 수 없음";
+            if (lines[i].includes("수량")) itemQty = lines[i + 1]?.replace(/[`'‘’()]/g, '').trim() || "1";
         }
 
         const buyer = messages.find(m => m.author.bot && m.mentions.users.size > 0)?.mentions.users.first() || interaction.user;
