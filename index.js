@@ -113,7 +113,7 @@ client.on('interactionCreate', async interaction => {
             console.error("로그 채널 전송 오류:", error);
         }
 
-        // 4. 구매자 DM 발송
+        // 4. 구매자 DM 발송 (기존과 동일)
         const dmEmbed = new EmbedBuilder()
             .setColor(0xFFD1DC)
             .setTitle("<a:check:1518257176811012217> 구매 완료")
@@ -122,9 +122,15 @@ client.on('interactionCreate', async interaction => {
         
         try { await buyer.send({ embeds: [dmEmbed] }); } catch (e) { }
 
-        // 5. 현재 채널에 완료 안내 메시지 전송
+        // 5. 현재 티켓 채널에 메시지 + 임베드 전송 (수정됨)
+        const ticketMessage = `${buyer}\n### 지급완료 <a:purple_check:1482280715147018371>\n- 확인 후 <#1457384179535712473> 작성 필수`;
+        const ticketEmbed = new EmbedBuilder()
+            .setColor(0xFFD1DC)
+            .setDescription(`${buyer}님, **${itemName} x ${itemQty}** 지급이 완료되었습니다.`);
+
         await interaction.channel.send({
-            embeds: [new EmbedBuilder().setColor(0xFFD1DC).setDescription(`${buyer}님, **${itemName} x ${itemQty}** 지급이 완료되었습니다.`)]
+            content: ticketMessage,
+            embeds: [ticketEmbed]
         });
     }
 });
