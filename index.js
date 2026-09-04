@@ -9,7 +9,7 @@ const client = new Client({
 });
 
 const TOKEN = process.env.TOKEN;
-const PURCHASE_LOG_CHANNEL_ID = '1457384179535712473'; // 로그 전송 채널 고정
+const PURCHASE_LOG_CHANNEL_ID = '1457384858065047663'; // 요청하신 로그 채널 ID로 변경
 
 client.once('ready', async () => {
     console.log('봇 준비 완료!');
@@ -63,7 +63,7 @@ client.on('interactionCreate', async interaction => {
         const buyer = interaction.options.getUser('구매자') || interaction.user;
         const seller = interaction.options.getUser('판매자') || interaction.user;
 
-        // 1. 지정된 로그 채널 전송
+        // 1. 지정된 로그 채널로 로그 전송
         try {
             const logChannel = await client.channels.fetch(PURCHASE_LOG_CHANNEL_ID);
             if (logChannel) {
@@ -77,12 +77,13 @@ client.on('interactionCreate', async interaction => {
             console.error("로그 채널 전송 오류:", error);
         }
 
-        // 2. 현재 티켓 채널에 임베드만 전송 (구매자 멘션 포함)
+        // 2. 티켓 채널에 [구매자 멘션만] 일반 메시지로 출력 + 임베드 함께 전송
         const ticketEmbed = new EmbedBuilder()
             .setColor(0xFFD1DC)
             .setDescription(`${buyer}님, 아이템이 정상적으로 지급되었어요. <a:veryheart:1479957265871143104>\nhttps://discord.com/channels/1456729030459134115/1457384179535712473 작성은 필수입니다`);
 
         await interaction.channel.send({
+            content: `${buyer}`, // 메시지에는 오직 구매자 멘션만 들어갑니다.
             embeds: [ticketEmbed]
         });
     }
