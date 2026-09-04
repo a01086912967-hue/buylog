@@ -69,7 +69,7 @@ client.on('interactionCreate', async interaction => {
             if (logChannel) {
                 const logEmbed = new EmbedBuilder()
                     .setColor(0xFFD1DC)
-                    .setDescription(`°.✩┈┈∘┈˃̶ ୨<a:Pinkheartgif:1545408138377695352> ୧˂̶┈∘┈┈✩.°\n\n${buyer}, ${itemName} (${itemQty}개) 구매 감사합니다 .ᐟ.ᐟ\n\n사용된 금액 : ${amount}\n\n해당 관리 판매자: ${seller}\n\n°.✩┈┈∘┈˃̶ ୨<a:Pinkheartgif:1545408138377695352> ୧˂̶┈∘┈┈✩.°\n࣪𓏲ּ ᥫ᭡ ₊ 𝑻𝒉𝒂𝒏𝒌 𝒚𝒐𝒖 ⊹ ˑ ִֶ 𓂃`)
+                    .setDescription(`°.✩┈┈∘┈˃̶ ୨<a:Pinkheartgif:1545408138377695352> ୧˂̶┈∘┈┈✩.°\n\n${buyer} 님, ${itemName} (${itemQty}개) 구매 감사합니다 .ᐟ.ᐟ\n\n사용된 금액 : ${amount}\n\n해당 관리 판매자: ${seller}\n\n°.✩┈┈∘┈˃̶ ୨<a:Pinkheartgif:1545408138377695352> ୧˂̶┈∘┈┈✩.°\n࣪𓏲ּ ᥫ᭡ ₊ 𝑻𝒉𝒂𝒏𝒌 𝒚𝒐𝒖 ⊹ ˑ ִֶ 𓂃`)
                     .setImage('https://i.imgur.com/jokl6LQ.gif');
 
                 await logChannel.send({
@@ -84,7 +84,7 @@ client.on('interactionCreate', async interaction => {
         // 2. 티켓 채널에 구매자 멘션(메시지) + 볼드 처리된 티켓 임베드 전송
         const ticketEmbed = new EmbedBuilder()
             .setColor(0xFFD1DC)
-            .setDescription(`**아이템이 정상적으로 지급되었어요.** \n**https://discord.com/channels/1456729030459134115/1457384179535712473 작성은 필수입니다. <a:veryheart:1479957265871143104>`);
+            .setDescription(`**아이템이 정상적으로 지급되었어요.** \n**https://discord.com/channels/1456729030459134115/1457384179535712473 작성은 필수입니다. <a:veryheart:1479957265871143104>**`);
 
         await interaction.channel.send({
             content: `${buyer}`, // 티켓 채널 메시지에 구매자 멘션
