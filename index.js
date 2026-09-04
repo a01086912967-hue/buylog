@@ -84,7 +84,7 @@ client.on('interactionCreate', async interaction => {
         // 2. 티켓 채널에 구매자 멘션(메시지) + 볼드 처리된 티켓 임베드 전송
         const ticketEmbed = new EmbedBuilder()
             .setColor(0xFFD1DC)
-            .setDescription(`**아이템이 정상적으로 지급되었어요.** \n**https://discord.com/channels/1456729030459134115/1457384179535712473 작성은 필수입니다. <a:veryheart:1479957265871143104>**`);
+            .setDescription(`**아이템이 정상적으로 지급되었어요.** \n**https://discord.com/channels/1456729030459134115/1457384179535712473 작성은 필수입니다.**`);
 
         await interaction.channel.send({
             content: `${buyer}`, // 티켓 채널 메시지에 구매자 멘션
