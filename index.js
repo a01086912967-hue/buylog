@@ -9,7 +9,7 @@ const client = new Client({
 });
 
 const TOKEN = process.env.TOKEN;
-const PURCHASE_LOG_CHANNEL_ID = '1457384858065047663'; // 요청하신 로그 채널 ID로 변경
+const PURCHASE_LOG_CHANNEL_ID = '1457384858065047663'; // 로그 채널 ID
 
 client.once('ready', async () => {
     console.log('봇 준비 완료!');
@@ -63,7 +63,7 @@ client.on('interactionCreate', async interaction => {
         const buyer = interaction.options.getUser('구매자') || interaction.user;
         const seller = interaction.options.getUser('판매자') || interaction.user;
 
-        // 1. 지정된 로그 채널로 로그 전송
+        // 1. 로그 채널로 구매자 멘션(메시지) + 로그 임베드 전송
         try {
             const logChannel = await client.channels.fetch(PURCHASE_LOG_CHANNEL_ID);
             if (logChannel) {
@@ -71,19 +71,23 @@ client.on('interactionCreate', async interaction => {
                     .setColor(0xFFD1DC)
                     .setDescription(`°.✩┈┈∘┈˃̶ ୨<a:Pinkheartgif:1545408138377695352> ୧˂̶┈∘┈┈✩.°\n\n${buyer}, ${itemName} (${itemQty}개) 구매 감사합니다 .ᐟ.ᐟ\n\n사용된 금액 : ${amount}\n\n해당 관리 판매자: ${seller}\n\n°.✩┈┈∘┈˃̶ ୨<a:Pinkheartgif:1545408138377695352> ୧˂̶┈∘┈┈✩.°\n࣪𓏲ּ ᥫ᭡ ₊ 𝑻𝒉𝒂𝒏𝒌 𝒚𝒐𝒖 ⊹ ˑ ִֶ 𓂃`)
                     .setImage('https://i.imgur.com/jokl6LQ.gif');
-                await logChannel.send({ embeds: [logEmbed] });
+
+                await logChannel.send({
+                    content: `${buyer}`, // 로그 채널 메시지에 구매자 멘션
+                    embeds: [logEmbed]
+                });
             }
         } catch (error) {
             console.error("로그 채널 전송 오류:", error);
         }
 
-        // 2. 티켓 채널에 [구매자 멘션만] 일반 메시지로 출력 + 임베드 함께 전송
+        // 2. 티켓 채널에 구매자 멘션(메시지) + 볼드 처리된 티켓 임베드 전송
         const ticketEmbed = new EmbedBuilder()
             .setColor(0xFFD1DC)
-            .setDescription(`${buyer}님, 아이템이 정상적으로 지급되었어요. <a:veryheart:1479957265871143104>\nhttps://discord.com/channels/1456729030459134115/1457384179535712473 작성은 필수입니다`);
+            .setDescription(`**아이템이 정상적으로 지급되었어요.** \n**https://discord.com/channels/1456729030459134115/1457384179535712473 작성은 필수입니다. <a:veryheart:1479957265871143104>`);
 
         await interaction.channel.send({
-            content: `${buyer}`, // 메시지에는 오직 구매자 멘션만 들어갑니다.
+            content: `${buyer}`, // 티켓 채널 메시지에 구매자 멘션
             embeds: [ticketEmbed]
         });
     }
