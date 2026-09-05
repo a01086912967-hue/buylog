@@ -23,7 +23,6 @@ const GUILD_ID = '1456729030459134115';
 const PURCHASE_LOG_CHANNEL_ID = '1457384858065047663'; 
 // ------------------------------------------------
 
-// 글씨 깨짐 방지를 위한 폰트 설정 (기본 sans-serif 백업 지정)
 const FONT_FAMILY = 'CustomFont, sans-serif, "Noto Sans KR", Arial';
 
 function loadOnlineFont() {
@@ -47,7 +46,6 @@ function loadOnlineFont() {
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// 유저 파싱 함수 (멘션 또는 유저 ID 입력 모두 지원)
 async function fetchUserFromInput(client, input) {
     if (!input) return null;
     const cleanId = input.replace(/[^0-9]/g, '');
@@ -55,7 +53,6 @@ async function fetchUserFromInput(client, input) {
     return await client.users.fetch(cleanId).catch(() => null);
 }
 
-// 랭킹 구하기 함수
 async function getUserRank(guild, targetUserId) {
     try {
         const allEntries = await db.all();
@@ -194,33 +191,6 @@ client.on('messageCreate', async message => {
     const args = message.content.slice(1).trim().split(/ +/);
     const command = args.shift();
 
-    if (command === '백업') {
-        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-            return message.reply('❌ 이 명령어를 사용할 수 있는 권한이 없습니다. (관리자 전용)');
-        }
-
-        const dbPath = path.join(__dirname, 'database.sqlite');
-
-        if (!fs.existsSync(dbPath)) {
-            return message.reply('❌ 데이터베이스 파일이 존재하지 않습니다.');
-        }
-
-        try {
-            const attachment = new AttachmentBuilder(dbPath, { name: `database_backup_${Date.now()}.sqlite` });
-            
-            const backupEmbed = new EmbedBuilder()
-                .setColor(0x2ECC71)
-                .setTitle('📦 데이터베이스 백업 완료')
-                .setDescription('최신 유저 누적 금액, 구매 횟수, 설정 데이터가 담긴 SQLite DB 파일입니다.')
-                .setTimestamp();
-
-            await message.reply({ embeds: [backupEmbed], files: [attachment] });
-        } catch (error) {
-            console.error('백업 오류:', error);
-            await message.reply('❌ 백업 파일 전송 중 오류가 발생했습니다.');
-        }
-    }
-
     if (command === '유저정보변경로그') {
         if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
             return message.reply('❌ 이 명령어를 사용할 수 있는 권한이 없습니다. (관리자 전용)');
@@ -254,6 +224,7 @@ client.on('messageCreate', async message => {
             return message.reply('❌ 사용법: `$유저구매횟수 (변경할 횟수) (유저ID 또는 @유저멘션)`');
         }
 
+        const oldVal = (await db.get(`user_${targetUser.id}.buyCount`)) || 0;
         await db.set(`user_${targetUser.id}.buyCount`, count);
 
         await message.reply(`✅ ${targetUser.username} (${targetUser.id}) 님의 구매 횟수가 **${count}회**로 변경되었습니다.`);
@@ -264,12 +235,14 @@ client.on('messageCreate', async message => {
                 const infoLogChannel = await client.channels.fetch(infoLogChannelId);
                 if (infoLogChannel) {
                     const infoEmbed = new EmbedBuilder()
-                        .setColor(0x2ECC71)
-                        .setTitle('🛠️ 유저 정보 변경 알림 (구매 횟수)')
+                        .setColor(0x3498DB)
+                        .setTitle('📝 유저 정보 변경 알림')
                         .addFields(
                             { name: '처리 관리자', value: `${message.author} (${message.author.id})`, inline: true },
                             { name: '대상 유저', value: `${targetUser} (${targetUser.id})`, inline: true },
-                            { name: '변경 후 총 구매 횟수', value: `${count}회`, inline: false }
+                            { name: '항목', value: '구매 횟수', inline: false },
+                            { name: '변경 전', value: `${oldVal}회`, inline: true },
+                            { name: '변경 후', value: `${count}회`, inline: true }
                         )
                         .setTimestamp();
 
@@ -293,12 +266,8 @@ client.on('messageCreate', async message => {
             return message.reply('❌ 사용법: `$유저구매금액 (변경할 금액) (유저ID 또는 @유저멘션)`');
         }
 
+        const oldVal = (await db.get(`user_${targetUser.id}.totalAmount`)) || 0;
         await db.set(`user_${targetUser.id}.totalAmount`, amount);
-
-        const currentBiggest = (await db.get(`user_${targetUser.id}.biggestDeal`)) || 0;
-        if (amount > currentBiggest) {
-            await db.set(`user_${targetUser.id}.biggestDeal`, amount);
-        }
 
         await message.reply(`✅ ${targetUser.username} (${targetUser.id}) 님의 누적 금액이 **₩${amount.toLocaleString()}**으로 변경되었습니다.`);
 
@@ -309,11 +278,13 @@ client.on('messageCreate', async message => {
                 if (infoLogChannel) {
                     const infoEmbed = new EmbedBuilder()
                         .setColor(0x3498DB)
-                        .setTitle('🛠️ 유저 정보 변경 알림 (구매 금액)')
+                        .setTitle('📝 유저 정보 변경 알림')
                         .addFields(
                             { name: '처리 관리자', value: `${message.author} (${message.author.id})`, inline: true },
                             { name: '대상 유저', value: `${targetUser} (${targetUser.id})`, inline: true },
-                            { name: '변경 후 총 누적 금액', value: `₩${amount.toLocaleString()}`, inline: false }
+                            { name: '항목', value: '누적 금액', inline: false },
+                            { name: '변경 전', value: `₩${Number(oldVal).toLocaleString()}`, inline: true },
+                            { name: '변경 후', value: `₩${amount.toLocaleString()}`, inline: true }
                         )
                         .setTimestamp();
 
@@ -337,9 +308,10 @@ client.on('messageCreate', async message => {
             return message.reply('❌ 사용법: `$유저최대금액 (변경할 금액) (유저ID 또는 @유저멘션)`');
         }
 
+        const oldVal = (await db.get(`user_${targetUser.id}.biggestDeal`)) || 0;
         await db.set(`user_${targetUser.id}.biggestDeal`, amount);
 
-        await message.reply(`✅ ${targetUser.username} (${targetUser.id}) 님의 최대 거래 금액(BIGGEST DEAL)이 **₩${amount.toLocaleString()}**으로 변경되었습니다.`);
+        await message.reply(`✅ ${targetUser.username} (${targetUser.id}) 님의 최대 거래 금액이 **₩${amount.toLocaleString()}**으로 변경되었습니다.`);
 
         const infoLogChannelId = await db.get('info_log_channel_id');
         if (infoLogChannelId) {
@@ -347,12 +319,14 @@ client.on('messageCreate', async message => {
                 const infoLogChannel = await client.channels.fetch(infoLogChannelId);
                 if (infoLogChannel) {
                     const infoEmbed = new EmbedBuilder()
-                        .setColor(0x9B59B6)
-                        .setTitle('🛠️ 유저 정보 변경 알림 (최대 거래 금액)')
+                        .setColor(0x3498DB)
+                        .setTitle('📝 유저 정보 변경 알림')
                         .addFields(
                             { name: '처리 관리자', value: `${message.author} (${message.author.id})`, inline: true },
                             { name: '대상 유저', value: `${targetUser} (${targetUser.id})`, inline: true },
-                            { name: '변경 후 최대 거래 금액', value: `₩${amount.toLocaleString()}`, inline: false }
+                            { name: '항목', value: '최대 거래 금액', inline: false },
+                            { name: '변경 전', value: `₩${Number(oldVal).toLocaleString()}`, inline: true },
+                            { name: '변경 후', value: `₩${amount.toLocaleString()}`, inline: true }
                         )
                         .setTimestamp();
 
@@ -375,9 +349,7 @@ client.on('messageCreate', async message => {
                 const key = entry.id || entry.key || '';
                 if (typeof key === 'string' && key.startsWith('user_')) {
                     const uid = key.split('.')[0].replace('user_', '');
-                    if (uid && !userMap.has(uid)) {
-                        userMap.set(uid, true);
-                    }
+                    if (uid && !userMap.has(uid)) userMap.set(uid, true);
                 }
             }
 
@@ -510,9 +482,7 @@ client.on('messageCreate', async message => {
                 const key = entry.id || entry.key || '';
                 if (typeof key === 'string' && key.startsWith('user_')) {
                     const uid = key.split('.')[0].replace('user_', '');
-                    if (uid && !userMap.has(uid)) {
-                        userMap.set(uid, true);
-                    }
+                    if (uid && !userMap.has(uid)) userMap.set(uid, true);
                 }
             }
 
@@ -532,9 +502,7 @@ client.on('messageCreate', async message => {
             const rankData = rankResults.filter(item => item !== null);
 
             rankData.sort((a, b) => {
-                if (b.amount !== a.amount) {
-                    return b.amount - a.amount;
-                }
+                if (b.amount !== a.amount) return b.amount - a.amount;
                 return a.joinedAt - b.joinedAt;
             });
 
@@ -725,7 +693,6 @@ client.on('messageCreate', async message => {
             const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'profile.png' });
 
             await sleep(1000);
-
             await loadingMsg.delete().catch(() => {});
             await message.reply({ files: [attachment] });
 
