@@ -40,7 +40,7 @@ function loadOnlineFont() {
     });
 }
 
-// DB 기반 초고속 & 정확한 랭킹 계산 함수
+// 수정된 정확한 랭킹 계산 함수
 async function getUserRank(targetUserId) {
     try {
         const allData = await db.all();
@@ -65,15 +65,21 @@ async function getUserRank(targetUserId) {
             }
         }
 
+        // 대상 유저가 DB 목록에 없는 경우 기본값 추가
         if (!userMap.has(targetUserId)) {
-            userMap.set(targetUserId, { id: targetUserId, amount: 0, count: 0 });
+            const myAmount = (await db.get(`user_${targetUserId}.totalAmount`)) || 0;
+            const myCount = (await db.get(`user_${targetUserId}.buyCount`)) || 0;
+            userMap.set(targetUserId, { id: targetUserId, amount: Number(myAmount), count: Number(myCount) });
         }
 
         const userList = Array.from(userMap.values());
 
+        // 금액 내림차순(큰 금액이 우선), 금액이 같으면 횟수 내림차순 정렬
         userList.sort((a, b) => {
-            if (b.amount !== a.amount) return b.amount - a.amount;
-            return b.count - a.count;
+            if (Number(b.amount) !== Number(a.amount)) {
+                return Number(b.amount) - Number(a.amount);
+            }
+            return Number(b.count) - Number(a.count);
         });
 
         const rankIndex = userList.findIndex(u => u.id === targetUserId);
@@ -267,7 +273,6 @@ client.on('messageCreate', async message => {
     }
 
     if (command === '정보') {
-        // 1. 안내 메시지 임시 전송
         const loadingMsg = await message.reply('유저 정보를 불러오는 중이에요. . .');
 
         try {
@@ -284,7 +289,7 @@ client.on('messageCreate', async message => {
             const buyCount = (await db.get(`user_${targetUser.id}.buyCount`)) || 0;
             const biggestDeal = (await db.get(`user_${targetUser.id}.biggestDeal`)) || 0;
             
-            // 실시간 랭킹 산출
+            // 정확한 실시간 랭킹 계산
             const userRank = await getUserRank(targetUser.id);
 
             const joinedAt = targetMember?.joinedAt 
@@ -375,10 +380,7 @@ client.on('messageCreate', async message => {
 
             const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'profile.png' });
 
-            // 2. 로딩 메시지 삭제
             await loadingMsg.delete().catch(() => {});
-
-            // 3. 유저의 original 메시지($정보)에 답장으로 이미지 전송
             await message.reply({ files: [attachment] });
 
         } catch (error) {
