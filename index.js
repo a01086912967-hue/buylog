@@ -324,8 +324,151 @@ client.on('messageCreate', async message => {
         }
     }
 
+    // $서버통계 (이미지 대시보드 생성)
+    if (command === '서버통계') {
+        const loadingMsg = await message.reply('📊 서버 전체 통계를 이미지로 생성하는 중이에요. . .');
+
+        try {
+            const allEntries = await db.all();
+            const userMap = new Map();
+
+            for (const entry of allEntries) {
+                const key = entry.id || entry.key || '';
+                if (typeof key === 'string' && key.startsWith('user_')) {
+                    const uid = key.split('.')[0].replace('user_', '');
+                    if (uid && !userMap.has(uid)) {
+                        userMap.set(uid, true);
+                    }
+                }
+            }
+
+            let totalVolume = 0;
+            let totalDeals = 0;
+            let topUser = { name: '없음', amount: 0 };
+
+            const fetchPromises = Array.from(userMap.keys()).map(async (uid) => {
+                const amount = Number((await db.get(`user_${uid}.totalAmount`)) || 0);
+                const count = Number((await db.get(`user_${uid}.buyCount`)) || 0);
+                const member = await message.guild.members.fetch(uid).catch(() => null);
+
+                return {
+                    username: member ? member.user.username : '탈퇴한 유저',
+                    amount,
+                    count
+                };
+            });
+
+            const results = await Promise.all(fetchPromises);
+
+            results.forEach(u => {
+                totalVolume += u.amount;
+                totalDeals += u.count;
+                if (u.amount > topUser.amount) {
+                    topUser = { name: u.username, amount: u.amount };
+                }
+            });
+
+            const avgDeal = totalDeals > 0 ? Math.floor(totalVolume / totalDeals) : 0;
+
+            const canvas = createCanvas(800, 420);
+            const ctx = canvas.getContext('2d');
+
+            // 배경
+            ctx.fillStyle = '#0F0F12';
+            ctx.beginPath();
+            ctx.roundRect(0, 0, 800, 420, 20);
+            ctx.fill();
+
+            // 타이틀
+            ctx.fillStyle = '#FFFFFF';
+            ctx.font = '30px CustomFont';
+            ctx.fillText('📊 SERVER TOTAL ANALYTICS', 40, 65);
+
+            ctx.fillStyle = '#72767D';
+            ctx.font = '14px CustomFont';
+            ctx.fillText(`SERVER: ${message.guild.name}`, 40, 95);
+
+            // 구분선
+            ctx.strokeStyle = '#27272E';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(40, 115);
+            ctx.lineTo(760, 115);
+            ctx.stroke();
+
+            // Card 1: TOTAL VOLUME
+            ctx.fillStyle = '#18181C';
+            ctx.beginPath();
+            ctx.roundRect(40, 140, 350, 120, 15);
+            ctx.fill();
+
+            ctx.fillStyle = '#8E9297';
+            ctx.font = '14px CustomFont';
+            ctx.fillText('TOTAL SALES VOLUME', 65, 175);
+
+            ctx.fillStyle = '#2ECC71';
+            ctx.font = '28px CustomFont';
+            ctx.fillText(`₩${totalVolume.toLocaleString()}`, 65, 220);
+
+            // Card 2: TOTAL DEALS
+            ctx.fillStyle = '#18181C';
+            ctx.beginPath();
+            ctx.roundRect(410, 140, 350, 120, 15);
+            ctx.fill();
+
+            ctx.fillStyle = '#8E9297';
+            ctx.font = '14px CustomFont';
+            ctx.fillText('TOTAL TRANSACTIONS', 435, 175);
+
+            ctx.fillStyle = '#3498DB';
+            ctx.font = '28px CustomFont';
+            ctx.fillText(`${totalDeals.toLocaleString()} DEALS`, 435, 220);
+
+            // Card 3: AVERAGE DEAL
+            ctx.fillStyle = '#18181C';
+            ctx.beginPath();
+            ctx.roundRect(40, 280, 350, 100, 15);
+            ctx.fill();
+
+            ctx.fillStyle = '#8E9297';
+            ctx.font = '13px CustomFont';
+            ctx.fillText('AVG TRANSACTION VALUE', 65, 310);
+
+            ctx.fillStyle = '#FFFFFF';
+            ctx.font = '22px CustomFont';
+            ctx.fillText(`₩${avgDeal.toLocaleString()}`, 65, 350);
+
+            // Card 4: TOP SPENDER
+            ctx.fillStyle = '#18181C';
+            ctx.beginPath();
+            ctx.roundRect(410, 280, 350, 100, 15);
+            ctx.fill();
+
+            ctx.fillStyle = '#8E9297';
+            ctx.font = '13px CustomFont';
+            ctx.fillText('TOP SPENDER 👑', 435, 310);
+
+            ctx.fillStyle = '#E5A93C';
+            ctx.font = '20px CustomFont';
+            let topName = topUser.name;
+            if (topName.length > 10) topName = topName.substring(0, 9) + '..';
+            ctx.fillText(`${topName} (₩${topUser.amount.toLocaleString()})`, 435, 350);
+
+            const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'stats.png' });
+
+            await sleep(1000);
+            await loadingMsg.delete().catch(() => {});
+            await message.reply({ files: [attachment] });
+
+        } catch (error) {
+            console.error('서버통계 이미지 생성 오류:', error);
+            await loadingMsg.delete().catch(() => {});
+            await message.reply('❌ 서버 통계 생성 중 오류가 발생했습니다.');
+        }
+    }
+
     if (command === '구매랭크') {
-        const loadingMsg = await message.reply('구매 금액을 조회하는 중이에요. . .');
+        const loadingMsg = await message.reply('🏆 구매 순위를 이미지로 생성하는 중이에요. . .');
 
         try {
             const allEntries = await db.all();
