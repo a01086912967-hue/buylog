@@ -42,7 +42,8 @@ function loadOnlineFont() {
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-async function getUserRank(targetUserId) {
+// 동점자 시 서버 가입일 비교를 포함한 랭킹 계산
+async function getUserRank(guild, targetUserId) {
     try {
         const allEntries = await db.all();
         const userMap = new Map();
@@ -61,23 +62,36 @@ async function getUserRank(targetUserId) {
             userMap.set(targetUserId, { id: targetUserId, amount: 0, count: 0 });
         }
 
+        const validUsers = [];
+
         for (const [uid, uData] of userMap.entries()) {
-            const amount = await db.get(`user_${uid}.totalAmount`);
-            const count = await db.get(`user_${uid}.buyCount`);
-            uData.amount = Number(amount) || 0;
-            uData.count = Number(count) || 0;
+            try {
+                const member = await guild.members.fetch(uid).catch(() => null);
+                // 봇 제외 및 서버에 존재하는 멤버만 집계
+                if (!member || member.user.bot) continue;
+
+                const amount = await db.get(`user_${uid}.totalAmount`);
+                const count = await db.get(`user_${uid}.buyCount`);
+
+                validUsers.push({
+                    id: uid,
+                    user: member.user,
+                    amount: Number(amount) || 0,
+                    count: Number(count) || 0,
+                    joinedAt: member.joinedTimestamp || Date.now()
+                });
+            } catch (e) {}
         }
 
-        const userList = Array.from(userMap.values());
-
-        userList.sort((a, b) => {
+        // 정렬 기준: 1) 금액 내림차순 -> 2) 금액 같으면 서버 가입일 오름차순 (빠른 순)
+        validUsers.sort((a, b) => {
             if (b.amount !== a.amount) {
                 return b.amount - a.amount;
             }
-            return b.count - a.count;
+            return a.joinedAt - b.joinedAt;
         });
 
-        const rankIndex = userList.findIndex(u => u.id === targetUserId);
+        const rankIndex = validUsers.findIndex(u => u.id === targetUserId);
         return rankIndex !== -1 ? `#${rankIndex + 1}` : '#1';
     } catch (e) {
         console.error('랭킹 집계 오류:', e);
@@ -267,7 +281,6 @@ client.on('messageCreate', async message => {
         }
     }
 
-    // 신규 추가: 유저최대금액 (BIGGEST DEAL) 변경 명령어
     if (command === '유저최대금액') {
         if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
             return message.reply('❌ 이 명령어를 사용할 수 있는 권한이 없습니다. (관리자 전용)');
@@ -307,6 +320,79 @@ client.on('messageCreate', async message => {
         }
     }
 
+    // 신규 추가: $구매랭크 (1~20위 출력)
+    if (command === '구매랭크') {
+        const loadingMsg = await message.reply('🏆 구매 순위를 집계하는 중이에요. . .');
+
+        try {
+            const allEntries = await db.all();
+            const userMap = new Map();
+
+            for (const entry of allEntries) {
+                const key = entry.id || entry.key || '';
+                if (typeof key === 'string' && key.startsWith('user_')) {
+                    const uid = key.split('.')[0].replace('user_', '');
+                    if (!userMap.has(uid)) {
+                        userMap.set(uid, { id: uid });
+                    }
+                }
+            }
+
+            const rankData = [];
+
+            for (const [uid] of userMap.entries()) {
+                const member = await message.guild.members.fetch(uid).catch(() => null);
+                // 봇 제외
+                if (!member || member.user.bot) continue;
+
+                const amount = (await db.get(`user_${uid}.totalAmount`)) || 0;
+                
+                // 누적 구매 금액이 0원 이상인 유저 집계
+                rankData.push({
+                    user: member.user,
+                    amount: Number(amount),
+                    joinedAt: member.joinedTimestamp || Date.now()
+                });
+            }
+
+            // 정렬: 1) 금액 높은 순 -> 2) 동점 시 가입일 빠른 순
+            rankData.sort((a, b) => {
+                if (b.amount !== a.amount) {
+                    return b.amount - a.amount;
+                }
+                return a.joinedAt - b.joinedAt;
+            });
+
+            const top20 = rankData.slice(0, 20);
+
+            let rankDescription = '';
+            if (top20.length === 0) {
+                rankDescription = '아직 집계된 구매 기록이 없습니다.';
+            } else {
+                top20.forEach((item, index) => {
+                    const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `**#${index + 1}**`;
+                    rankDescription += `${medal} ${item.user} - **₩${item.amount.toLocaleString()}**\n`;
+                });
+            }
+
+            const rankEmbed = new EmbedBuilder()
+                .setColor(0xFFD1DC)
+                .setTitle('🏆 구매 금액 순위 TOP 20')
+                .setDescription(rankDescription)
+                .setFooter({ text: '동점일 경우 서버 가입일이 빠른 순으로 정렬됩니다. (봇 제외)' })
+                .setTimestamp();
+
+            await sleep(2000); // 2초 집계 연출 대기
+            await loadingMsg.delete().catch(() => {});
+            await message.reply({ embeds: [rankEmbed] });
+
+        } catch (error) {
+            console.error('구매랭크 생성 오류:', error);
+            await loadingMsg.delete().catch(() => {});
+            await message.reply('❌ 랭킹 집계 중 오류가 발생했습니다.');
+        }
+    }
+
     if (command === '정보') {
         const loadingMsg = await message.reply('유저 정보를 불러오는 중이에요. . .');
 
@@ -324,7 +410,7 @@ client.on('messageCreate', async message => {
             const buyCount = (await db.get(`user_${targetUser.id}.buyCount`)) || 0;
             const biggestDeal = (await db.get(`user_${targetUser.id}.biggestDeal`)) || 0;
             
-            const userRank = await getUserRank(targetUser.id);
+            const userRank = await getUserRank(message.guild, targetUser.id);
 
             const joinedAt = targetMember?.joinedAt 
                 ? targetMember.joinedAt.toISOString().split('T')[0] 
