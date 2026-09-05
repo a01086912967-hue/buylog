@@ -1,9 +1,6 @@
 const { Client, GatewayIntentBits, EmbedBuilder, REST, Routes, SlashCommandBuilder, AttachmentBuilder } = require('discord.js');
-const { createCanvas, loadImage, GlobalFonts } = require('@napi-rs/canvas');
+const { createCanvas, loadImage } = require('@napi-rs/canvas');
 const { QuickDB } = require('quick.db');
-const https = require('https');
-const fs = require('fs');
-const path = require('path');
 
 const db = new QuickDB();
 
@@ -18,26 +15,6 @@ const client = new Client({
 const TOKEN = process.env.TOKEN;
 const PURCHASE_LOG_CHANNEL_ID = '1457384858065047663';
 
-// 나눔고딕 폰트 자동 다운로드 및 등록
-const fontPath = path.join(__dirname, 'NanumGothic.ttf');
-function setupFont() {
-    return new Promise((resolve) => {
-        if (fs.existsSync(fontPath)) {
-            GlobalFonts.registerFromPath(fontPath, 'NanumGothic');
-            return resolve();
-        }
-        const file = fs.createWriteStream(fontPath);
-        https.get('https://github.com/google/fonts/raw/main/ofl/nanumgothic/NanumGothic-Bold.ttf', (response) => {
-            response.pipe(file);
-            file.on('finish', () => {
-                file.close();
-                GlobalFonts.registerFromPath(fontPath, 'NanumGothic');
-                resolve();
-            });
-        }).on('error', () => resolve());
-    });
-}
-
 function getMemberRank(totalAmount) {
     if (totalAmount >= 500000) return 'VIP CLIENT';
     if (totalAmount >= 100000) return 'GOLD CLIENT';
@@ -46,8 +23,7 @@ function getMemberRank(totalAmount) {
 }
 
 client.once('ready', async () => {
-    await setupFont(); // 폰트 등록 진행
-    console.log('봇 준비 완료! (폰트 로드 완료)');
+    console.log('봇 준비 완료!');
 
     const commands = [
         new SlashCommandBuilder()
@@ -147,79 +123,89 @@ client.on('messageCreate', async message => {
             ? member.joinedAt.toISOString().split('T')[0] 
             : '2026.09.06';
 
-        const canvas = createCanvas(750, 380);
+        // 캔버스 크기 지정
+        const canvas = createCanvas(800, 420);
         const ctx = canvas.getContext('2d');
 
-        // 메인 다크 배경
-        ctx.fillStyle = '#121214';
+        // 배경
+        ctx.fillStyle = '#0F0F12';
         ctx.beginPath();
-        ctx.roundRect(0, 0, 750, 380, 20);
+        ctx.roundRect(0, 0, 800, 420, 20);
         ctx.fill();
 
-        // 1. 프로필 영역
-        ctx.fillStyle = '#1A1A1E';
+        // 1. 프로필 서클 테두리 및 원형 아바타
+        ctx.strokeStyle = '#D67D27';
+        ctx.lineWidth = 4;
         ctx.beginPath();
-        ctx.roundRect(25, 25, 700, 100, 15);
-        ctx.fill();
+        ctx.arc(100, 90, 48, 0, Math.PI * 2);
+        ctx.stroke();
 
-        // 아바타
         const avatarURL = user.displayAvatarURL({ extension: 'png', size: 128 });
         try {
             const avatar = await loadImage(avatarURL);
             ctx.save();
             ctx.beginPath();
-            ctx.arc(75, 75, 35, 0, Math.PI * 2, true);
+            ctx.arc(100, 90, 44, 0, Math.PI * 2, true);
             ctx.closePath();
             ctx.clip();
-            ctx.drawImage(avatar, 40, 40, 70, 70);
+            ctx.drawImage(avatar, 56, 46, 88, 88);
             ctx.restore();
         } catch (e) { }
 
-        // 등록된 NanumGothic 폰트 적용
+        // 유저네임 및 등급 (sans-serif 기본 폰트 적용)
         ctx.fillStyle = '#FFFFFF';
-        ctx.font = 'bold 22px NanumGothic';
-        ctx.fillText(`${user.username}`, 125, 63);
+        ctx.font = 'bold 28px sans-serif';
+        ctx.fillText(`${user.username}`, 170, 82);
 
-        ctx.fillStyle = '#E5A93C';
-        ctx.font = 'bold 14px NanumGothic';
-        ctx.fillText(`${userRank}`, 125, 88);
+        ctx.fillStyle = '#D67D27';
+        ctx.font = 'bold 16px sans-serif';
+        ctx.fillText(`${userRank}`, 170, 108);
 
+        // 가입일
         ctx.fillStyle = '#72767D';
-        ctx.font = '13px NanumGothic';
-        ctx.fillText(`가입일: ${joinedAt}`, 550, 75);
+        ctx.font = '14px sans-serif';
+        ctx.fillText(`JOINED: ${joinedAt}`, 620, 82);
 
-        // 2. 구매 금액 박스
-        ctx.fillStyle = '#1A1A1E';
+        // 2. TOTAL VOLUME 박스 (메인 구매 금액)
+        ctx.fillStyle = '#18181C';
         ctx.beginPath();
-        ctx.roundRect(25, 140, 340, 160, 15);
+        ctx.roundRect(40, 160, 350, 170, 15);
         ctx.fill();
 
         ctx.fillStyle = '#8E9297';
-        ctx.font = 'bold 13px NanumGothic';
-        ctx.fillText('TOTAL VOLUME', 45, 175);
+        ctx.font = 'bold 13px sans-serif';
+        ctx.fillText('TOTAL VOLUME', 65, 195);
 
         ctx.fillStyle = '#FFFFFF';
-        ctx.font = 'bold 30px NanumGothic';
-        ctx.fillText(`₩${totalAmount.toLocaleString()}`, 45, 225);
+        ctx.font = 'bold 36px sans-serif';
+        ctx.fillText(`$${totalAmount.toLocaleString()}`, 65, 250);
 
-        // 3. 구매 횟수 박스
-        ctx.fillStyle = '#1A1A1E';
+        ctx.fillStyle = '#8E9297';
+        ctx.font = '13px sans-serif';
+        ctx.fillText('DEALS', 65, 290);
+
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = 'bold 18px sans-serif';
+        ctx.fillText(`${buyCount}`, 65, 312);
+
+        // 3. 우측 서브 정보 박스 (DEALS & STATUS)
+        ctx.fillStyle = '#18181C';
         ctx.beginPath();
-        ctx.roundRect(385, 140, 340, 160, 15);
+        ctx.roundRect(410, 160, 350, 170, 15);
         ctx.fill();
 
         ctx.fillStyle = '#8E9297';
-        ctx.font = 'bold 13px NanumGothic';
-        ctx.fillText('TOTAL DEALS', 405, 175);
+        ctx.font = 'bold 13px sans-serif';
+        ctx.fillText('TOTAL DEALS', 435, 195);
 
         ctx.fillStyle = '#2ECC71';
-        ctx.font = 'bold 30px NanumGothic';
-        ctx.fillText(`${buyCount} 회`, 405, 225);
+        ctx.font = 'bold 36px sans-serif';
+        ctx.fillText(`${buyCount} COUNT`, 435, 250);
 
-        // 하단 텍스트
-        ctx.fillStyle = '#5C5E66';
-        ctx.font = '12px NanumGothic';
-        ctx.fillText('* 해당 데이터는 2026.09.06일 부터 기준입니다.', 25, 335);
+        // 4. 하단 안내 문구
+        ctx.fillStyle = '#EE4B2B';
+        ctx.font = '12px sans-serif';
+        ctx.fillText('* Data recorded starting from 2026.09.06', 40, 370);
 
         const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'profile.png' });
         await message.reply({ files: [attachment] });
