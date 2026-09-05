@@ -40,16 +40,13 @@ function loadOnlineFont() {
     });
 }
 
-// 지정된 시간(ms) 동안 대기하는 함수
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// 완벽하게 수정된 랭킹 집계 함수
 async function getUserRank(targetUserId) {
     try {
         const allEntries = await db.all();
         const userMap = new Map();
 
-        // 1. DB의 모든 데이터 탐색
         for (const entry of allEntries) {
             const key = entry.id || entry.key || '';
             if (typeof key === 'string' && key.startsWith('user_')) {
@@ -60,12 +57,10 @@ async function getUserRank(targetUserId) {
             }
         }
 
-        // 대상 유저도 기본 포함
         if (!userMap.has(targetUserId)) {
             userMap.set(targetUserId, { id: targetUserId, amount: 0, count: 0 });
         }
 
-        // 2. 각 유저별 실제 금액 및 구매 횟수 조회
         for (const [uid, uData] of userMap.entries()) {
             const amount = await db.get(`user_${uid}.totalAmount`);
             const count = await db.get(`user_${uid}.buyCount`);
@@ -75,7 +70,6 @@ async function getUserRank(targetUserId) {
 
         const userList = Array.from(userMap.values());
 
-        // 3. 누적 금액 내림차순 (금액 같으면 구매 횟수 내림차순) 정렬
         userList.sort((a, b) => {
             if (b.amount !== a.amount) {
                 return b.amount - a.amount;
@@ -83,7 +77,6 @@ async function getUserRank(targetUserId) {
             return b.count - a.count;
         });
 
-        // 4. 대상 유저의 순위 검색 (1위, 2위...)
         const rankIndex = userList.findIndex(u => u.id === targetUserId);
         return rankIndex !== -1 ? `#${rankIndex + 1}` : '#1';
     } catch (e) {
@@ -274,8 +267,47 @@ client.on('messageCreate', async message => {
         }
     }
 
+    // 신규 추가: 유저최대금액 (BIGGEST DEAL) 변경 명령어
+    if (command === '유저최대금액') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+            return message.reply('❌ 이 명령어를 사용할 수 있는 권한이 없습니다. (관리자 전용)');
+        }
+
+        const amount = parseInt(args[0]);
+        const targetUser = message.mentions.users.first();
+
+        if (isNaN(amount) || !targetUser) {
+            return message.reply('❌ 사용법: `$유저최대금액 (변경할 금액) (@유저멘션)`');
+        }
+
+        await db.set(`user_${targetUser.id}.biggestDeal`, amount);
+
+        await message.reply(`✅ ${targetUser.username} 님의 최대 거래 금액(BIGGEST DEAL)이 **₩${amount.toLocaleString()}**으로 변경되었습니다.`);
+
+        const infoLogChannelId = await db.get('info_log_channel_id');
+        if (infoLogChannelId) {
+            try {
+                const infoLogChannel = await client.channels.fetch(infoLogChannelId);
+                if (infoLogChannel) {
+                    const infoEmbed = new EmbedBuilder()
+                        .setColor(0x9B59B6)
+                        .setTitle('🛠️ 유저 정보 변경 알림 (최대 거래 금액)')
+                        .addFields(
+                            { name: '처리 관리자', value: `${message.author} (${message.author.tag})`, inline: true },
+                            { name: '대상 유저', value: `${targetUser} (${targetUser.tag})`, inline: true },
+                            { name: '변경 후 최대 거래 금액', value: `₩${amount.toLocaleString()}`, inline: false }
+                        )
+                        .setTimestamp();
+
+                    await infoLogChannel.send({ embeds: [infoEmbed] });
+                }
+            } catch (error) {
+                console.error('로그 전송 실패:', error);
+            }
+        }
+    }
+
     if (command === '정보') {
-        // 1. 로딩 메시지 출력
         const loadingMsg = await message.reply('유저 정보를 불러오는 중이에요. . .');
 
         try {
@@ -292,7 +324,6 @@ client.on('messageCreate', async message => {
             const buyCount = (await db.get(`user_${targetUser.id}.buyCount`)) || 0;
             const biggestDeal = (await db.get(`user_${targetUser.id}.biggestDeal`)) || 0;
             
-            // 정확한 랭킹 계산
             const userRank = await getUserRank(targetUser.id);
 
             const joinedAt = targetMember?.joinedAt 
@@ -383,10 +414,8 @@ client.on('messageCreate', async message => {
 
             const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'profile.png' });
 
-            // 3초간 로딩 연출 대기
             await sleep(3000);
 
-            // 로딩 메시지 삭제 후 카드 답장 전송
             await loadingMsg.delete().catch(() => {});
             await message.reply({ files: [attachment] });
 
