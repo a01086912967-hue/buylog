@@ -41,31 +41,33 @@ function loadOnlineFont() {
     });
 }
 
-// 랭킹 집계 함수 (오류 수정 버전)
+// 랭킹 집계 함수 (TOTAL VOLUME 기준 순위 산출)
 async function getUserRank(userId) {
     try {
         const allData = await db.all();
-        const userAmountList = [];
+        const userAmountMap = new Map();
 
         for (const item of allData) {
-            // QuickDB 저장 키 구조 분석 (user_123456789.totalAmount)
-            if (typeof item.id === 'string' && item.id.startsWith('user_') && item.id.endsWith('.totalAmount')) {
-                const uid = item.id.replace('user_', '').replace('.totalAmount', '');
-                const amount = Number(item.value) || 0;
-                userAmountList.push({ id: uid, amount });
+            const keyStr = item.id || item.key || '';
+            const val = item.value !== undefined ? item.value : item.data;
+
+            if (typeof keyStr === 'string' && keyStr.startsWith('user_') && keyStr.endsWith('.totalAmount')) {
+                const uid = keyStr.replace('user_', '').replace('.totalAmount', '');
+                const amount = Number(val) || 0;
+                userAmountMap.set(uid, amount);
             }
         }
 
-        if (userAmountList.length === 0) return '#-';
+        if (userAmountMap.size === 0) return '#-';
 
-        // 구매 금액(totalAmount)이 높은 순으로 정렬
-        userAmountList.sort((a, b) => b.amount - a.amount);
+        // 누적 구매 금액(TOTAL VOLUME) 내림차순 정렬
+        const sortedUsers = Array.from(userAmountMap.entries())
+            .sort((a, b) => b[1] - a[1]);
 
-        // 대상 유저의 순위 검색 (0부터 시작하므로 +1)
-        const rankIndex = userAmountList.findIndex(u => u.id === userId);
+        const rankIndex = sortedUsers.findIndex(([uid]) => uid === userId);
         return rankIndex !== -1 ? `#${rankIndex + 1}` : '#-';
     } catch (e) {
-        console.error('랭킹 계산 오류:', e);
+        console.error('랭킹 집계 오류:', e);
         return '#-';
     }
 }
@@ -173,7 +175,7 @@ client.on('messageCreate', async message => {
         }
     }
 
-    // 2. $유저구매횟수 (변경할 횟수) (@유저) - 관리자 전용 & 값 변경(set)
+    // 2. $유저구매횟수 (변경할 횟수) (@유저) - 관리자 전용 & 값 변경
     if (command === '유저구매횟수') {
         if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
             return message.reply('❌ 이 명령어를 사용할 수 있는 권한이 없습니다. (관리자 전용)');
@@ -213,7 +215,7 @@ client.on('messageCreate', async message => {
         }
     }
 
-    // 3. $유저구매금액 (변경할 금액) (@유저) - 관리자 전용 & 값 변경(set)
+    // 3. $유저구매금액 (변경할 금액) (@유저) - 관리자 전용 & 값 변경
     if (command === '유저구매금액') {
         if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
             return message.reply('❌ 이 명령어를 사용할 수 있는 권한이 없습니다. (관리자 전용)');
@@ -273,7 +275,7 @@ client.on('messageCreate', async message => {
         const buyCount = (await db.get(`user_${targetUser.id}.buyCount`)) || 0;
         const biggestDeal = (await db.get(`user_${targetUser.id}.biggestDeal`)) || 0;
         
-        // 정교화된 랭킹 수치 산출
+        // TOTAL VOLUME 기준 랭킹 계산
         const userRank = await getUserRank(targetUser.id);
 
         const joinedAt = targetMember?.joinedAt 
