@@ -42,37 +42,22 @@ function loadOnlineFont() {
     });
 }
 
-// 고속 랭킹 집계 함수
+// 오류 없는 랭킹 집계 함수
 async function getUserRank(guild, targetUserId) {
     try {
         const members = await guild.members.fetch();
         const nonBotMembers = members.filter(m => !m.user.bot);
 
-        const allData = await db.all();
-        const amountMap = new Map();
-        const countMap = new Map();
-
-        for (const item of allData) {
-            const keyStr = item.id || item.key || '';
-            const val = item.value !== undefined ? item.value : item.data;
-
-            if (typeof keyStr === 'string' && keyStr.startsWith('user_')) {
-                const parts = keyStr.split('.');
-                const uid = parts[0].replace('user_', '');
-                const prop = parts[1];
-
-                if (prop === 'totalAmount') amountMap.set(uid, Number(val) || 0);
-                if (prop === 'buyCount') countMap.set(uid, Number(val) || 0);
-            }
-        }
-
         const userList = [];
+
+        // 비동기 처리로 모든 서버 유저의 금액/횟수 가져오기
         for (const [id] of nonBotMembers) {
-            const amount = amountMap.get(id) || 0;
-            const count = countMap.get(id) || 0;
+            const amount = Number(await db.get(`user_${id}.totalAmount`)) || 0;
+            const count = Number(await db.get(`user_${id}.buyCount`)) || 0;
             userList.push({ id, amount, count });
         }
 
+        // 금액 내림차순 -> 횟수 내림차순 정렬
         userList.sort((a, b) => {
             if (b.amount !== a.amount) return b.amount - a.amount;
             return b.count - a.count;
