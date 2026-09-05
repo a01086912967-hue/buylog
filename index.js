@@ -10,7 +10,8 @@ const client = new Client({
     intents: [
         GatewayIntentBits.Guilds, 
         GatewayIntentBits.GuildMessages, 
-        GatewayIntentBits.MessageContent
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildMembers // 멤버 조회를 위한 인텐트
     ] 
 });
 
@@ -41,30 +42,25 @@ function loadOnlineFont() {
     });
 }
 
-// 랭킹 집계 함수 (TOTAL VOLUME 기준 순위 산출)
-async function getUserRank(userId) {
+// 서버 멤버 전체 대상 랭킹 집계 함수 (봇 제외 & 0원 유저도 포함)
+async function getUserRank(guild, targetUserId) {
     try {
-        const allData = await db.all();
-        const userAmountMap = new Map();
+        // 서버의 모든 멤버 캐싱/페치
+        const members = await guild.members.fetch();
+        const nonBotMembers = members.filter(m => !m.user.bot);
 
-        for (const item of allData) {
-            const keyStr = item.id || item.key || '';
-            const val = item.value !== undefined ? item.value : item.data;
+        const userList = [];
 
-            if (typeof keyStr === 'string' && keyStr.startsWith('user_') && keyStr.endsWith('.totalAmount')) {
-                const uid = keyStr.replace('user_', '').replace('.totalAmount', '');
-                const amount = Number(val) || 0;
-                userAmountMap.set(uid, amount);
-            }
+        for (const [id, member] of nonBotMembers) {
+            const amount = (await db.get(`user_${id}.totalAmount`)) || 0;
+            userList.push({ id, amount });
         }
 
-        if (userAmountMap.size === 0) return '#-';
+        // TOTAL VOLUME 기준 내림차순 정렬
+        userList.sort((a, b) => b.amount - a.amount);
 
-        // 누적 구매 금액(TOTAL VOLUME) 내림차순 정렬
-        const sortedUsers = Array.from(userAmountMap.entries())
-            .sort((a, b) => b[1] - a[1]);
-
-        const rankIndex = sortedUsers.findIndex(([uid]) => uid === userId);
+        // 순위 계산 (1부터 시작)
+        const rankIndex = userList.findIndex(u => u.id === targetUserId);
         return rankIndex !== -1 ? `#${rankIndex + 1}` : '#-';
     } catch (e) {
         console.error('랭킹 집계 오류:', e);
@@ -175,7 +171,7 @@ client.on('messageCreate', async message => {
         }
     }
 
-    // 2. $유저구매횟수 (변경할 횟수) (@유저) - 관리자 전용 & 값 변경
+    // 2. $유저구매횟수 (변경할 횟수) (@유저) - 관리자 전용
     if (command === '유저구매횟수') {
         if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
             return message.reply('❌ 이 명령어를 사용할 수 있는 권한이 없습니다. (관리자 전용)');
@@ -215,7 +211,7 @@ client.on('messageCreate', async message => {
         }
     }
 
-    // 3. $유저구매금액 (변경할 금액) (@유저) - 관리자 전용 & 값 변경
+    // 3. $유저구매금액 (변경할 금액) (@유저) - 관리자 전용
     if (command === '유저구매금액') {
         if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
             return message.reply('❌ 이 명령어를 사용할 수 있는 권한이 없습니다. (관리자 전용)');
@@ -275,8 +271,8 @@ client.on('messageCreate', async message => {
         const buyCount = (await db.get(`user_${targetUser.id}.buyCount`)) || 0;
         const biggestDeal = (await db.get(`user_${targetUser.id}.biggestDeal`)) || 0;
         
-        // TOTAL VOLUME 기준 랭킹 계산
-        const userRank = await getUserRank(targetUser.id);
+        // 서버 전체 유저(봇 제외) 기준 랭킹 계산
+        const userRank = await getUserRank(message.guild, targetUser.id);
 
         const joinedAt = targetMember?.joinedAt 
             ? targetMember.joinedAt.toISOString().split('T')[0] 
