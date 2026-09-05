@@ -40,48 +40,50 @@ function loadOnlineFont() {
     });
 }
 
-// 수정된 정확한 랭킹 계산 함수
+// 지정된 시간(ms) 동안 대기하는 함수
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// 완벽하게 수정된 랭킹 집계 함수
 async function getUserRank(targetUserId) {
     try {
-        const allData = await db.all();
+        const allEntries = await db.all();
         const userMap = new Map();
 
-        for (const item of allData) {
-            const keyStr = item.id || item.key || '';
-            const val = item.value !== undefined ? item.value : item.data;
-
-            if (typeof keyStr === 'string' && keyStr.startsWith('user_')) {
-                const parts = keyStr.split('.');
-                const uid = parts[0].replace('user_', '');
-                const prop = parts[1];
-
+        // 1. DB의 모든 데이터 탐색
+        for (const entry of allEntries) {
+            const key = entry.id || entry.key || '';
+            if (typeof key === 'string' && key.startsWith('user_')) {
+                const uid = key.split('.')[0].replace('user_', '');
                 if (!userMap.has(uid)) {
                     userMap.set(uid, { id: uid, amount: 0, count: 0 });
                 }
-
-                const userData = userMap.get(uid);
-                if (prop === 'totalAmount') userData.amount = Number(val) || 0;
-                if (prop === 'buyCount') userData.count = Number(val) || 0;
             }
         }
 
-        // 대상 유저가 DB 목록에 없는 경우 기본값 추가
+        // 대상 유저도 기본 포함
         if (!userMap.has(targetUserId)) {
-            const myAmount = (await db.get(`user_${targetUserId}.totalAmount`)) || 0;
-            const myCount = (await db.get(`user_${targetUserId}.buyCount`)) || 0;
-            userMap.set(targetUserId, { id: targetUserId, amount: Number(myAmount), count: Number(myCount) });
+            userMap.set(targetUserId, { id: targetUserId, amount: 0, count: 0 });
+        }
+
+        // 2. 각 유저별 실제 금액 및 구매 횟수 조회
+        for (const [uid, uData] of userMap.entries()) {
+            const amount = await db.get(`user_${uid}.totalAmount`);
+            const count = await db.get(`user_${uid}.buyCount`);
+            uData.amount = Number(amount) || 0;
+            uData.count = Number(count) || 0;
         }
 
         const userList = Array.from(userMap.values());
 
-        // 금액 내림차순(큰 금액이 우선), 금액이 같으면 횟수 내림차순 정렬
+        // 3. 누적 금액 내림차순 (금액 같으면 구매 횟수 내림차순) 정렬
         userList.sort((a, b) => {
-            if (Number(b.amount) !== Number(a.amount)) {
-                return Number(b.amount) - Number(a.amount);
+            if (b.amount !== a.amount) {
+                return b.amount - a.amount;
             }
-            return Number(b.count) - Number(a.count);
+            return b.count - a.count;
         });
 
+        // 4. 대상 유저의 순위 검색 (1위, 2위...)
         const rankIndex = userList.findIndex(u => u.id === targetUserId);
         return rankIndex !== -1 ? `#${rankIndex + 1}` : '#1';
     } catch (e) {
@@ -273,6 +275,7 @@ client.on('messageCreate', async message => {
     }
 
     if (command === '정보') {
+        // 1. 로딩 메시지 출력
         const loadingMsg = await message.reply('유저 정보를 불러오는 중이에요. . .');
 
         try {
@@ -289,7 +292,7 @@ client.on('messageCreate', async message => {
             const buyCount = (await db.get(`user_${targetUser.id}.buyCount`)) || 0;
             const biggestDeal = (await db.get(`user_${targetUser.id}.biggestDeal`)) || 0;
             
-            // 정확한 실시간 랭킹 계산
+            // 정확한 랭킹 계산
             const userRank = await getUserRank(targetUser.id);
 
             const joinedAt = targetMember?.joinedAt 
@@ -380,6 +383,10 @@ client.on('messageCreate', async message => {
 
             const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'profile.png' });
 
+            // 3초간 로딩 연출 대기
+            await sleep(3000);
+
+            // 로딩 메시지 삭제 후 카드 답장 전송
             await loadingMsg.delete().catch(() => {});
             await message.reply({ files: [attachment] });
 
