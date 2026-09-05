@@ -1,6 +1,7 @@
 const { Client, GatewayIntentBits, EmbedBuilder, REST, Routes, SlashCommandBuilder, AttachmentBuilder } = require('discord.js');
-const { createCanvas, loadImage } = require('@napi-rs/canvas');
+const { createCanvas, loadImage, GlobalFonts } = require('@napi-rs/canvas');
 const { QuickDB } = require('quick.db');
+const https = require('https');
 
 const db = new QuickDB();
 
@@ -14,6 +15,26 @@ const client = new Client({
 
 const TOKEN = process.env.TOKEN;
 const PURCHASE_LOG_CHANNEL_ID = '1457384858065047663';
+
+// TTF 폰트를 바이너리 버퍼로 다운로드 받아 GlobalFonts에 등록
+function loadOnlineFont() {
+    return new Promise((resolve) => {
+        const fontUrl = 'https://raw.githubusercontent.com/google/fonts/main/ofl/notosans/NotoSans-Bold.ttf';
+        https.get(fontUrl, (res) => {
+            const data = [];
+            res.on('data', (chunk) => data.push(chunk));
+            res.on('end', () => {
+                const buffer = Buffer.concat(data);
+                GlobalFonts.register(buffer, 'CustomFont');
+                console.log('온라인 폰트 등록 성공!');
+                resolve();
+            });
+        }).on('error', (err) => {
+            console.error('폰트 로드 실패:', err);
+            resolve();
+        });
+    });
+}
 
 // 유저 순위 계산 함수
 async function getUserRank(userId) {
@@ -33,6 +54,7 @@ async function getUserRank(userId) {
 }
 
 client.once('ready', async () => {
+    await loadOnlineFont();
     console.log('봇 준비 완료!');
 
     const commands = [
@@ -151,7 +173,6 @@ client.on('messageCreate', async message => {
         
         const userRank = await getUserRank(user.id);
 
-        // 가장 높은 역할 가져오기 (@everyone 제외)
         const highestRole = member?.roles.highest.name !== '@everyone' 
             ? member?.roles.highest.name 
             : 'Member';
@@ -182,18 +203,18 @@ client.on('messageCreate', async message => {
             ctx.restore();
         } catch (e) { }
 
-        // 유저명 & 가장 높은 역할
+        // 유저명 & 최상위 역할 (등록한 CustomFont 지정)
         ctx.fillStyle = '#FFFFFF';
-        ctx.font = 'bold 28px sans-serif';
+        ctx.font = '28px CustomFont';
         ctx.fillText(`${user.username}`, 160, 80);
 
         ctx.fillStyle = '#E5A93C';
-        ctx.font = 'bold 15px sans-serif';
+        ctx.font = '15px CustomFont';
         ctx.fillText(`ROLE: ${highestRole}`, 160, 105);
 
         // 가입일
         ctx.fillStyle = '#72767D';
-        ctx.font = '14px sans-serif';
+        ctx.font = '14px CustomFont';
         ctx.fillText(`JOINED: ${joinedAt}`, 600, 80);
 
         // TOTAL VOLUME
@@ -203,19 +224,19 @@ client.on('messageCreate', async message => {
         ctx.fill();
 
         ctx.fillStyle = '#8E9297';
-        ctx.font = 'bold 14px sans-serif';
+        ctx.font = '14px CustomFont';
         ctx.fillText('TOTAL VOLUME', 65, 195);
 
         ctx.fillStyle = '#FFFFFF';
-        ctx.font = 'bold 32px sans-serif';
+        ctx.font = '32px CustomFont';
         ctx.fillText(`₩${totalAmount.toLocaleString()}`, 65, 245);
 
         ctx.fillStyle = '#8E9297';
-        ctx.font = '13px sans-serif';
+        ctx.font = '13px CustomFont';
         ctx.fillText('BIGGEST DEAL', 65, 288);
 
         ctx.fillStyle = '#FFFFFF';
-        ctx.font = 'bold 16px sans-serif';
+        ctx.font = '16px CustomFont';
         ctx.fillText(`₩${biggestDeal.toLocaleString()}`, 65, 312);
 
         // TOTAL DEALS & RANK
@@ -225,24 +246,24 @@ client.on('messageCreate', async message => {
         ctx.fill();
 
         ctx.fillStyle = '#8E9297';
-        ctx.font = 'bold 14px sans-serif';
+        ctx.font = '14px CustomFont';
         ctx.fillText('TOTAL DEALS', 435, 195);
 
         ctx.fillStyle = '#2ECC71';
-        ctx.font = 'bold 32px sans-serif';
+        ctx.font = '32px CustomFont';
         ctx.fillText(`${buyCount}`, 435, 245);
 
         ctx.fillStyle = '#8E9297';
-        ctx.font = '13px sans-serif';
+        ctx.font = '13px CustomFont';
         ctx.fillText('RANK', 435, 288);
 
         ctx.fillStyle = '#E5A93C';
-        ctx.font = 'bold 18px sans-serif';
+        ctx.font = '18px CustomFont';
         ctx.fillText(`${userRank}`, 435, 312);
 
         // 하단 안내 문구
         ctx.fillStyle = '#EE4B2B';
-        ctx.font = '12px sans-serif';
+        ctx.font = '12px CustomFont';
         ctx.fillText('* Data recorded starting from 2026.09.06', 40, 370);
 
         const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'profile.png' });
