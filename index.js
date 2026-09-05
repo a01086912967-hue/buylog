@@ -41,24 +41,33 @@ function loadOnlineFont() {
     });
 }
 
-// 랭킹 집계
+// 랭킹 집계 함수 (오류 수정 버전)
 async function getUserRank(userId) {
-    const allData = await db.all();
-    const userAmountMap = [];
+    try {
+        const allData = await db.all();
+        const userAmountList = [];
 
-    for (const item of allData) {
-        if (item.id.startsWith('user_') && item.id.endsWith('.totalAmount')) {
-            const uid = item.id.split('_')[1].replace('.totalAmount', '');
-            const amount = Number(item.value) || 0;
-            userAmountMap.push({ id: uid, amount });
+        for (const item of allData) {
+            // QuickDB 저장 키 구조 분석 (user_123456789.totalAmount)
+            if (typeof item.id === 'string' && item.id.startsWith('user_') && item.id.endsWith('.totalAmount')) {
+                const uid = item.id.replace('user_', '').replace('.totalAmount', '');
+                const amount = Number(item.value) || 0;
+                userAmountList.push({ id: uid, amount });
+            }
         }
+
+        if (userAmountList.length === 0) return '#-';
+
+        // 구매 금액(totalAmount)이 높은 순으로 정렬
+        userAmountList.sort((a, b) => b.amount - a.amount);
+
+        // 대상 유저의 순위 검색 (0부터 시작하므로 +1)
+        const rankIndex = userAmountList.findIndex(u => u.id === userId);
+        return rankIndex !== -1 ? `#${rankIndex + 1}` : '#-';
+    } catch (e) {
+        console.error('랭킹 계산 오류:', e);
+        return '#-';
     }
-
-    if (userAmountMap.length === 0) return '#-';
-
-    userAmountMap.sort((a, b) => b.amount - a.amount);
-    const rankIndex = userAmountMap.findIndex(u => u.id === userId);
-    return rankIndex !== -1 ? `#${rankIndex + 1}` : '#-';
 }
 
 client.once('ready', async () => {
@@ -177,7 +186,6 @@ client.on('messageCreate', async message => {
             return message.reply('❌ 사용법: `$유저구매횟수 (변경할 횟수) (@유저멘션)`');
         }
 
-        // 값 직접 변경 (set)
         await db.set(`user_${targetUser.id}.buyCount`, count);
 
         await message.reply(`✅ ${targetUser.username} 님의 구매 횟수가 **${count}회**로 변경되었습니다.`);
@@ -218,10 +226,8 @@ client.on('messageCreate', async message => {
             return message.reply('❌ 사용법: `$유저구매금액 (변경할 금액) (@유저멘션)`');
         }
 
-        // 값 직접 변경 (set)
         await db.set(`user_${targetUser.id}.totalAmount`, amount);
 
-        // BIGGEST DEAL 조건 판단 및 변경
         const currentBiggest = (await db.get(`user_${targetUser.id}.biggestDeal`)) || 0;
         if (amount > currentBiggest) {
             await db.set(`user_${targetUser.id}.biggestDeal`, amount);
@@ -267,6 +273,7 @@ client.on('messageCreate', async message => {
         const buyCount = (await db.get(`user_${targetUser.id}.buyCount`)) || 0;
         const biggestDeal = (await db.get(`user_${targetUser.id}.biggestDeal`)) || 0;
         
+        // 정교화된 랭킹 수치 산출
         const userRank = await getUserRank(targetUser.id);
 
         const joinedAt = targetMember?.joinedAt 
