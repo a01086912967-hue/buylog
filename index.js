@@ -60,12 +60,13 @@ async function getUserRank(userId) {
 
 client.once('ready', async () => {
     await loadOnlineFont();
-    console.log('봇 준비 완료!');
+    console.log(`봇 로그인 성공: ${client.user.tag}`);
 
+    // 슬래시 명령어 정의 (요청하신 이름으로 변경)
     const commands = [
         new SlashCommandBuilder()
-            .setName('지급완료')
-            .setDescription('지급 완료 알림 및 로그를 전송합니다.')
+            .setName('유저구매')
+            .setDescription('지급 완료 알림 및 구매 로그를 전송합니다.')
             .addStringOption(opt => opt.setName('금액').setDescription('구매 금액').setRequired(true))
             .addStringOption(opt => opt.setName('상품').setDescription('구매한 상품명').setRequired(true))
             .addStringOption(opt => opt.setName('수량').setDescription('구매 수량').setRequired(true))
@@ -73,14 +74,14 @@ client.once('ready', async () => {
             .addUserOption(opt => opt.setName('판매자').setDescription('담당 판매자').setRequired(false)),
 
         new SlashCommandBuilder()
-            .setName('금액추가')
-            .setDescription('특정 유저의 누적 구매 금액을 수동으로 추가합니다.')
+            .setName('유저정보로그')
+            .setDescription('특정 유저의 누적 구매 금액을 수동으로 추가하고 로그를 남깁니다.')
             .addUserOption(opt => opt.setName('유저').setDescription('대상 유저').setRequired(true))
             .addIntegerOption(opt => opt.setName('금액').setDescription('추가할 금액(원)').setRequired(true)),
 
         new SlashCommandBuilder()
-            .setName('횟수추가')
-            .setDescription('특정 유저의 구매 횟수를 수동으로 추가합니다.')
+            .setName('유저거래')
+            .setDescription('특정 유저의 구매 횟수(거래 수)를 수동으로 추가합니다.')
             .addUserOption(opt => opt.setName('유저').setDescription('대상 유저').setRequired(true))
             .addIntegerOption(opt => opt.setName('횟수').setDescription('추가할 횟수').setRequired(true))
     ];
@@ -88,30 +89,25 @@ client.once('ready', async () => {
     const rest = new REST({ version: '10' }).setToken(TOKEN);
 
     try {
-        console.log('슬래시 명령어 동기화 시도 중...');
+        console.log('슬래시 명령어 강제 동기화 시작...');
         
-        // 길드(서버) 등록
-        await rest.put(
+        // 해당 서버에 즉시 명령어 주입
+        const data = await rest.put(
             Routes.applicationGuildCommands(client.user.id, GUILD_ID),
             { body: commands }
         );
         
-        // 글로벌 등록도 동시 진행 (이중 안전장치)
-        await rest.put(
-            Routes.applicationCommands(client.user.id),
-            { body: commands }
-        );
-
-        console.log('슬래시 명령어 성공적으로 등록됨!');
+        console.log(`성공! 총 ${data.length}개의 슬래시 명령어(/유저구매, /유저정보로그, /유저거래)가 생성되었습니다.`);
     } catch (error) {
-        console.error('슬래시 명령어 등록 에러:', error.rawError || error);
+        console.error('슬래시 명령어 등록 실패 원인:', error);
     }
 });
 
 client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
 
-    if (interaction.commandName === '지급완료') {
+    // 1. /유저구매
+    if (interaction.commandName === '유저구매') {
         await interaction.reply({ content: '처리를 시작합니다.', ephemeral: true });
 
         const itemName = interaction.options.getString('상품');
@@ -151,7 +147,8 @@ client.on('interactionCreate', async interaction => {
         await interaction.channel.send({ content: `${buyer}`, embeds: [ticketEmbed] });
     }
 
-    if (interaction.commandName === '금액추가') {
+    // 2. /유저정보로그
+    if (interaction.commandName === '유저정보로그') {
         const targetUser = interaction.options.getUser('유저');
         const amount = interaction.options.getInteger('금액');
 
@@ -187,21 +184,22 @@ client.on('interactionCreate', async interaction => {
         }
     }
 
-    if (interaction.commandName === '횟수추가') {
+    // 3. /유저거래
+    if (interaction.commandName === '유저거래') {
         const targetUser = interaction.options.getUser('유저');
         const count = interaction.options.getInteger('횟수');
 
         await db.add(`user_${targetUser.id}.buyCount`, count);
         const newCount = (await db.get(`user_${targetUser.id}.buyCount`)) || 0;
 
-        await interaction.reply({ content: `${targetUser.username} 님의 구매 횟수에 ${count}회를 추가했습니다.`, ephemeral: true });
+        await interaction.reply({ content: `${targetUser.username} 님의 구매 횟수(거래)에 ${count}회를 추가했습니다.`, ephemeral: true });
 
         try {
             const infoLogChannel = await client.channels.fetch(INFO_LOG_CHANNEL_ID);
             if (infoLogChannel) {
                 const infoEmbed = new EmbedBuilder()
                     .setColor(0x2ECC71)
-                    .setTitle('🛠️ 유저 정보 변경 알림 (횟수 추가)')
+                    .setTitle('🛠️ 유저 정보 변경 알림 (거래 횟수 추가)')
                     .addFields(
                         { name: '처리 관리자', value: `${interaction.user} (${interaction.user.tag})`, inline: true },
                         { name: '대상 유저', value: `${targetUser} (${targetUser.tag})`, inline: true },
@@ -257,7 +255,7 @@ client.on('messageCreate', async message => {
             ctx.restore();
         } catch (e) { }
 
-        // 유저명 (역할 제거 후 Y축 위치 조정)
+        // 유저명
         ctx.fillStyle = '#FFFFFF';
         ctx.font = '30px CustomFont';
         ctx.fillText(`${user.username}`, 160, 95);
