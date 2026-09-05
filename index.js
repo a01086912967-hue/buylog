@@ -62,25 +62,28 @@ async function getUserRank(guild, targetUserId) {
             userMap.set(targetUserId, { id: targetUserId, amount: 0, count: 0 });
         }
 
-        const validUsers = [];
-
-        for (const [uid, uData] of userMap.entries()) {
+        const fetchPromises = Array.from(userMap.keys()).map(async (uid) => {
             try {
                 const member = await guild.members.fetch(uid).catch(() => null);
-                if (!member || member.user.bot) continue;
+                if (!member || member.user.bot) return null;
 
                 const amount = await db.get(`user_${uid}.totalAmount`);
                 const count = await db.get(`user_${uid}.buyCount`);
 
-                validUsers.push({
+                return {
                     id: uid,
                     user: member.user,
                     amount: Number(amount) || 0,
                     count: Number(count) || 0,
                     joinedAt: member.joinedTimestamp || Date.now()
-                });
-            } catch (e) {}
-        }
+                };
+            } catch (e) {
+                return null;
+            }
+        });
+
+        const results = await Promise.all(fetchPromises);
+        const validUsers = results.filter(u => u !== null);
 
         validUsers.sort((a, b) => {
             if (b.amount !== a.amount) {
@@ -318,7 +321,7 @@ client.on('messageCreate', async message => {
         }
     }
 
-    // 사진(Canvas)으로 출력되는 $구매랭크
+    // $구매랭크 (1초 대기 및 고속 비동기 처리 적용)
     if (command === '구매랭크') {
         const loadingMsg = await message.reply('🏆 구매 순위를 이미지로 생성하는 중이에요. . .');
 
@@ -336,20 +339,21 @@ client.on('messageCreate', async message => {
                 }
             }
 
-            const rankData = [];
-
-            for (const [uid] of userMap.entries()) {
+            // 병렬 비동기 탐색
+            const fetchPromises = Array.from(userMap.keys()).map(async (uid) => {
                 const member = await message.guild.members.fetch(uid).catch(() => null);
-                if (!member || member.user.bot) continue;
+                if (!member || member.user.bot) return null;
 
                 const amount = (await db.get(`user_${uid}.totalAmount`)) || 0;
-                
-                rankData.push({
+                return {
                     user: member.user,
                     amount: Number(amount),
                     joinedAt: member.joinedTimestamp || Date.now()
-                });
-            }
+                };
+            });
+
+            const rankResults = await Promise.all(fetchPromises);
+            const rankData = rankResults.filter(item => item !== null);
 
             rankData.sort((a, b) => {
                 if (b.amount !== a.amount) {
@@ -360,7 +364,6 @@ client.on('messageCreate', async message => {
 
             const top20 = rankData.slice(0, 20);
 
-            // 이미지 크기 설정 (좌/우 2열 배치)
             const itemHeight = 65;
             const rows = Math.min(top20.length, 10);
             const canvasWidth = 900;
@@ -392,7 +395,11 @@ client.on('messageCreate', async message => {
             ctx.lineTo(canvasWidth - 40, 115);
             ctx.stroke();
 
-            // 랭킹 목록 렌더링
+            // 유저 아바타 병렬 미리 로딩
+            const avatarImages = await Promise.all(
+                top20.map(item => loadImage(item.user.displayAvatarURL({ extension: 'png', size: 64 })).catch(() => null))
+            );
+
             for (let i = 0; i < top20.length; i++) {
                 const item = top20[i];
                 const isSecondCol = i >= 10;
@@ -402,43 +409,41 @@ client.on('messageCreate', async message => {
                 const startX = colIndex === 0 ? 40 : 470;
                 const startY = 140 + rowIndex * itemHeight;
 
-                // 아이템 배경 카드
+                // 아이템 배경
                 ctx.fillStyle = '#18181C';
                 ctx.beginPath();
                 ctx.roundRect(startX, startY, 390, 55, 12);
                 ctx.fill();
 
-                // 순위 표시
+                // 순위
                 ctx.font = '20px CustomFont';
-                if (i === 0) ctx.fillStyle = '#FFD700'; // Gold
-                else if (i === 1) ctx.fillStyle = '#C0C0C0'; // Silver
-                else if (i === 2) ctx.fillStyle = '#CD7F32'; // Bronze
+                if (i === 0) ctx.fillStyle = '#FFD700';
+                else if (i === 1) ctx.fillStyle = '#C0C0C0';
+                else if (i === 2) ctx.fillStyle = '#CD7F32';
                 else ctx.fillStyle = '#8E9297';
 
-                const rankText = `#${i + 1}`;
-                ctx.fillText(rankText, startX + 15, startY + 34);
+                ctx.fillText(`#${i + 1}`, startX + 15, startY + 34);
 
-                // 유저 프로필 아바타 렌더링
-                const avatarURL = item.user.displayAvatarURL({ extension: 'png', size: 64 });
-                try {
-                    const avatar = await loadImage(avatarURL);
+                // 아바타
+                const avatarImg = avatarImages[i];
+                if (avatarImg) {
                     ctx.save();
                     ctx.beginPath();
                     ctx.arc(startX + 80, startY + 27.5, 18, 0, Math.PI * 2, true);
                     ctx.closePath();
                     ctx.clip();
-                    ctx.drawImage(avatar, startX + 62, startY + 9.5, 36, 36);
+                    ctx.drawImage(avatarImg, startX + 62, startY + 9.5, 36, 36);
                     ctx.restore();
-                } catch (e) { }
+                }
 
-                // 유저 이름
+                // 이름
                 ctx.fillStyle = '#FFFFFF';
                 ctx.font = '16px CustomFont';
                 let username = item.user.username;
                 if (username.length > 9) username = username.substring(0, 8) + '..';
                 ctx.fillText(username, startX + 110, startY + 33);
 
-                // 구매 금액
+                // 금액
                 ctx.fillStyle = '#2ECC71';
                 ctx.font = '16px CustomFont';
                 const amountText = `₩${item.amount.toLocaleString()}`;
@@ -448,7 +453,7 @@ client.on('messageCreate', async message => {
 
             const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'ranking.png' });
 
-            await sleep(2000);
+            await sleep(1000); // 1초 연출 대기
             await loadingMsg.delete().catch(() => {});
             await message.reply({ files: [attachment] });
 
@@ -459,24 +464,21 @@ client.on('messageCreate', async message => {
         }
     }
 
+    // $정보 (1초 대기)
     if (command === '정보') {
         const loadingMsg = await message.reply('유저 정보를 불러오는 중이에요. . .');
 
         try {
             const targetUser = message.mentions.users.first() || message.author;
-            let targetMember;
             
-            try {
-                targetMember = await message.guild.members.fetch(targetUser.id);
-            } catch (e) {
-                targetMember = null;
-            }
-
-            const totalAmount = (await db.get(`user_${targetUser.id}.totalAmount`)) || 0;
-            const buyCount = (await db.get(`user_${targetUser.id}.buyCount`)) || 0;
-            const biggestDeal = (await db.get(`user_${targetUser.id}.biggestDeal`)) || 0;
-            
-            const userRank = await getUserRank(message.guild, targetUser.id);
+            const [targetMember, totalAmount, buyCount, biggestDeal, userRank, avatar] = await Promise.all([
+                message.guild.members.fetch(targetUser.id).catch(() => null),
+                db.get(`user_${targetUser.id}.totalAmount`),
+                db.get(`user_${targetUser.id}.buyCount`),
+                db.get(`user_${targetUser.id}.biggestDeal`),
+                getUserRank(message.guild, targetUser.id),
+                loadImage(targetUser.displayAvatarURL({ extension: 'png', size: 128 })).catch(() => null)
+            ]);
 
             const joinedAt = targetMember?.joinedAt 
                 ? targetMember.joinedAt.toISOString().split('T')[0] 
@@ -492,9 +494,7 @@ client.on('messageCreate', async message => {
             ctx.fill();
 
             // 아바타
-            const avatarURL = targetUser.displayAvatarURL({ extension: 'png', size: 128 });
-            try {
-                const avatar = await loadImage(avatarURL);
+            if (avatar) {
                 ctx.save();
                 ctx.beginPath();
                 ctx.arc(90, 85, 45, 0, Math.PI * 2, true);
@@ -502,7 +502,7 @@ client.on('messageCreate', async message => {
                 ctx.clip();
                 ctx.drawImage(avatar, 45, 40, 90, 90);
                 ctx.restore();
-            } catch (e) { }
+            }
 
             // 유저명
             ctx.fillStyle = '#FFFFFF';
@@ -526,7 +526,7 @@ client.on('messageCreate', async message => {
 
             ctx.fillStyle = '#FFFFFF';
             ctx.font = '32px CustomFont';
-            ctx.fillText(`₩${Number(totalAmount).toLocaleString()}`, 65, 245);
+            ctx.fillText(`₩${Number(totalAmount || 0).toLocaleString()}`, 65, 245);
 
             ctx.fillStyle = '#8E9297';
             ctx.font = '13px CustomFont';
@@ -534,7 +534,7 @@ client.on('messageCreate', async message => {
 
             ctx.fillStyle = '#FFFFFF';
             ctx.font = '16px CustomFont';
-            ctx.fillText(`₩${Number(biggestDeal).toLocaleString()}`, 65, 312);
+            ctx.fillText(`₩${Number(biggestDeal || 0).toLocaleString()}`, 65, 312);
 
             // TOTAL DEALS & RANK
             ctx.fillStyle = '#18181C';
@@ -548,7 +548,7 @@ client.on('messageCreate', async message => {
 
             ctx.fillStyle = '#2ECC71';
             ctx.font = '32px CustomFont';
-            ctx.fillText(`${buyCount}`, 435, 245);
+            ctx.fillText(`${buyCount || 0}`, 435, 245);
 
             ctx.fillStyle = '#8E9297';
             ctx.font = '13px CustomFont';
@@ -566,7 +566,7 @@ client.on('messageCreate', async message => {
 
             const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'profile.png' });
 
-            await sleep(3000);
+            await sleep(1000); // 1초 대기
 
             await loadingMsg.delete().catch(() => {});
             await message.reply({ files: [attachment] });
