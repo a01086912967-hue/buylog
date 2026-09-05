@@ -27,9 +27,7 @@ async function getUserRank(userId) {
         }
     }
 
-    // 금액 기준 내림차순 정렬
     userAmountMap.sort((a, b) => b.amount - a.amount);
-
     const rankIndex = userAmountMap.findIndex(u => u.id === userId);
     return rankIndex !== -1 ? `#${rankIndex + 1}` : '#-';
 }
@@ -151,8 +149,12 @@ client.on('messageCreate', async message => {
         const buyCount = (await db.get(`user_${user.id}.buyCount`)) || 0;
         const biggestDeal = (await db.get(`user_${user.id}.biggestDeal`)) || 0;
         
-        // 순위 산정
         const userRank = await getUserRank(user.id);
+
+        // 가장 높은 역할 가져오기 (@everyone 제외)
+        const highestRole = member?.roles.highest.name !== '@everyone' 
+            ? member?.roles.highest.name 
+            : 'Member';
 
         const joinedAt = member?.joinedAt 
             ? member.joinedAt.toISOString().split('T')[0] 
@@ -161,7 +163,7 @@ client.on('messageCreate', async message => {
         const canvas = createCanvas(800, 420);
         const ctx = canvas.getContext('2d');
 
-        // 메인 다크 배경
+        // 배경
         ctx.fillStyle = '#0F0F12';
         ctx.beginPath();
         ctx.roundRect(0, 0, 800, 420, 20);
@@ -180,17 +182,21 @@ client.on('messageCreate', async message => {
             ctx.restore();
         } catch (e) { }
 
-        // 유저명
+        // 유저명 & 가장 높은 역할
         ctx.fillStyle = '#FFFFFF';
         ctx.font = 'bold 28px sans-serif';
-        ctx.fillText(`${user.username}`, 160, 92);
+        ctx.fillText(`${user.username}`, 160, 80);
+
+        ctx.fillStyle = '#E5A93C';
+        ctx.font = 'bold 15px sans-serif';
+        ctx.fillText(`ROLE: ${highestRole}`, 160, 105);
 
         // 가입일
         ctx.fillStyle = '#72767D';
         ctx.font = '14px sans-serif';
-        ctx.fillText(`JOINED: ${joinedAt}`, 600, 92);
+        ctx.fillText(`JOINED: ${joinedAt}`, 600, 80);
 
-        // TOTAL VOLUME (총 구매 금액)
+        // TOTAL VOLUME
         ctx.fillStyle = '#18181C';
         ctx.beginPath();
         ctx.roundRect(40, 160, 350, 170, 15);
@@ -234,7 +240,7 @@ client.on('messageCreate', async message => {
         ctx.font = 'bold 18px sans-serif';
         ctx.fillText(`${userRank}`, 435, 312);
 
-        // 하단 서브 텍스트
+        // 하단 안내 문구
         ctx.fillStyle = '#EE4B2B';
         ctx.font = '12px sans-serif';
         ctx.fillText('* Data recorded starting from 2026.09.06', 40, 370);
