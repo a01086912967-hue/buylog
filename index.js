@@ -1,5 +1,5 @@
 const { Client, GatewayIntentBits, EmbedBuilder, REST, Routes, SlashCommandBuilder, AttachmentBuilder } = require('discord.js');
-const { createCanvas, loadImage } = require('canvas');
+const { createCanvas, loadImage } = require('@napi-rs/canvas');
 const { QuickDB } = require('quick.db');
 const db = new QuickDB(); // 데이터 저장용 Local DB (json 형태)
 
