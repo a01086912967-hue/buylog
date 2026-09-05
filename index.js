@@ -67,7 +67,6 @@ async function getUserRank(guild, targetUserId) {
         for (const [uid, uData] of userMap.entries()) {
             try {
                 const member = await guild.members.fetch(uid).catch(() => null);
-                // 봇 제외 및 서버에 존재하는 멤버만 집계
                 if (!member || member.user.bot) continue;
 
                 const amount = await db.get(`user_${uid}.totalAmount`);
@@ -83,7 +82,6 @@ async function getUserRank(guild, targetUserId) {
             } catch (e) {}
         }
 
-        // 정렬 기준: 1) 금액 내림차순 -> 2) 금액 같으면 서버 가입일 오름차순 (빠른 순)
         validUsers.sort((a, b) => {
             if (b.amount !== a.amount) {
                 return b.amount - a.amount;
@@ -320,9 +318,9 @@ client.on('messageCreate', async message => {
         }
     }
 
-    // 신규 추가: $구매랭크 (1~20위 출력)
+    // 사진(Canvas)으로 출력되는 $구매랭크
     if (command === '구매랭크') {
-        const loadingMsg = await message.reply('🏆 구매 순위를 집계하는 중이에요. . .');
+        const loadingMsg = await message.reply('🏆 구매 순위를 이미지로 생성하는 중이에요. . .');
 
         try {
             const allEntries = await db.all();
@@ -342,12 +340,10 @@ client.on('messageCreate', async message => {
 
             for (const [uid] of userMap.entries()) {
                 const member = await message.guild.members.fetch(uid).catch(() => null);
-                // 봇 제외
                 if (!member || member.user.bot) continue;
 
                 const amount = (await db.get(`user_${uid}.totalAmount`)) || 0;
                 
-                // 누적 구매 금액이 0원 이상인 유저 집계
                 rankData.push({
                     user: member.user,
                     amount: Number(amount),
@@ -355,7 +351,6 @@ client.on('messageCreate', async message => {
                 });
             }
 
-            // 정렬: 1) 금액 높은 순 -> 2) 동점 시 가입일 빠른 순
             rankData.sort((a, b) => {
                 if (b.amount !== a.amount) {
                     return b.amount - a.amount;
@@ -365,31 +360,102 @@ client.on('messageCreate', async message => {
 
             const top20 = rankData.slice(0, 20);
 
-            let rankDescription = '';
-            if (top20.length === 0) {
-                rankDescription = '아직 집계된 구매 기록이 없습니다.';
-            } else {
-                top20.forEach((item, index) => {
-                    const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `**#${index + 1}**`;
-                    rankDescription += `${medal} ${item.user} - **₩${item.amount.toLocaleString()}**\n`;
-                });
+            // 이미지 크기 설정 (좌/우 2열 배치)
+            const itemHeight = 65;
+            const rows = Math.min(top20.length, 10);
+            const canvasWidth = 900;
+            const canvasHeight = Math.max(220 + rows * itemHeight, 350);
+
+            const canvas = createCanvas(canvasWidth, canvasHeight);
+            const ctx = canvas.getContext('2d');
+
+            // 배경
+            ctx.fillStyle = '#0F0F12';
+            ctx.beginPath();
+            ctx.roundRect(0, 0, canvasWidth, canvasHeight, 20);
+            ctx.fill();
+
+            // 타이틀
+            ctx.fillStyle = '#FFFFFF';
+            ctx.font = '32px CustomFont';
+            ctx.fillText('🏆 TOP 20 PURCHASE RANKING', 40, 65);
+
+            ctx.fillStyle = '#72767D';
+            ctx.font = '14px CustomFont';
+            ctx.fillText('Data sorted by total purchase volume (Tier: Joined Date)', 40, 95);
+
+            // 구분선
+            ctx.strokeStyle = '#27272E';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(40, 115);
+            ctx.lineTo(canvasWidth - 40, 115);
+            ctx.stroke();
+
+            // 랭킹 목록 렌더링
+            for (let i = 0; i < top20.length; i++) {
+                const item = top20[i];
+                const isSecondCol = i >= 10;
+                const colIndex = isSecondCol ? 1 : 0;
+                const rowIndex = isSecondCol ? i - 10 : i;
+
+                const startX = colIndex === 0 ? 40 : 470;
+                const startY = 140 + rowIndex * itemHeight;
+
+                // 아이템 배경 카드
+                ctx.fillStyle = '#18181C';
+                ctx.beginPath();
+                ctx.roundRect(startX, startY, 390, 55, 12);
+                ctx.fill();
+
+                // 순위 표시
+                ctx.font = '20px CustomFont';
+                if (i === 0) ctx.fillStyle = '#FFD700'; // Gold
+                else if (i === 1) ctx.fillStyle = '#C0C0C0'; // Silver
+                else if (i === 2) ctx.fillStyle = '#CD7F32'; // Bronze
+                else ctx.fillStyle = '#8E9297';
+
+                const rankText = `#${i + 1}`;
+                ctx.fillText(rankText, startX + 15, startY + 34);
+
+                // 유저 프로필 아바타 렌더링
+                const avatarURL = item.user.displayAvatarURL({ extension: 'png', size: 64 });
+                try {
+                    const avatar = await loadImage(avatarURL);
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.arc(startX + 80, startY + 27.5, 18, 0, Math.PI * 2, true);
+                    ctx.closePath();
+                    ctx.clip();
+                    ctx.drawImage(avatar, startX + 62, startY + 9.5, 36, 36);
+                    ctx.restore();
+                } catch (e) { }
+
+                // 유저 이름
+                ctx.fillStyle = '#FFFFFF';
+                ctx.font = '16px CustomFont';
+                let username = item.user.username;
+                if (username.length > 9) username = username.substring(0, 8) + '..';
+                ctx.fillText(username, startX + 110, startY + 33);
+
+                // 구매 금액
+                ctx.fillStyle = '#2ECC71';
+                ctx.font = '16px CustomFont';
+                const amountText = `₩${item.amount.toLocaleString()}`;
+                const textWidth = ctx.measureText(amountText).width;
+                ctx.fillText(amountText, startX + 375 - textWidth, startY + 33);
             }
 
-            const rankEmbed = new EmbedBuilder()
-                .setColor(0xFFD1DC)
-                .setTitle('🏆 구매 금액 순위 TOP 20')
-                .setDescription(rankDescription)
-                .setFooter({ text: '동점일 경우 서버 가입일이 빠른 순으로 정렬됩니다. (봇 제외)' })
-                .setTimestamp();
+            const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'ranking.png' });
 
-            await sleep(2000); // 2초 집계 연출 대기
+            await sleep(2000);
             await loadingMsg.delete().catch(() => {});
-            await message.reply({ embeds: [rankEmbed] });
+            await message.reply({ files: [attachment] });
 
         } catch (error) {
-            console.error('구매랭크 생성 오류:', error);
+            console.error('구매랭크 이미지 생성 오류:', error);
             await loadingMsg.delete().catch(() => {});
-            await message.reply('❌ 랭킹 집계 중 오류가 발생했습니다.');
+            await message.reply('❌ 랭킹 이미지 생성 중 오류가 발생했습니다.');
         }
     }
 
