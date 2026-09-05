@@ -7,7 +7,7 @@
     "start": "node index.js"
   },
   "dependencies": {
-    "canvas": "^2.11.2",
+    "@napi-rs/canvas": "^0.1.44",
     "discord.js": "^14.14.1",
     "quick.db": "^9.1.7"
   }
