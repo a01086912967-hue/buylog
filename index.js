@@ -325,7 +325,7 @@ client.on('messageCreate', async message => {
     }
 
     if (command === '구매랭크') {
-        const loadingMsg = await message.reply('🏆 구매 순위를 이미지로 생성하는 중이에요. . .');
+        const loadingMsg = await message.reply('구매 금액을 조회하는 중이에요. . .');
 
         try {
             const allEntries = await db.all();
