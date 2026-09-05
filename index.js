@@ -1,7 +1,6 @@
 const { Client, GatewayIntentBits, EmbedBuilder, REST, Routes, SlashCommandBuilder, AttachmentBuilder } = require('discord.js');
-const { createCanvas, loadImage, GlobalFonts } = require('@napi-rs/canvas');
+const { createCanvas, loadImage } = require('@napi-rs/canvas');
 const { QuickDB } = require('quick.db');
-const https = require('https');
 
 const db = new QuickDB();
 
@@ -16,28 +15,7 @@ const client = new Client({
 const TOKEN = process.env.TOKEN;
 const PURCHASE_LOG_CHANNEL_ID = '1457384858065047663';
 
-// Noto Sans KR 한글 폰트 자동 로드
-function loadOnlineFont() {
-    return new Promise((resolve) => {
-        const fontUrl = 'https://raw.githubusercontent.com/google/fonts/main/ofl/notosanskr/NotoSansKR-Bold.ttf';
-        https.get(fontUrl, (res) => {
-            const data = [];
-            res.on('data', (chunk) => data.push(chunk));
-            res.on('end', () => {
-                const buffer = Buffer.concat(data);
-                GlobalFonts.register(buffer, 'KoreanFont');
-                console.log('한글 폰트 등록 성공!');
-                resolve();
-            });
-        }).on('error', (err) => {
-            console.error('폰트 로드 실패:', err);
-            resolve();
-        });
-    });
-}
-
 client.once('ready', async () => {
-    await loadOnlineFont();
     console.log('봇 준비 완료!');
 
     const commands = [
@@ -76,11 +54,9 @@ client.once('ready', async () => {
     }
 });
 
-// 슬래시 명령어 처리
 client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
 
-    // 1. /지급완료
     if (interaction.commandName === '지급완료') {
         await interaction.reply({ content: '처리를 시작합니다.', ephemeral: true });
 
@@ -92,7 +68,6 @@ client.on('interactionCreate', async interaction => {
         const buyer = interaction.options.getUser('구매자') || interaction.user;
         const seller = interaction.options.getUser('판매자') || interaction.user;
 
-        // DB 저장 (금액, 횟수, 최고 거래액)
         await db.add(`user_${buyer.id}.totalAmount`, numericAmount);
         await db.add(`user_${buyer.id}.buyCount`, 1);
 
@@ -122,7 +97,6 @@ client.on('interactionCreate', async interaction => {
         await interaction.channel.send({ content: `${buyer}`, embeds: [ticketEmbed] });
     }
 
-    // 2. /금액추가
     if (interaction.commandName === '금액추가') {
         const targetUser = interaction.options.getUser('유저');
         const amount = interaction.options.getInteger('금액');
@@ -134,21 +108,19 @@ client.on('interactionCreate', async interaction => {
             await db.set(`user_${targetUser.id}.biggestDeal`, amount);
         }
 
-        await interaction.reply({ content: `${targetUser.username}님에게 ${amount.toLocaleString()}원이 성공적으로 추가되었습니다.`, ephemeral: true });
+        await interaction.reply({ content: `${targetUser.username} - Amount added: ₩${amount.toLocaleString()}`, ephemeral: true });
     }
 
-    // 3. /횟수추가
     if (interaction.commandName === '횟수추가') {
         const targetUser = interaction.options.getUser('유저');
         const count = interaction.options.getInteger('횟수');
 
         await db.add(`user_${targetUser.id}.buyCount`, count);
 
-        await interaction.reply({ content: `${targetUser.username}님에게 구매 횟수 ${count}회가 성공적으로 추가되었습니다.`, ephemeral: true });
+        await interaction.reply({ content: `${targetUser.username} - Deals count added: ${count}`, ephemeral: true });
     }
 });
 
-// $내정보 카드 생성
 client.on('messageCreate', async message => {
     if (message.author.bot) return;
 
@@ -165,7 +137,7 @@ client.on('messageCreate', async message => {
             : '2026.09.06';
 
         const canvas = createCanvas(800, 420);
-        const ctx = canvas.getContext('2d');
+        ctx = canvas.getContext('2d');
 
         // 메인 다크 배경
         ctx.fillStyle = '#0F0F12';
@@ -173,7 +145,7 @@ client.on('messageCreate', async message => {
         ctx.roundRect(0, 0, 800, 420, 20);
         ctx.fill();
 
-        // 아바타 (주황색 테두리 제거)
+        // 아바타 (주황 테두리 없음)
         const avatarURL = user.displayAvatarURL({ extension: 'png', size: 128 });
         try {
             const avatar = await loadImage(avatarURL);
@@ -186,56 +158,56 @@ client.on('messageCreate', async message => {
             ctx.restore();
         } catch (e) { }
 
-        // 유저네임 (한글 적용)
+        // 유저명 (영문 표준)
         ctx.fillStyle = '#FFFFFF';
-        ctx.font = '28px KoreanFont';
+        ctx.font = 'bold 28px sans-serif';
         ctx.fillText(`${user.username}`, 160, 92);
 
         // 가입일
         ctx.fillStyle = '#72767D';
-        ctx.font = '14px KoreanFont';
-        ctx.fillText(`가입일: ${joinedAt}`, 600, 92);
+        ctx.font = '14px sans-serif';
+        ctx.fillText(`JOINED: ${joinedAt}`, 600, 92);
 
-        // 왼쪽 박스: 총 구매 금액
+        // TOTAL VOLUME (원화 ₩ 표시)
         ctx.fillStyle = '#18181C';
         ctx.beginPath();
         ctx.roundRect(40, 160, 350, 170, 15);
         ctx.fill();
 
         ctx.fillStyle = '#8E9297';
-        ctx.font = '14px KoreanFont';
-        ctx.fillText('총 구매 금액', 65, 195);
+        ctx.font = 'bold 14px sans-serif';
+        ctx.fillText('TOTAL VOLUME', 65, 195);
 
         ctx.fillStyle = '#FFFFFF';
-        ctx.font = '32px KoreanFont';
+        ctx.font = 'bold 32px sans-serif';
         ctx.fillText(`₩${totalAmount.toLocaleString()}`, 65, 245);
 
         ctx.fillStyle = '#8E9297';
-        ctx.font = '13px KoreanFont';
-        ctx.fillText('가장 큰 거래 금액', 65, 288);
+        ctx.font = '13px sans-serif';
+        ctx.fillText('BIGGEST DEAL', 65, 288);
 
         ctx.fillStyle = '#FFFFFF';
-        ctx.font = '16px KoreanFont';
+        ctx.font = 'bold 16px sans-serif';
         ctx.fillText(`₩${biggestDeal.toLocaleString()}`, 65, 312);
 
-        // 오른쪽 박스: 총 구매 횟수
+        // TOTAL DEALS
         ctx.fillStyle = '#18181C';
         ctx.beginPath();
         ctx.roundRect(410, 160, 350, 170, 15);
         ctx.fill();
 
         ctx.fillStyle = '#8E9297';
-        ctx.font = '14px KoreanFont';
-        ctx.fillText('총 구매 횟수', 435, 195);
+        ctx.font = 'bold 14px sans-serif';
+        ctx.fillText('TOTAL DEALS', 435, 195);
 
         ctx.fillStyle = '#2ECC71';
-        ctx.font = '32px KoreanFont';
-        ctx.fillText(`${buyCount}회`, 435, 245);
+        ctx.font = 'bold 32px sans-serif';
+        ctx.fillText(`${buyCount}`, 435, 245);
 
-        // 하단 안내 문구
+        // 하단 서브 텍스트
         ctx.fillStyle = '#EE4B2B';
-        ctx.font = '12px KoreanFont';
-        ctx.fillText('* 해당 데이터는 2026.09.06일 기준 기록입니다.', 40, 370);
+        ctx.font = '12px sans-serif';
+        ctx.fillText('* Data recorded starting from 2026.09.06', 40, 370);
 
         const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'profile.png' });
         await message.reply({ files: [attachment] });
