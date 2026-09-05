@@ -23,6 +23,9 @@ const GUILD_ID = '1456729030459134115';
 const PURCHASE_LOG_CHANNEL_ID = '1457384858065047663'; 
 // ------------------------------------------------
 
+// 글씨 깨짐 방지를 위한 폰트 설정 (기본 sans-serif 백업 지정)
+const FONT_FAMILY = 'CustomFont, sans-serif, "Noto Sans KR", Arial';
+
 function loadOnlineFont() {
     return new Promise((resolve) => {
         const fontUrl = 'https://raw.githubusercontent.com/google/fonts/main/ofl/notosans/NotoSans%5Bwdth%2Cwght%5D.ttf';
@@ -44,7 +47,15 @@ function loadOnlineFont() {
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// 랭킹 구하기 함수 (동점 시 가입일 순)
+// 유저 파싱 함수 (멘션 또는 유저 ID 입력 모두 지원)
+async function fetchUserFromInput(client, input) {
+    if (!input) return null;
+    const cleanId = input.replace(/[^0-9]/g, '');
+    if (!cleanId) return null;
+    return await client.users.fetch(cleanId).catch(() => null);
+}
+
+// 랭킹 구하기 함수
 async function getUserRank(guild, targetUserId) {
     try {
         const allEntries = await db.all();
@@ -183,7 +194,6 @@ client.on('messageCreate', async message => {
     const args = message.content.slice(1).trim().split(/ +/);
     const command = args.shift();
 
-    // $백업 (데이터베이스 파일 즉시 추출 - 관리자 전용)
     if (command === '백업') {
         if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
             return message.reply('❌ 이 명령어를 사용할 수 있는 권한이 없습니다. (관리자 전용)');
@@ -238,15 +248,15 @@ client.on('messageCreate', async message => {
         }
 
         const count = parseInt(args[0]);
-        const targetUser = message.mentions.users.first() || (args[1] ? await client.users.fetch(args[1]).catch(() => null) : null);
+        const targetUser = await fetchUserFromInput(client, args[1]);
 
         if (isNaN(count) || !targetUser) {
-            return message.reply('❌ 사용법: `$유저구매횟수 (변경할 횟수) (@유저멘션 또는 유저ID)`');
+            return message.reply('❌ 사용법: `$유저구매횟수 (변경할 횟수) (유저ID 또는 @유저멘션)`');
         }
 
         await db.set(`user_${targetUser.id}.buyCount`, count);
 
-        await message.reply(`✅ ${targetUser.username} 님의 구매 횟수가 **${count}회**로 변경되었습니다.`);
+        await message.reply(`✅ ${targetUser.username} (${targetUser.id}) 님의 구매 횟수가 **${count}회**로 변경되었습니다.`);
 
         const infoLogChannelId = await db.get('info_log_channel_id');
         if (infoLogChannelId) {
@@ -257,8 +267,8 @@ client.on('messageCreate', async message => {
                         .setColor(0x2ECC71)
                         .setTitle('🛠️ 유저 정보 변경 알림 (구매 횟수)')
                         .addFields(
-                            { name: '처리 관리자', value: `${message.author} (${message.author.tag})`, inline: true },
-                            { name: '대상 유저', value: `${targetUser} (${targetUser.tag})`, inline: true },
+                            { name: '처리 관리자', value: `${message.author} (${message.author.id})`, inline: true },
+                            { name: '대상 유저', value: `${targetUser} (${targetUser.id})`, inline: true },
                             { name: '변경 후 총 구매 횟수', value: `${count}회`, inline: false }
                         )
                         .setTimestamp();
@@ -277,10 +287,10 @@ client.on('messageCreate', async message => {
         }
 
         const amount = parseInt(args[0]);
-        const targetUser = message.mentions.users.first() || (args[1] ? await client.users.fetch(args[1]).catch(() => null) : null);
+        const targetUser = await fetchUserFromInput(client, args[1]);
 
         if (isNaN(amount) || !targetUser) {
-            return message.reply('❌ 사용법: `$유저구매금액 (변경할 금액) (@유저멘션 또는 유저ID)`');
+            return message.reply('❌ 사용법: `$유저구매금액 (변경할 금액) (유저ID 또는 @유저멘션)`');
         }
 
         await db.set(`user_${targetUser.id}.totalAmount`, amount);
@@ -290,7 +300,7 @@ client.on('messageCreate', async message => {
             await db.set(`user_${targetUser.id}.biggestDeal`, amount);
         }
 
-        await message.reply(`✅ ${targetUser.username} 님의 누적 금액이 **₩${amount.toLocaleString()}**으로 변경되었습니다.`);
+        await message.reply(`✅ ${targetUser.username} (${targetUser.id}) 님의 누적 금액이 **₩${amount.toLocaleString()}**으로 변경되었습니다.`);
 
         const infoLogChannelId = await db.get('info_log_channel_id');
         if (infoLogChannelId) {
@@ -301,8 +311,8 @@ client.on('messageCreate', async message => {
                         .setColor(0x3498DB)
                         .setTitle('🛠️ 유저 정보 변경 알림 (구매 금액)')
                         .addFields(
-                            { name: '처리 관리자', value: `${message.author} (${message.author.tag})`, inline: true },
-                            { name: '대상 유저', value: `${targetUser} (${targetUser.tag})`, inline: true },
+                            { name: '처리 관리자', value: `${message.author} (${message.author.id})`, inline: true },
+                            { name: '대상 유저', value: `${targetUser} (${targetUser.id})`, inline: true },
                             { name: '변경 후 총 누적 금액', value: `₩${amount.toLocaleString()}`, inline: false }
                         )
                         .setTimestamp();
@@ -321,15 +331,15 @@ client.on('messageCreate', async message => {
         }
 
         const amount = parseInt(args[0]);
-        const targetUser = message.mentions.users.first() || (args[1] ? await client.users.fetch(args[1]).catch(() => null) : null);
+        const targetUser = await fetchUserFromInput(client, args[1]);
 
         if (isNaN(amount) || !targetUser) {
-            return message.reply('❌ 사용법: `$유저최대금액 (변경할 금액) (@유저멘션 또는 유저ID)`');
+            return message.reply('❌ 사용법: `$유저최대금액 (변경할 금액) (유저ID 또는 @유저멘션)`');
         }
 
         await db.set(`user_${targetUser.id}.biggestDeal`, amount);
 
-        await message.reply(`✅ ${targetUser.username} 님의 최대 거래 금액(BIGGEST DEAL)이 **₩${amount.toLocaleString()}**으로 변경되었습니다.`);
+        await message.reply(`✅ ${targetUser.username} (${targetUser.id}) 님의 최대 거래 금액(BIGGEST DEAL)이 **₩${amount.toLocaleString()}**으로 변경되었습니다.`);
 
         const infoLogChannelId = await db.get('info_log_channel_id');
         if (infoLogChannelId) {
@@ -340,8 +350,8 @@ client.on('messageCreate', async message => {
                         .setColor(0x9B59B6)
                         .setTitle('🛠️ 유저 정보 변경 알림 (최대 거래 금액)')
                         .addFields(
-                            { name: '처리 관리자', value: `${message.author} (${message.author.tag})`, inline: true },
-                            { name: '대상 유저', value: `${targetUser} (${targetUser.tag})`, inline: true },
+                            { name: '처리 관리자', value: `${message.author} (${message.author.id})`, inline: true },
+                            { name: '대상 유저', value: `${targetUser} (${targetUser.id})`, inline: true },
                             { name: '변경 후 최대 거래 금액', value: `₩${amount.toLocaleString()}`, inline: false }
                         )
                         .setTimestamp();
@@ -408,11 +418,11 @@ client.on('messageCreate', async message => {
             ctx.fill();
 
             ctx.fillStyle = '#FFFFFF';
-            ctx.font = '30px CustomFont';
+            ctx.font = `30px ${FONT_FAMILY}`;
             ctx.fillText('📊 SERVER TOTAL ANALYTICS', 40, 65);
 
             ctx.fillStyle = '#72767D';
-            ctx.font = '14px CustomFont';
+            ctx.font = `14px ${FONT_FAMILY}`;
             ctx.fillText('SERVER: SODDU SHOP', 40, 95);
 
             ctx.strokeStyle = '#27272E';
@@ -428,11 +438,11 @@ client.on('messageCreate', async message => {
             ctx.fill();
 
             ctx.fillStyle = '#8E9297';
-            ctx.font = '14px CustomFont';
+            ctx.font = `14px ${FONT_FAMILY}`;
             ctx.fillText('TOTAL SALES VOLUME', 65, 175);
 
             ctx.fillStyle = '#2ECC71';
-            ctx.font = '28px CustomFont';
+            ctx.font = `28px ${FONT_FAMILY}`;
             ctx.fillText(`₩${totalVolume.toLocaleString()}`, 65, 220);
 
             ctx.fillStyle = '#18181C';
@@ -441,11 +451,11 @@ client.on('messageCreate', async message => {
             ctx.fill();
 
             ctx.fillStyle = '#8E9297';
-            ctx.font = '14px CustomFont';
+            ctx.font = `14px ${FONT_FAMILY}`;
             ctx.fillText('TOTAL TRANSACTIONS', 435, 175);
 
             ctx.fillStyle = '#3498DB';
-            ctx.font = '28px CustomFont';
+            ctx.font = `28px ${FONT_FAMILY}`;
             ctx.fillText(`${totalDeals.toLocaleString()} DEALS`, 435, 220);
 
             ctx.fillStyle = '#18181C';
@@ -454,11 +464,11 @@ client.on('messageCreate', async message => {
             ctx.fill();
 
             ctx.fillStyle = '#8E9297';
-            ctx.font = '13px CustomFont';
+            ctx.font = `13px ${FONT_FAMILY}`;
             ctx.fillText('AVG TRANSACTION VALUE', 65, 310);
 
             ctx.fillStyle = '#FFFFFF';
-            ctx.font = '22px CustomFont';
+            ctx.font = `22px ${FONT_FAMILY}`;
             ctx.fillText(`₩${avgDeal.toLocaleString()}`, 65, 350);
 
             ctx.fillStyle = '#18181C';
@@ -467,11 +477,11 @@ client.on('messageCreate', async message => {
             ctx.fill();
 
             ctx.fillStyle = '#8E9297';
-            ctx.font = '13px CustomFont';
+            ctx.font = `13px ${FONT_FAMILY}`;
             ctx.fillText('TOP SPENDER 👑', 435, 310);
 
             ctx.fillStyle = '#E5A93C';
-            ctx.font = '20px CustomFont';
+            ctx.font = `20px ${FONT_FAMILY}`;
             let topName = topUser.name;
             if (topName.length > 10) topName = topName.substring(0, 9) + '..';
             ctx.fillText(`${topName} (₩${topUser.amount.toLocaleString()})`, 435, 350);
@@ -544,11 +554,11 @@ client.on('messageCreate', async message => {
             ctx.fill();
 
             ctx.fillStyle = '#FFFFFF';
-            ctx.font = '32px CustomFont';
+            ctx.font = `32px ${FONT_FAMILY}`;
             ctx.fillText('🏆 TOP 20 PURCHASE RANKING', 40, 65);
 
             ctx.fillStyle = '#72767D';
-            ctx.font = '14px CustomFont';
+            ctx.font = `14px ${FONT_FAMILY}`;
             ctx.fillText('Data sorted by total purchase volume (Tier: Joined Date)', 40, 95);
 
             ctx.strokeStyle = '#27272E';
@@ -576,7 +586,7 @@ client.on('messageCreate', async message => {
                 ctx.roundRect(startX, startY, 390, 55, 12);
                 ctx.fill();
 
-                ctx.font = '20px CustomFont';
+                ctx.font = `20px ${FONT_FAMILY}`;
                 if (i === 0) ctx.fillStyle = '#FFD700';
                 else if (i === 1) ctx.fillStyle = '#C0C0C0';
                 else if (i === 2) ctx.fillStyle = '#CD7F32';
@@ -596,13 +606,13 @@ client.on('messageCreate', async message => {
                 }
 
                 ctx.fillStyle = '#FFFFFF';
-                ctx.font = '16px CustomFont';
+                ctx.font = `16px ${FONT_FAMILY}`;
                 let username = item.user.username;
                 if (username.length > 9) username = username.substring(0, 8) + '..';
                 ctx.fillText(username, startX + 110, startY + 33);
 
                 ctx.fillStyle = '#2ECC71';
-                ctx.font = '16px CustomFont';
+                ctx.font = `16px ${FONT_FAMILY}`;
                 const amountText = `₩${item.amount.toLocaleString()}`;
                 const textWidth = ctx.measureText(amountText).width;
                 ctx.fillText(amountText, startX + 375 - textWidth, startY + 33);
@@ -625,7 +635,7 @@ client.on('messageCreate', async message => {
         const loadingMsg = await message.reply('유저 정보를 불러오는 중이에요. . .');
 
         try {
-            const targetUser = message.mentions.users.first() || message.author;
+            const targetUser = (await fetchUserFromInput(client, args[0])) || message.author;
             
             const [targetMember, totalAmount, buyCount, biggestDeal, userRank, avatar] = await Promise.all([
                 message.guild.members.fetch(targetUser.id).catch(() => null),
@@ -659,11 +669,11 @@ client.on('messageCreate', async message => {
             }
 
             ctx.fillStyle = '#FFFFFF';
-            ctx.font = '30px CustomFont';
+            ctx.font = `30px ${FONT_FAMILY}`;
             ctx.fillText(`${targetUser.username}`, 160, 95);
 
             ctx.fillStyle = '#72767D';
-            ctx.font = '14px CustomFont';
+            ctx.font = `14px ${FONT_FAMILY}`;
             ctx.fillText(`JOINED: ${joinedAt}`, 600, 80);
 
             ctx.fillStyle = '#18181C';
@@ -672,19 +682,19 @@ client.on('messageCreate', async message => {
             ctx.fill();
 
             ctx.fillStyle = '#8E9297';
-            ctx.font = '14px CustomFont';
+            ctx.font = `14px ${FONT_FAMILY}`;
             ctx.fillText('TOTAL VOLUME', 65, 195);
 
             ctx.fillStyle = '#FFFFFF';
-            ctx.font = '32px CustomFont';
+            ctx.font = `32px ${FONT_FAMILY}`;
             ctx.fillText(`₩${Number(totalAmount || 0).toLocaleString()}`, 65, 245);
 
             ctx.fillStyle = '#8E9297';
-            ctx.font = '13px CustomFont';
+            ctx.font = `13px ${FONT_FAMILY}`;
             ctx.fillText('BIGGEST DEAL', 65, 288);
 
             ctx.fillStyle = '#FFFFFF';
-            ctx.font = '16px CustomFont';
+            ctx.font = `16px ${FONT_FAMILY}`;
             ctx.fillText(`₩${Number(biggestDeal || 0).toLocaleString()}`, 65, 312);
 
             ctx.fillStyle = '#18181C';
@@ -693,23 +703,23 @@ client.on('messageCreate', async message => {
             ctx.fill();
 
             ctx.fillStyle = '#8E9297';
-            ctx.font = '14px CustomFont';
+            ctx.font = `14px ${FONT_FAMILY}`;
             ctx.fillText('TOTAL DEALS', 435, 195);
 
             ctx.fillStyle = '#2ECC71';
-            ctx.font = '32px CustomFont';
+            ctx.font = `32px ${FONT_FAMILY}`;
             ctx.fillText(`${buyCount || 0}`, 435, 245);
 
             ctx.fillStyle = '#8E9297';
-            ctx.font = '13px CustomFont';
+            ctx.font = `13px ${FONT_FAMILY}`;
             ctx.fillText('RANK', 435, 288);
 
             ctx.fillStyle = '#E5A93C';
-            ctx.font = '18px CustomFont';
+            ctx.font = `18px ${FONT_FAMILY}`;
             ctx.fillText(`${userRank}`, 435, 312);
 
             ctx.fillStyle = '#EE4B2B';
-            ctx.font = '12px CustomFont';
+            ctx.font = `12px ${FONT_FAMILY}`;
             ctx.fillText('* Data recorded starting from 2026.09.06', 40, 370);
 
             const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'profile.png' });
