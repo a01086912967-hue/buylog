@@ -40,53 +40,47 @@ function loadOnlineFont() {
     });
 }
 
-// 데이터 기반 실시간 랭킹 집계 함수
-async function getUserRank(guild, targetUserId) {
+// DB 기반 초고속 & 정확한 랭킹 계산 함수
+async function getUserRank(targetUserId) {
     try {
-        const members = await guild.members.fetch();
-        const nonBotMembers = members.filter(m => !m.user.bot);
-
-        const userDataMap = new Map();
-
-        // 1. 모든 비봇 멤버 기본 데이터(0원) 생성
-        for (const [id] of nonBotMembers) {
-            userDataMap.set(id, { id, amount: 0, count: 0 });
-        }
-
-        // 2. DB 데이터를 조회하여 해당 유저 데이터 매핑
         const allData = await db.all();
+        const userMap = new Map();
 
-        for (const entry of allData) {
-            const keyStr = entry.id || entry.key || '';
-            const val = entry.value !== undefined ? entry.value : entry.data;
+        for (const item of allData) {
+            const keyStr = item.id || item.key || '';
+            const val = item.value !== undefined ? item.value : item.data;
 
             if (typeof keyStr === 'string' && keyStr.startsWith('user_')) {
                 const parts = keyStr.split('.');
                 const uid = parts[0].replace('user_', '');
                 const prop = parts[1];
 
-                if (userDataMap.has(uid)) {
-                    const targetData = userDataMap.get(uid);
-                    if (prop === 'totalAmount') targetData.amount = Number(val) || 0;
-                    if (prop === 'buyCount') targetData.count = Number(val) || 0;
+                if (!userMap.has(uid)) {
+                    userMap.set(uid, { id: uid, amount: 0, count: 0 });
                 }
+
+                const userData = userMap.get(uid);
+                if (prop === 'totalAmount') userData.amount = Number(val) || 0;
+                if (prop === 'buyCount') userData.count = Number(val) || 0;
             }
         }
 
-        const userList = Array.from(userDataMap.values());
+        if (!userMap.has(targetUserId)) {
+            userMap.set(targetUserId, { id: targetUserId, amount: 0, count: 0 });
+        }
 
-        // 3. 데이터 기준 내림차순 정렬 (금액 > 구매 횟수)
+        const userList = Array.from(userMap.values());
+
         userList.sort((a, b) => {
             if (b.amount !== a.amount) return b.amount - a.amount;
             return b.count - a.count;
         });
 
-        // 4. 대상 유저의 정확한 랭크 산출
         const rankIndex = userList.findIndex(u => u.id === targetUserId);
-        return rankIndex !== -1 ? `#${rankIndex + 1}` : '#-';
+        return rankIndex !== -1 ? `#${rankIndex + 1}` : '#1';
     } catch (e) {
         console.error('랭킹 집계 오류:', e);
-        return '#-';
+        return '#1';
     }
 }
 
@@ -273,110 +267,125 @@ client.on('messageCreate', async message => {
     }
 
     if (command === '정보') {
-        const targetUser = message.mentions.users.first() || message.author;
-        let targetMember;
-        
+        // 1. 안내 메시지 임시 전송
+        const loadingMsg = await message.reply('유저 정보를 불러오는 중이에요. . .');
+
         try {
-            targetMember = await message.guild.members.fetch(targetUser.id);
-        } catch (e) {
-            targetMember = null;
-        }
+            const targetUser = message.mentions.users.first() || message.author;
+            let targetMember;
+            
+            try {
+                targetMember = await message.guild.members.fetch(targetUser.id);
+            } catch (e) {
+                targetMember = null;
+            }
 
-        const totalAmount = (await db.get(`user_${targetUser.id}.totalAmount`)) || 0;
-        const buyCount = (await db.get(`user_${targetUser.id}.buyCount`)) || 0;
-        const biggestDeal = (await db.get(`user_${targetUser.id}.biggestDeal`)) || 0;
-        
-        // 데이터 기반 실시간 랭킹 산출
-        const userRank = await getUserRank(message.guild, targetUser.id);
+            const totalAmount = (await db.get(`user_${targetUser.id}.totalAmount`)) || 0;
+            const buyCount = (await db.get(`user_${targetUser.id}.buyCount`)) || 0;
+            const biggestDeal = (await db.get(`user_${targetUser.id}.biggestDeal`)) || 0;
+            
+            // 실시간 랭킹 산출
+            const userRank = await getUserRank(targetUser.id);
 
-        const joinedAt = targetMember?.joinedAt 
-            ? targetMember.joinedAt.toISOString().split('T')[0] 
-            : '2026.09.06';
+            const joinedAt = targetMember?.joinedAt 
+                ? targetMember.joinedAt.toISOString().split('T')[0] 
+                : '2026.09.06';
 
-        const canvas = createCanvas(800, 420);
-        const ctx = canvas.getContext('2d');
+            const canvas = createCanvas(800, 420);
+            const ctx = canvas.getContext('2d');
 
-        // 배경
-        ctx.fillStyle = '#0F0F12';
-        ctx.beginPath();
-        ctx.roundRect(0, 0, 800, 420, 20);
-        ctx.fill();
-
-        // 아바타
-        const avatarURL = targetUser.displayAvatarURL({ extension: 'png', size: 128 });
-        try {
-            const avatar = await loadImage(avatarURL);
-            ctx.save();
+            // 배경
+            ctx.fillStyle = '#0F0F12';
             ctx.beginPath();
-            ctx.arc(90, 85, 45, 0, Math.PI * 2, true);
-            ctx.closePath();
-            ctx.clip();
-            ctx.drawImage(avatar, 45, 40, 90, 90);
-            ctx.restore();
-        } catch (e) { }
+            ctx.roundRect(0, 0, 800, 420, 20);
+            ctx.fill();
 
-        // 유저명
-        ctx.fillStyle = '#FFFFFF';
-        ctx.font = '30px CustomFont';
-        ctx.fillText(`${targetUser.username}`, 160, 95);
+            // 아바타
+            const avatarURL = targetUser.displayAvatarURL({ extension: 'png', size: 128 });
+            try {
+                const avatar = await loadImage(avatarURL);
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(90, 85, 45, 0, Math.PI * 2, true);
+                ctx.closePath();
+                ctx.clip();
+                ctx.drawImage(avatar, 45, 40, 90, 90);
+                ctx.restore();
+            } catch (e) { }
 
-        // 가입일
-        ctx.fillStyle = '#72767D';
-        ctx.font = '14px CustomFont';
-        ctx.fillText(`JOINED: ${joinedAt}`, 600, 80);
+            // 유저명
+            ctx.fillStyle = '#FFFFFF';
+            ctx.font = '30px CustomFont';
+            ctx.fillText(`${targetUser.username}`, 160, 95);
 
-        // TOTAL VOLUME
-        ctx.fillStyle = '#18181C';
-        ctx.beginPath();
-        ctx.roundRect(40, 160, 350, 170, 15);
-        ctx.fill();
+            // 가입일
+            ctx.fillStyle = '#72767D';
+            ctx.font = '14px CustomFont';
+            ctx.fillText(`JOINED: ${joinedAt}`, 600, 80);
 
-        ctx.fillStyle = '#8E9297';
-        ctx.font = '14px CustomFont';
-        ctx.fillText('TOTAL VOLUME', 65, 195);
+            // TOTAL VOLUME
+            ctx.fillStyle = '#18181C';
+            ctx.beginPath();
+            ctx.roundRect(40, 160, 350, 170, 15);
+            ctx.fill();
 
-        ctx.fillStyle = '#FFFFFF';
-        ctx.font = '32px CustomFont';
-        ctx.fillText(`₩${Number(totalAmount).toLocaleString()}`, 65, 245);
+            ctx.fillStyle = '#8E9297';
+            ctx.font = '14px CustomFont';
+            ctx.fillText('TOTAL VOLUME', 65, 195);
 
-        ctx.fillStyle = '#8E9297';
-        ctx.font = '13px CustomFont';
-        ctx.fillText('BIGGEST DEAL', 65, 288);
+            ctx.fillStyle = '#FFFFFF';
+            ctx.font = '32px CustomFont';
+            ctx.fillText(`₩${Number(totalAmount).toLocaleString()}`, 65, 245);
 
-        ctx.fillStyle = '#FFFFFF';
-        ctx.font = '16px CustomFont';
-        ctx.fillText(`₩${Number(biggestDeal).toLocaleString()}`, 65, 312);
+            ctx.fillStyle = '#8E9297';
+            ctx.font = '13px CustomFont';
+            ctx.fillText('BIGGEST DEAL', 65, 288);
 
-        // TOTAL DEALS & RANK
-        ctx.fillStyle = '#18181C';
-        ctx.beginPath();
-        ctx.roundRect(410, 160, 350, 170, 15);
-        ctx.fill();
+            ctx.fillStyle = '#FFFFFF';
+            ctx.font = '16px CustomFont';
+            ctx.fillText(`₩${Number(biggestDeal).toLocaleString()}`, 65, 312);
 
-        ctx.fillStyle = '#8E9297';
-        ctx.font = '14px CustomFont';
-        ctx.fillText('TOTAL DEALS', 435, 195);
+            // TOTAL DEALS & RANK
+            ctx.fillStyle = '#18181C';
+            ctx.beginPath();
+            ctx.roundRect(410, 160, 350, 170, 15);
+            ctx.fill();
 
-        ctx.fillStyle = '#2ECC71';
-        ctx.font = '32px CustomFont';
-        ctx.fillText(`${buyCount}`, 435, 245);
+            ctx.fillStyle = '#8E9297';
+            ctx.font = '14px CustomFont';
+            ctx.fillText('TOTAL DEALS', 435, 195);
 
-        ctx.fillStyle = '#8E9297';
-        ctx.font = '13px CustomFont';
-        ctx.fillText('RANK', 435, 288);
+            ctx.fillStyle = '#2ECC71';
+            ctx.font = '32px CustomFont';
+            ctx.fillText(`${buyCount}`, 435, 245);
 
-        // 계산된 유저의 실시간 랭크 적용
-        ctx.fillStyle = '#E5A93C';
-        ctx.font = '18px CustomFont';
-        ctx.fillText(`${userRank}`, 435, 312);
+            ctx.fillStyle = '#8E9297';
+            ctx.font = '13px CustomFont';
+            ctx.fillText('RANK', 435, 288);
 
-        // 하단 문구
-        ctx.fillStyle = '#EE4B2B';
-        ctx.font = '12px CustomFont';
-        ctx.fillText('* Data recorded starting from 2026.09.06', 40, 370);
+            // RANK
+            ctx.fillStyle = '#E5A93C';
+            ctx.font = '18px CustomFont';
+            ctx.fillText(`${userRank}`, 435, 312);
 
-        const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'profile.png' });
-        await message.reply({ files: [attachment] });
+            // 하단 문구
+            ctx.fillStyle = '#EE4B2B';
+            ctx.font = '12px CustomFont';
+            ctx.fillText('* Data recorded starting from 2026.09.06', 40, 370);
+
+            const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'profile.png' });
+
+            // 2. 로딩 메시지 삭제
+            await loadingMsg.delete().catch(() => {});
+
+            // 3. 유저의 original 메시지($정보)에 답장으로 이미지 전송
+            await message.reply({ files: [attachment] });
+
+        } catch (error) {
+            console.error('정보 이미지 생성 오류:', error);
+            await loadingMsg.delete().catch(() => {});
+            await message.reply('❌ 정보 조회 중 오류가 발생했습니다.');
+        }
     }
 });
 
