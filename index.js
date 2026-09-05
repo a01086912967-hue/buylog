@@ -16,12 +16,12 @@ const client = new Client({
 const TOKEN = process.env.TOKEN;
 
 // ---------------- [ 설정 영역 ] ----------------
-const GUILD_ID = '1456729030459134115'; // 서버 ID (즉시 반영용)
-const PURCHASE_LOG_CHANNEL_ID = '1457384858065047663'; // 구매 지급 로그 채널 ID
-const INFO_LOG_CHANNEL_ID = '1545759434175815771'; // 유저 정보 변경 로그 채널 ID
+const GUILD_ID = '1456729030459134115'; 
+const PURCHASE_LOG_CHANNEL_ID = '1457384858065047663'; 
+const INFO_LOG_CHANNEL_ID = '1545759434175815771'; 
 // ------------------------------------------------
 
-// 온라인 폰트 로드 및 등록 로직
+// 폰트 로더
 function loadOnlineFont() {
     return new Promise((resolve) => {
         const fontUrl = 'https://raw.githubusercontent.com/google/fonts/main/ofl/notosans/NotoSans%5Bwdth%2Cwght%5D.ttf';
@@ -41,7 +41,7 @@ function loadOnlineFont() {
     });
 }
 
-// 유저 순위 계산 함수
+// 유저 순위 계산
 async function getUserRank(userId) {
     const allData = await db.all();
     const userAmountMap = [];
@@ -88,21 +88,29 @@ client.once('ready', async () => {
     const rest = new REST({ version: '10' }).setToken(TOKEN);
 
     try {
-        // 서버 ID 지정을 통해 디스코드에 즉시 등록
+        console.log('슬래시 명령어 동기화 시도 중...');
+        
+        // 길드(서버) 등록
         await rest.put(
             Routes.applicationGuildCommands(client.user.id, GUILD_ID),
             { body: commands }
         );
-        console.log('서버 전용 슬래시 명령어 즉시 등록 완료!');
+        
+        // 글로벌 등록도 동시 진행 (이중 안전장치)
+        await rest.put(
+            Routes.applicationCommands(client.user.id),
+            { body: commands }
+        );
+
+        console.log('슬래시 명령어 성공적으로 등록됨!');
     } catch (error) {
-        console.error('슬래시 명령어 등록 실패:', error);
+        console.error('슬래시 명령어 등록 에러:', error.rawError || error);
     }
 });
 
 client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
 
-    // 1. /지급완료
     if (interaction.commandName === '지급완료') {
         await interaction.reply({ content: '처리를 시작합니다.', ephemeral: true });
 
@@ -143,7 +151,6 @@ client.on('interactionCreate', async interaction => {
         await interaction.channel.send({ content: `${buyer}`, embeds: [ticketEmbed] });
     }
 
-    // 2. /금액추가
     if (interaction.commandName === '금액추가') {
         const targetUser = interaction.options.getUser('유저');
         const amount = interaction.options.getInteger('금액');
@@ -159,7 +166,6 @@ client.on('interactionCreate', async interaction => {
 
         await interaction.reply({ content: `${targetUser.username} 님의 누적 금액에 ₩${amount.toLocaleString()}을 추가했습니다.`, ephemeral: true });
 
-        // 정보 변경 로그 채널 전송
         try {
             const infoLogChannel = await client.channels.fetch(INFO_LOG_CHANNEL_ID);
             if (infoLogChannel) {
@@ -181,7 +187,6 @@ client.on('interactionCreate', async interaction => {
         }
     }
 
-    // 3. /횟수추가
     if (interaction.commandName === '횟수추가') {
         const targetUser = interaction.options.getUser('유저');
         const count = interaction.options.getInteger('횟수');
@@ -191,7 +196,6 @@ client.on('interactionCreate', async interaction => {
 
         await interaction.reply({ content: `${targetUser.username} 님의 구매 횟수에 ${count}회를 추가했습니다.`, ephemeral: true });
 
-        // 정보 변경 로그 채널 전송
         try {
             const infoLogChannel = await client.channels.fetch(INFO_LOG_CHANNEL_ID);
             if (infoLogChannel) {
@@ -227,10 +231,6 @@ client.on('messageCreate', async message => {
         
         const userRank = await getUserRank(user.id);
 
-        const highestRole = member?.roles?.highest?.name && member.roles.highest.name !== '@everyone' 
-            ? member.roles.highest.name 
-            : 'Member';
-
         const joinedAt = member?.joinedAt 
             ? member.joinedAt.toISOString().split('T')[0] 
             : '2026.09.06';
@@ -238,7 +238,7 @@ client.on('messageCreate', async message => {
         const canvas = createCanvas(800, 420);
         const ctx = canvas.getContext('2d');
 
-        // 메인 배경
+        // 배경
         ctx.fillStyle = '#0F0F12';
         ctx.beginPath();
         ctx.roundRect(0, 0, 800, 420, 20);
@@ -257,14 +257,10 @@ client.on('messageCreate', async message => {
             ctx.restore();
         } catch (e) { }
 
-        // 유저명 & 가장 높은 역할
+        // 유저명 (역할 제거 후 Y축 위치 조정)
         ctx.fillStyle = '#FFFFFF';
-        ctx.font = '28px CustomFont';
-        ctx.fillText(`${user.username}`, 160, 80);
-
-        ctx.fillStyle = '#E5A93C';
-        ctx.font = '15px CustomFont';
-        ctx.fillText(`ROLE: ${highestRole}`, 160, 105);
+        ctx.font = '30px CustomFont';
+        ctx.fillText(`${user.username}`, 160, 95);
 
         // 가입일
         ctx.fillStyle = '#72767D';
