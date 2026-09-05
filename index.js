@@ -2,6 +2,8 @@ const { Client, GatewayIntentBits, EmbedBuilder, REST, Routes, SlashCommandBuild
 const { createCanvas, loadImage, GlobalFonts } = require('@napi-rs/canvas');
 const { QuickDB } = require('quick.db');
 const https = require('https');
+const path = require('path');
+const fs = require('fs');
 
 const db = new QuickDB({ filePath: './database.sqlite' });
 
@@ -181,6 +183,34 @@ client.on('messageCreate', async message => {
     const args = message.content.slice(1).trim().split(/ +/);
     const command = args.shift();
 
+    // $백업 (데이터베이스 파일 즉시 추출 - 관리자 전용)
+    if (command === '백업') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+            return message.reply('❌ 이 명령어를 사용할 수 있는 권한이 없습니다. (관리자 전용)');
+        }
+
+        const dbPath = path.join(__dirname, 'database.sqlite');
+
+        if (!fs.existsSync(dbPath)) {
+            return message.reply('❌ 데이터베이스 파일이 존재하지 않습니다.');
+        }
+
+        try {
+            const attachment = new AttachmentBuilder(dbPath, { name: `database_backup_${Date.now()}.sqlite` });
+            
+            const backupEmbed = new EmbedBuilder()
+                .setColor(0x2ECC71)
+                .setTitle('📦 데이터베이스 백업 완료')
+                .setDescription('최신 유저 누적 금액, 구매 횟수, 설정 데이터가 담긴 SQLite DB 파일입니다.')
+                .setTimestamp();
+
+            await message.reply({ embeds: [backupEmbed], files: [attachment] });
+        } catch (error) {
+            console.error('백업 오류:', error);
+            await message.reply('❌ 백업 파일 전송 중 오류가 발생했습니다.');
+        }
+    }
+
     if (command === '유저정보변경로그') {
         if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
             return message.reply('❌ 이 명령어를 사용할 수 있는 권한이 없습니다. (관리자 전용)');
@@ -324,7 +354,6 @@ client.on('messageCreate', async message => {
         }
     }
 
-    // $서버통계 (SERVER: SODDU SHOP 적용)
     if (command === '서버통계') {
         const loadingMsg = await message.reply('📊 서버 전체 통계를 이미지로 생성하는 중이에요. . .');
 
@@ -373,23 +402,19 @@ client.on('messageCreate', async message => {
             const canvas = createCanvas(800, 420);
             const ctx = canvas.getContext('2d');
 
-            // 배경
             ctx.fillStyle = '#0F0F12';
             ctx.beginPath();
             ctx.roundRect(0, 0, 800, 420, 20);
             ctx.fill();
 
-            // 타이틀
             ctx.fillStyle = '#FFFFFF';
             ctx.font = '30px CustomFont';
             ctx.fillText('📊 SERVER TOTAL ANALYTICS', 40, 65);
 
-            // 서버명 고정 설정
             ctx.fillStyle = '#72767D';
             ctx.font = '14px CustomFont';
             ctx.fillText('SERVER: SODDU SHOP', 40, 95);
 
-            // 구분선
             ctx.strokeStyle = '#27272E';
             ctx.lineWidth = 2;
             ctx.beginPath();
@@ -397,7 +422,6 @@ client.on('messageCreate', async message => {
             ctx.lineTo(760, 115);
             ctx.stroke();
 
-            // Card 1: TOTAL VOLUME
             ctx.fillStyle = '#18181C';
             ctx.beginPath();
             ctx.roundRect(40, 140, 350, 120, 15);
@@ -411,7 +435,6 @@ client.on('messageCreate', async message => {
             ctx.font = '28px CustomFont';
             ctx.fillText(`₩${totalVolume.toLocaleString()}`, 65, 220);
 
-            // Card 2: TOTAL DEALS
             ctx.fillStyle = '#18181C';
             ctx.beginPath();
             ctx.roundRect(410, 140, 350, 120, 15);
@@ -425,7 +448,6 @@ client.on('messageCreate', async message => {
             ctx.font = '28px CustomFont';
             ctx.fillText(`${totalDeals.toLocaleString()} DEALS`, 435, 220);
 
-            // Card 3: AVERAGE DEAL
             ctx.fillStyle = '#18181C';
             ctx.beginPath();
             ctx.roundRect(40, 280, 350, 100, 15);
@@ -439,7 +461,6 @@ client.on('messageCreate', async message => {
             ctx.font = '22px CustomFont';
             ctx.fillText(`₩${avgDeal.toLocaleString()}`, 65, 350);
 
-            // Card 4: TOP SPENDER
             ctx.fillStyle = '#18181C';
             ctx.beginPath();
             ctx.roundRect(410, 280, 350, 100, 15);
