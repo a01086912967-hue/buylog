@@ -16,45 +16,61 @@ const client = new Client({
 const TOKEN = process.env.TOKEN;
 const PURCHASE_LOG_CHANNEL_ID = '1457384858065047663';
 
-// TTF 폰트를 바이너리 버퍼로 다운로드 받아 GlobalFonts에 등록
-function loadOnlineFont() {
+let isFontLoaded = false;
+
+// 안정적인 폰트 로더 (실패 시 기본 폰트로 안전 전환)
+function initFont() {
     return new Promise((resolve) => {
         const fontUrl = 'https://raw.githubusercontent.com/google/fonts/main/ofl/notosans/NotoSans-Bold.ttf';
         https.get(fontUrl, (res) => {
+            if (res.statusCode !== 200) {
+                console.error('폰트 다운로드 응답 오류:', res.statusCode);
+                return resolve(false);
+            }
             const data = [];
             res.on('data', (chunk) => data.push(chunk));
             res.on('end', () => {
-                const buffer = Buffer.concat(data);
-                GlobalFonts.register(buffer, 'CustomFont');
-                console.log('온라인 폰트 등록 성공!');
-                resolve();
+                try {
+                    const buffer = Buffer.concat(data);
+                    GlobalFonts.register(buffer, 'CustomFont');
+                    console.log('폰트 등록 성공!');
+                    isFontLoaded = true;
+                    resolve(true);
+                } catch (e) {
+                    console.error('폰트 등록 중 에러:', e);
+                    resolve(false);
+                }
             });
         }).on('error', (err) => {
-            console.error('폰트 로드 실패:', err);
-            resolve();
+            console.error('폰트 네트워크 요청 실패:', err);
+            resolve(false);
         });
     });
 }
 
-// 유저 순위 계산 함수
+// 유저 순위 계산
 async function getUserRank(userId) {
-    const allData = await db.all();
-    const userAmountMap = [];
+    try {
+        const allData = await db.all();
+        const userAmountMap = [];
 
-    for (const item of allData) {
-        if (item.id.startsWith('user_') && item.id.endsWith('.totalAmount')) {
-            const uid = item.id.split('_')[1].split('.')[0];
-            userAmountMap.push({ id: uid, amount: item.value || 0 });
+        for (const item of allData) {
+            if (item.id.startsWith('user_') && item.id.endsWith('.totalAmount')) {
+                const uid = item.id.split('_')[1].split('.')[0];
+                userAmountMap.push({ id: uid, amount: item.value || 0 });
+            }
         }
-    }
 
-    userAmountMap.sort((a, b) => b.amount - a.amount);
-    const rankIndex = userAmountMap.findIndex(u => u.id === userId);
-    return rankIndex !== -1 ? `#${rankIndex + 1}` : '#-';
+        userAmountMap.sort((a, b) => b.amount - a.amount);
+        const rankIndex = userAmountMap.findIndex(u => u.id === userId);
+        return rankIndex !== -1 ? `#${rankIndex + 1}` : '#-';
+    } catch (e) {
+        return '#-';
+    }
 }
 
 client.once('ready', async () => {
-    await loadOnlineFont();
+    await initFont();
     console.log('봇 준비 완료!');
 
     const commands = [
@@ -173,8 +189,8 @@ client.on('messageCreate', async message => {
         
         const userRank = await getUserRank(user.id);
 
-        const highestRole = member?.roles.highest.name !== '@everyone' 
-            ? member?.roles.highest.name 
+        const highestRole = member?.roles?.highest?.name && member.roles.highest.name !== '@everyone' 
+            ? member.roles.highest.name 
             : 'Member';
 
         const joinedAt = member?.joinedAt 
@@ -184,7 +200,10 @@ client.on('messageCreate', async message => {
         const canvas = createCanvas(800, 420);
         const ctx = canvas.getContext('2d');
 
-        // 배경
+        // 폰트가 로드되었으면 등록된 폰트를 쓰고, 실패 시 시스템 기본 폰트로 폴백
+        const fontName = isFontLoaded ? 'CustomFont' : 'sans-serif';
+
+        // 메인 다크 배경
         ctx.fillStyle = '#0F0F12';
         ctx.beginPath();
         ctx.roundRect(0, 0, 800, 420, 20);
@@ -203,18 +222,18 @@ client.on('messageCreate', async message => {
             ctx.restore();
         } catch (e) { }
 
-        // 유저명 & 최상위 역할 (등록한 CustomFont 지정)
+        // 유저명 & 최상위 역할
         ctx.fillStyle = '#FFFFFF';
-        ctx.font = '28px CustomFont';
+        ctx.font = `28px ${fontName}`;
         ctx.fillText(`${user.username}`, 160, 80);
 
         ctx.fillStyle = '#E5A93C';
-        ctx.font = '15px CustomFont';
+        ctx.font = `15px ${fontName}`;
         ctx.fillText(`ROLE: ${highestRole}`, 160, 105);
 
         // 가입일
         ctx.fillStyle = '#72767D';
-        ctx.font = '14px CustomFont';
+        ctx.font = `14px ${fontName}`;
         ctx.fillText(`JOINED: ${joinedAt}`, 600, 80);
 
         // TOTAL VOLUME
@@ -224,19 +243,19 @@ client.on('messageCreate', async message => {
         ctx.fill();
 
         ctx.fillStyle = '#8E9297';
-        ctx.font = '14px CustomFont';
+        ctx.font = `14px ${fontName}`;
         ctx.fillText('TOTAL VOLUME', 65, 195);
 
         ctx.fillStyle = '#FFFFFF';
-        ctx.font = '32px CustomFont';
+        ctx.font = `32px ${fontName}`;
         ctx.fillText(`₩${totalAmount.toLocaleString()}`, 65, 245);
 
         ctx.fillStyle = '#8E9297';
-        ctx.font = '13px CustomFont';
+        ctx.font = `13px ${fontName}`;
         ctx.fillText('BIGGEST DEAL', 65, 288);
 
         ctx.fillStyle = '#FFFFFF';
-        ctx.font = '16px CustomFont';
+        ctx.font = `16px ${fontName}`;
         ctx.fillText(`₩${biggestDeal.toLocaleString()}`, 65, 312);
 
         // TOTAL DEALS & RANK
@@ -246,24 +265,24 @@ client.on('messageCreate', async message => {
         ctx.fill();
 
         ctx.fillStyle = '#8E9297';
-        ctx.font = '14px CustomFont';
+        ctx.font = `14px ${fontName}`;
         ctx.fillText('TOTAL DEALS', 435, 195);
 
         ctx.fillStyle = '#2ECC71';
-        ctx.font = '32px CustomFont';
+        ctx.font = `32px ${fontName}`;
         ctx.fillText(`${buyCount}`, 435, 245);
 
         ctx.fillStyle = '#8E9297';
-        ctx.font = '13px CustomFont';
+        ctx.font = `13px ${fontName}`;
         ctx.fillText('RANK', 435, 288);
 
         ctx.fillStyle = '#E5A93C';
-        ctx.font = '18px CustomFont';
+        ctx.font = `18px ${fontName}`;
         ctx.fillText(`${userRank}`, 435, 312);
 
         // 하단 안내 문구
         ctx.fillStyle = '#EE4B2B';
-        ctx.font = '12px CustomFont';
+        ctx.font = `12px ${fontName}`;
         ctx.fillText('* Data recorded starting from 2026.09.06', 40, 370);
 
         const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'profile.png' });
