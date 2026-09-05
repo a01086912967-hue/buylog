@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@napi-rs/canvas": "^0.1.44",
+    "better-sqlite3": "^11.8.0",
     "discord.js": "^14.14.1",
     "quick.db": "^9.1.7"
   }
