@@ -14,9 +14,14 @@ const client = new Client({
 });
 
 const TOKEN = process.env.TOKEN;
-const PURCHASE_LOG_CHANNEL_ID = '1457384858065047663';
 
-// 아까 성공했던 원본 폰트 로드 로직 그대로 복구
+// ---------------- [ 설정 영역 ] ----------------
+const GUILD_ID = '1456729030459134115'; // 서버 ID (즉시 반영용)
+const PURCHASE_LOG_CHANNEL_ID = '1457384858065047663'; // 구매 지급 로그 채널 ID
+const INFO_LOG_CHANNEL_ID = '1545759434175815771'; // 유저 정보 변경 로그 채널 ID
+// ------------------------------------------------
+
+// 온라인 폰트 로드 및 등록 로직
 function loadOnlineFont() {
     return new Promise((resolve) => {
         const fontUrl = 'https://raw.githubusercontent.com/google/fonts/main/ofl/notosans/NotoSans%5Bwdth%2Cwght%5D.ttf';
@@ -54,7 +59,7 @@ async function getUserRank(userId) {
 }
 
 client.once('ready', async () => {
-    await loadOnlineFont(); // 폰트 로딩 완료 후 봇 가동
+    await loadOnlineFont();
     console.log('봇 준비 완료!');
 
     const commands = [
@@ -83,11 +88,12 @@ client.once('ready', async () => {
     const rest = new REST({ version: '10' }).setToken(TOKEN);
 
     try {
+        // 서버 ID 지정을 통해 디스코드에 즉시 등록
         await rest.put(
-            Routes.applicationCommands(client.user.id),
+            Routes.applicationGuildCommands(client.user.id, GUILD_ID),
             { body: commands }
         );
-        console.log('슬래시 명령어 등록 완료!');
+        console.log('서버 전용 슬래시 명령어 즉시 등록 완료!');
     } catch (error) {
         console.error('슬래시 명령어 등록 실패:', error);
     }
@@ -96,6 +102,7 @@ client.once('ready', async () => {
 client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
 
+    // 1. /지급완료
     if (interaction.commandName === '지급완료') {
         await interaction.reply({ content: '처리를 시작합니다.', ephemeral: true });
 
@@ -126,7 +133,7 @@ client.on('interactionCreate', async interaction => {
                 await logChannel.send({ content: `${buyer}`, embeds: [logEmbed] });
             }
         } catch (error) {
-            console.error("로그 채널 전송 오류:", error);
+            console.error("구매 로그 채널 전송 오류:", error);
         }
 
         const ticketEmbed = new EmbedBuilder()
@@ -136,6 +143,7 @@ client.on('interactionCreate', async interaction => {
         await interaction.channel.send({ content: `${buyer}`, embeds: [ticketEmbed] });
     }
 
+    // 2. /금액추가
     if (interaction.commandName === '금액추가') {
         const targetUser = interaction.options.getUser('유저');
         const amount = interaction.options.getInteger('금액');
@@ -147,16 +155,62 @@ client.on('interactionCreate', async interaction => {
             await db.set(`user_${targetUser.id}.biggestDeal`, amount);
         }
 
-        await interaction.reply({ content: `${targetUser.username} - Amount added: ₩${amount.toLocaleString()}`, ephemeral: true });
+        const newTotal = (await db.get(`user_${targetUser.id}.totalAmount`)) || 0;
+
+        await interaction.reply({ content: `${targetUser.username} 님의 누적 금액에 ₩${amount.toLocaleString()}을 추가했습니다.`, ephemeral: true });
+
+        // 정보 변경 로그 채널 전송
+        try {
+            const infoLogChannel = await client.channels.fetch(INFO_LOG_CHANNEL_ID);
+            if (infoLogChannel) {
+                const infoEmbed = new EmbedBuilder()
+                    .setColor(0x3498DB)
+                    .setTitle('🛠️ 유저 정보 변경 알림 (금액 추가)')
+                    .addFields(
+                        { name: '처리 관리자', value: `${interaction.user} (${interaction.user.tag})`, inline: true },
+                        { name: '대상 유저', value: `${targetUser} (${targetUser.tag})`, inline: true },
+                        { name: '추가된 금액', value: `₩${amount.toLocaleString()}`, inline: false },
+                        { name: '변경 후 총 누적 금액', value: `₩${newTotal.toLocaleString()}`, inline: false }
+                    )
+                    .setTimestamp();
+
+                await infoLogChannel.send({ embeds: [infoEmbed] });
+            }
+        } catch (error) {
+            console.error("유저 정보 변경 로그 전송 오류:", error);
+        }
     }
 
+    // 3. /횟수추가
     if (interaction.commandName === '횟수추가') {
         const targetUser = interaction.options.getUser('유저');
         const count = interaction.options.getInteger('횟수');
 
         await db.add(`user_${targetUser.id}.buyCount`, count);
+        const newCount = (await db.get(`user_${targetUser.id}.buyCount`)) || 0;
 
-        await interaction.reply({ content: `${targetUser.username} - Deals count added: ${count}`, ephemeral: true });
+        await interaction.reply({ content: `${targetUser.username} 님의 구매 횟수에 ${count}회를 추가했습니다.`, ephemeral: true });
+
+        // 정보 변경 로그 채널 전송
+        try {
+            const infoLogChannel = await client.channels.fetch(INFO_LOG_CHANNEL_ID);
+            if (infoLogChannel) {
+                const infoEmbed = new EmbedBuilder()
+                    .setColor(0x2ECC71)
+                    .setTitle('🛠️ 유저 정보 변경 알림 (횟수 추가)')
+                    .addFields(
+                        { name: '처리 관리자', value: `${interaction.user} (${interaction.user.tag})`, inline: true },
+                        { name: '대상 유저', value: `${targetUser} (${targetUser.tag})`, inline: true },
+                        { name: '추가된 횟수', value: `${count}회`, inline: false },
+                        { name: '변경 후 총 구매 횟수', value: `${newCount}회`, inline: false }
+                    )
+                    .setTimestamp();
+
+                await infoLogChannel.send({ embeds: [infoEmbed] });
+            }
+        } catch (error) {
+            console.error("유저 정보 변경 로그 전송 오류:", error);
+        }
     }
 });
 
@@ -184,13 +238,13 @@ client.on('messageCreate', async message => {
         const canvas = createCanvas(800, 420);
         const ctx = canvas.getContext('2d');
 
-        // 메인 다크 배경
+        // 메인 배경
         ctx.fillStyle = '#0F0F12';
         ctx.beginPath();
         ctx.roundRect(0, 0, 800, 420, 20);
         ctx.fill();
 
-        // 아바타 (주황색 테두리 제거)
+        // 아바타
         const avatarURL = user.displayAvatarURL({ extension: 'png', size: 128 });
         try {
             const avatar = await loadImage(avatarURL);
@@ -203,7 +257,7 @@ client.on('messageCreate', async message => {
             ctx.restore();
         } catch (e) { }
 
-        // 유저명 & 가장 높은 역할 (등록된 CustomFont 전용 적용)
+        // 유저명 & 가장 높은 역할
         ctx.fillStyle = '#FFFFFF';
         ctx.font = '28px CustomFont';
         ctx.fillText(`${user.username}`, 160, 80);
@@ -217,7 +271,7 @@ client.on('messageCreate', async message => {
         ctx.font = '14px CustomFont';
         ctx.fillText(`JOINED: ${joinedAt}`, 600, 80);
 
-        // TOTAL VOLUME (원화 ₩ 표시)
+        // TOTAL VOLUME
         ctx.fillStyle = '#18181C';
         ctx.beginPath();
         ctx.roundRect(40, 160, 350, 170, 15);
