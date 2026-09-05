@@ -324,7 +324,7 @@ client.on('messageCreate', async message => {
         }
     }
 
-    // $서버통계 (이미지 대시보드 생성)
+    // $서버통계 (SERVER: SODDU SHOP 적용)
     if (command === '서버통계') {
         const loadingMsg = await message.reply('📊 서버 전체 통계를 이미지로 생성하는 중이에요. . .');
 
@@ -384,9 +384,10 @@ client.on('messageCreate', async message => {
             ctx.font = '30px CustomFont';
             ctx.fillText('📊 SERVER TOTAL ANALYTICS', 40, 65);
 
+            // 서버명 고정 설정
             ctx.fillStyle = '#72767D';
             ctx.font = '14px CustomFont';
-            ctx.fillText(`SERVER: ${message.guild.name}`, 40, 95);
+            ctx.fillText('SERVER: SODDU SHOP', 40, 95);
 
             // 구분선
             ctx.strokeStyle = '#27272E';
