@@ -1,6 +1,7 @@
 const { Client, GatewayIntentBits, EmbedBuilder, REST, Routes, SlashCommandBuilder, AttachmentBuilder } = require('discord.js');
-const { createCanvas, loadImage } = require('@napi-rs/canvas');
+const { createCanvas, loadImage, GlobalFonts } = require('@napi-rs/canvas');
 const { QuickDB } = require('quick.db');
+const https = require('https');
 
 const db = new QuickDB();
 
@@ -15,6 +16,26 @@ const client = new Client({
 const TOKEN = process.env.TOKEN;
 const PURCHASE_LOG_CHANNEL_ID = '1457384858065047663';
 
+// 폰트 바이너리를 메모리로 직접 받아와 강제 등록하는 함수
+function loadOnlineFont() {
+    return new Promise((resolve) => {
+        const fontUrl = 'https://raw.githubusercontent.com/google/fonts/main/ofl/notosans/NotoSans%5Bwdth%2Cwght%5D.ttf';
+        https.get(fontUrl, (res) => {
+            const data = [];
+            res.on('data', (chunk) => data.push(chunk));
+            res.on('end', () => {
+                const buffer = Buffer.concat(data);
+                GlobalFonts.register(buffer, 'CustomFont');
+                console.log('폰트 글로벌 등록 성공!');
+                resolve();
+            });
+        }).on('error', (err) => {
+            console.error('폰트 로드 실패:', err);
+            resolve();
+        });
+    });
+}
+
 function getMemberRank(totalAmount) {
     if (totalAmount >= 500000) return 'VIP CLIENT';
     if (totalAmount >= 100000) return 'GOLD CLIENT';
@@ -23,6 +44,7 @@ function getMemberRank(totalAmount) {
 }
 
 client.once('ready', async () => {
+    await loadOnlineFont(); // 폰트 로드 완료 후 실행
     console.log('봇 준비 완료!');
 
     const commands = [
@@ -123,23 +145,23 @@ client.on('messageCreate', async message => {
             ? member.joinedAt.toISOString().split('T')[0] 
             : '2026.09.06';
 
-        // 캔버스 크기 지정
         const canvas = createCanvas(800, 420);
         const ctx = canvas.getContext('2d');
 
-        // 배경
+        // 메인 다크 배경
         ctx.fillStyle = '#0F0F12';
         ctx.beginPath();
         ctx.roundRect(0, 0, 800, 420, 20);
         ctx.fill();
 
-        // 1. 프로필 서클 테두리 및 원형 아바타
+        // 아바타 테두리
         ctx.strokeStyle = '#D67D27';
         ctx.lineWidth = 4;
         ctx.beginPath();
         ctx.arc(100, 90, 48, 0, Math.PI * 2);
         ctx.stroke();
 
+        // 아바타
         const avatarURL = user.displayAvatarURL({ extension: 'png', size: 128 });
         try {
             const avatar = await loadImage(avatarURL);
@@ -152,59 +174,59 @@ client.on('messageCreate', async message => {
             ctx.restore();
         } catch (e) { }
 
-        // 유저네임 및 등급 (sans-serif 기본 폰트 적용)
+        // 유저네임 및 등급 (등록된 CustomFont 적용)
         ctx.fillStyle = '#FFFFFF';
-        ctx.font = 'bold 28px sans-serif';
+        ctx.font = '28px CustomFont';
         ctx.fillText(`${user.username}`, 170, 82);
 
         ctx.fillStyle = '#D67D27';
-        ctx.font = 'bold 16px sans-serif';
+        ctx.font = '16px CustomFont';
         ctx.fillText(`${userRank}`, 170, 108);
 
         // 가입일
         ctx.fillStyle = '#72767D';
-        ctx.font = '14px sans-serif';
-        ctx.fillText(`JOINED: ${joinedAt}`, 620, 82);
+        ctx.font = '14px CustomFont';
+        ctx.fillText(`JOINED: ${joinedAt}`, 600, 82);
 
-        // 2. TOTAL VOLUME 박스 (메인 구매 금액)
+        // TOTAL VOLUME 박스
         ctx.fillStyle = '#18181C';
         ctx.beginPath();
         ctx.roundRect(40, 160, 350, 170, 15);
         ctx.fill();
 
         ctx.fillStyle = '#8E9297';
-        ctx.font = 'bold 13px sans-serif';
+        ctx.font = '13px CustomFont';
         ctx.fillText('TOTAL VOLUME', 65, 195);
 
         ctx.fillStyle = '#FFFFFF';
-        ctx.font = 'bold 36px sans-serif';
+        ctx.font = '36px CustomFont';
         ctx.fillText(`$${totalAmount.toLocaleString()}`, 65, 250);
 
         ctx.fillStyle = '#8E9297';
-        ctx.font = '13px sans-serif';
+        ctx.font = '13px CustomFont';
         ctx.fillText('DEALS', 65, 290);
 
         ctx.fillStyle = '#FFFFFF';
-        ctx.font = 'bold 18px sans-serif';
+        ctx.font = '18px CustomFont';
         ctx.fillText(`${buyCount}`, 65, 312);
 
-        // 3. 우측 서브 정보 박스 (DEALS & STATUS)
+        // TOTAL DEALS 박스
         ctx.fillStyle = '#18181C';
         ctx.beginPath();
         ctx.roundRect(410, 160, 350, 170, 15);
         ctx.fill();
 
         ctx.fillStyle = '#8E9297';
-        ctx.font = 'bold 13px sans-serif';
+        ctx.font = '13px CustomFont';
         ctx.fillText('TOTAL DEALS', 435, 195);
 
         ctx.fillStyle = '#2ECC71';
-        ctx.font = 'bold 36px sans-serif';
+        ctx.font = '36px CustomFont';
         ctx.fillText(`${buyCount} COUNT`, 435, 250);
 
-        // 4. 하단 안내 문구
+        // 하단 문구
         ctx.fillStyle = '#EE4B2B';
-        ctx.font = '12px sans-serif';
+        ctx.font = '12px CustomFont';
         ctx.fillText('* Data recorded starting from 2026.09.06', 40, 370);
 
         const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'profile.png' });
