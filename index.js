@@ -3,7 +3,6 @@ const { createCanvas, loadImage, GlobalFonts } = require('@napi-rs/canvas');
 const { QuickDB } = require('quick.db');
 const https = require('https');
 
-// 데이터 영구 보존을 위한 파일 경로 지정
 const db = new QuickDB({ filePath: './database.sqlite' });
 
 const client = new Client({ 
@@ -22,7 +21,6 @@ const GUILD_ID = '1456729030459134115';
 const PURCHASE_LOG_CHANNEL_ID = '1457384858065047663'; 
 // ------------------------------------------------
 
-// 폰트 로드
 function loadOnlineFont() {
     return new Promise((resolve) => {
         const fontUrl = 'https://raw.githubusercontent.com/google/fonts/main/ofl/notosans/NotoSans%5Bwdth%2Cwght%5D.ttf';
@@ -42,42 +40,48 @@ function loadOnlineFont() {
     });
 }
 
-// 오류 없는 고속 랭킹 집계 함수
+// 데이터 기반 실시간 랭킹 집계 함수
 async function getUserRank(guild, targetUserId) {
     try {
         const members = await guild.members.fetch();
         const nonBotMembers = members.filter(m => !m.user.bot);
 
-        const allData = await db.all();
-        const amountMap = new Map();
-        const countMap = new Map();
+        const userDataMap = new Map();
 
-        for (const item of allData) {
-            const keyStr = item.id || item.key || '';
-            const val = item.value !== undefined ? item.value : item.data;
+        // 1. 모든 비봇 멤버 기본 데이터(0원) 생성
+        for (const [id] of nonBotMembers) {
+            userDataMap.set(id, { id, amount: 0, count: 0 });
+        }
+
+        // 2. DB 데이터를 조회하여 해당 유저 데이터 매핑
+        const allData = await db.all();
+
+        for (const entry of allData) {
+            const keyStr = entry.id || entry.key || '';
+            const val = entry.value !== undefined ? entry.value : entry.data;
 
             if (typeof keyStr === 'string' && keyStr.startsWith('user_')) {
                 const parts = keyStr.split('.');
                 const uid = parts[0].replace('user_', '');
                 const prop = parts[1];
 
-                if (prop === 'totalAmount') amountMap.set(uid, Number(val) || 0);
-                if (prop === 'buyCount') countMap.set(uid, Number(val) || 0);
+                if (userDataMap.has(uid)) {
+                    const targetData = userDataMap.get(uid);
+                    if (prop === 'totalAmount') targetData.amount = Number(val) || 0;
+                    if (prop === 'buyCount') targetData.count = Number(val) || 0;
+                }
             }
         }
 
-        const userList = [];
-        for (const [id] of nonBotMembers) {
-            const amount = amountMap.get(id) || 0;
-            const count = countMap.get(id) || 0;
-            userList.push({ id, amount, count });
-        }
+        const userList = Array.from(userDataMap.values());
 
+        // 3. 데이터 기준 내림차순 정렬 (금액 > 구매 횟수)
         userList.sort((a, b) => {
             if (b.amount !== a.amount) return b.amount - a.amount;
             return b.count - a.count;
         });
 
+        // 4. 대상 유저의 정확한 랭크 산출
         const rankIndex = userList.findIndex(u => u.id === targetUserId);
         return rankIndex !== -1 ? `#${rankIndex + 1}` : '#-';
     } catch (e) {
@@ -282,6 +286,7 @@ client.on('messageCreate', async message => {
         const buyCount = (await db.get(`user_${targetUser.id}.buyCount`)) || 0;
         const biggestDeal = (await db.get(`user_${targetUser.id}.biggestDeal`)) || 0;
         
+        // 데이터 기반 실시간 랭킹 산출
         const userRank = await getUserRank(message.guild, targetUser.id);
 
         const joinedAt = targetMember?.joinedAt 
@@ -291,11 +296,13 @@ client.on('messageCreate', async message => {
         const canvas = createCanvas(800, 420);
         const ctx = canvas.getContext('2d');
 
+        // 배경
         ctx.fillStyle = '#0F0F12';
         ctx.beginPath();
         ctx.roundRect(0, 0, 800, 420, 20);
         ctx.fill();
 
+        // 아바타
         const avatarURL = targetUser.displayAvatarURL({ extension: 'png', size: 128 });
         try {
             const avatar = await loadImage(avatarURL);
@@ -308,14 +315,17 @@ client.on('messageCreate', async message => {
             ctx.restore();
         } catch (e) { }
 
+        // 유저명
         ctx.fillStyle = '#FFFFFF';
         ctx.font = '30px CustomFont';
         ctx.fillText(`${targetUser.username}`, 160, 95);
 
+        // 가입일
         ctx.fillStyle = '#72767D';
         ctx.font = '14px CustomFont';
         ctx.fillText(`JOINED: ${joinedAt}`, 600, 80);
 
+        // TOTAL VOLUME
         ctx.fillStyle = '#18181C';
         ctx.beginPath();
         ctx.roundRect(40, 160, 350, 170, 15);
@@ -337,6 +347,7 @@ client.on('messageCreate', async message => {
         ctx.font = '16px CustomFont';
         ctx.fillText(`₩${Number(biggestDeal).toLocaleString()}`, 65, 312);
 
+        // TOTAL DEALS & RANK
         ctx.fillStyle = '#18181C';
         ctx.beginPath();
         ctx.roundRect(410, 160, 350, 170, 15);
@@ -354,10 +365,12 @@ client.on('messageCreate', async message => {
         ctx.font = '13px CustomFont';
         ctx.fillText('RANK', 435, 288);
 
+        // 계산된 유저의 실시간 랭크 적용
         ctx.fillStyle = '#E5A93C';
         ctx.font = '18px CustomFont';
         ctx.fillText(`${userRank}`, 435, 312);
 
+        // 하단 문구
         ctx.fillStyle = '#EE4B2B';
         ctx.font = '12px CustomFont';
         ctx.fillText('* Data recorded starting from 2026.09.06', 40, 370);
