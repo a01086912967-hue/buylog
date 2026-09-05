@@ -15,6 +15,25 @@ const client = new Client({
 const TOKEN = process.env.TOKEN;
 const PURCHASE_LOG_CHANNEL_ID = '1457384858065047663';
 
+// 유저 순위 계산 함수
+async function getUserRank(userId) {
+    const allData = await db.all();
+    const userAmountMap = [];
+
+    for (const item of allData) {
+        if (item.id.startsWith('user_') && item.id.endsWith('.totalAmount')) {
+            const uid = item.id.split('_')[1].split('.')[0];
+            userAmountMap.push({ id: uid, amount: item.value || 0 });
+        }
+    }
+
+    // 금액 기준 내림차순 정렬
+    userAmountMap.sort((a, b) => b.amount - a.amount);
+
+    const rankIndex = userAmountMap.findIndex(u => u.id === userId);
+    return rankIndex !== -1 ? `#${rankIndex + 1}` : '#-';
+}
+
 client.once('ready', async () => {
     console.log('봇 준비 완료!');
 
@@ -131,13 +150,16 @@ client.on('messageCreate', async message => {
         const totalAmount = (await db.get(`user_${user.id}.totalAmount`)) || 0;
         const buyCount = (await db.get(`user_${user.id}.buyCount`)) || 0;
         const biggestDeal = (await db.get(`user_${user.id}.biggestDeal`)) || 0;
+        
+        // 순위 산정
+        const userRank = await getUserRank(user.id);
 
         const joinedAt = member?.joinedAt 
             ? member.joinedAt.toISOString().split('T')[0] 
             : '2026.09.06';
 
         const canvas = createCanvas(800, 420);
-        ctx = canvas.getContext('2d');
+        const ctx = canvas.getContext('2d');
 
         // 메인 다크 배경
         ctx.fillStyle = '#0F0F12';
@@ -145,7 +167,7 @@ client.on('messageCreate', async message => {
         ctx.roundRect(0, 0, 800, 420, 20);
         ctx.fill();
 
-        // 아바타 (주황 테두리 없음)
+        // 아바타
         const avatarURL = user.displayAvatarURL({ extension: 'png', size: 128 });
         try {
             const avatar = await loadImage(avatarURL);
@@ -158,7 +180,7 @@ client.on('messageCreate', async message => {
             ctx.restore();
         } catch (e) { }
 
-        // 유저명 (영문 표준)
+        // 유저명
         ctx.fillStyle = '#FFFFFF';
         ctx.font = 'bold 28px sans-serif';
         ctx.fillText(`${user.username}`, 160, 92);
@@ -168,7 +190,7 @@ client.on('messageCreate', async message => {
         ctx.font = '14px sans-serif';
         ctx.fillText(`JOINED: ${joinedAt}`, 600, 92);
 
-        // TOTAL VOLUME (원화 ₩ 표시)
+        // TOTAL VOLUME (총 구매 금액)
         ctx.fillStyle = '#18181C';
         ctx.beginPath();
         ctx.roundRect(40, 160, 350, 170, 15);
@@ -190,7 +212,7 @@ client.on('messageCreate', async message => {
         ctx.font = 'bold 16px sans-serif';
         ctx.fillText(`₩${biggestDeal.toLocaleString()}`, 65, 312);
 
-        // TOTAL DEALS
+        // TOTAL DEALS & RANK
         ctx.fillStyle = '#18181C';
         ctx.beginPath();
         ctx.roundRect(410, 160, 350, 170, 15);
@@ -203,6 +225,14 @@ client.on('messageCreate', async message => {
         ctx.fillStyle = '#2ECC71';
         ctx.font = 'bold 32px sans-serif';
         ctx.fillText(`${buyCount}`, 435, 245);
+
+        ctx.fillStyle = '#8E9297';
+        ctx.font = '13px sans-serif';
+        ctx.fillText('RANK', 435, 288);
+
+        ctx.fillStyle = '#E5A93C';
+        ctx.font = 'bold 18px sans-serif';
+        ctx.fillText(`${userRank}`, 435, 312);
 
         // 하단 서브 텍스트
         ctx.fillStyle = '#EE4B2B';
