@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, EmbedBuilder, REST, Routes, SlashCommandBuilder, AttachmentBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, REST, Routes, SlashCommandBuilder, AttachmentBuilder, PermissionsBitField } = require('discord.js');
 const { createCanvas, loadImage, GlobalFonts } = require('@napi-rs/canvas');
 const { QuickDB } = require('quick.db');
 const https = require('https');
@@ -142,8 +142,12 @@ client.on('messageCreate', async message => {
     const args = message.content.slice(1).trim().split(/ +/);
     const command = args.shift();
 
-    // 1. $유저정보변경로그 (채널ID)
+    // 1. $유저정보변경로그 (채널ID) - 관리자 전용
     if (command === '유저정보변경로그') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+            return message.reply('❌ 이 명령어를 사용할 수 있는 권한이 없습니다. (관리자 전용)');
+        }
+
         const channelId = args[0];
         if (!channelId) {
             return message.reply('❌ 설정할 채널 ID를 입력해주세요. 예: `$유저정보변경로그 1545759434175815771`');
@@ -160,19 +164,23 @@ client.on('messageCreate', async message => {
         }
     }
 
-    // 2. $유저구매횟수 (추가할 횟수) (@유저)
+    // 2. $유저구매횟수 (변경할 횟수) (@유저) - 관리자 전용 & 값 변경(set)
     if (command === '유저구매횟수') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+            return message.reply('❌ 이 명령어를 사용할 수 있는 권한이 없습니다. (관리자 전용)');
+        }
+
         const count = parseInt(args[0]);
         const targetUser = message.mentions.users.first();
 
         if (isNaN(count) || !targetUser) {
-            return message.reply('❌ 사용법: `$유저구매횟수 (추가할 횟수) (@유저멘션)`');
+            return message.reply('❌ 사용법: `$유저구매횟수 (변경할 횟수) (@유저멘션)`');
         }
 
-        await db.add(`user_${targetUser.id}.buyCount`, count);
-        const newCount = (await db.get(`user_${targetUser.id}.buyCount`)) || 0;
+        // 값 직접 변경 (set)
+        await db.set(`user_${targetUser.id}.buyCount`, count);
 
-        await message.reply(`✅ ${targetUser.username} 님의 구매 횟수에 ${count}회가 추가되었습니다. (현재: ${newCount}회)`);
+        await message.reply(`✅ ${targetUser.username} 님의 구매 횟수가 **${count}회**로 변경되었습니다.`);
 
         const infoLogChannelId = await db.get('info_log_channel_id');
         if (infoLogChannelId) {
@@ -185,8 +193,7 @@ client.on('messageCreate', async message => {
                         .addFields(
                             { name: '처리 관리자', value: `${message.author} (${message.author.tag})`, inline: true },
                             { name: '대상 유저', value: `${targetUser} (${targetUser.tag})`, inline: true },
-                            { name: '추가된 횟수', value: `${count}회`, inline: false },
-                            { name: '총 구매 횟수', value: `${newCount}회`, inline: false }
+                            { name: '변경 후 총 구매 횟수', value: `${count}회`, inline: false }
                         )
                         .setTimestamp();
 
@@ -198,26 +205,29 @@ client.on('messageCreate', async message => {
         }
     }
 
-    // 3. $유저구매금액 (추가할 금액) (@유저)
+    // 3. $유저구매금액 (변경할 금액) (@유저) - 관리자 전용 & 값 변경(set)
     if (command === '유저구매금액') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+            return message.reply('❌ 이 명령어를 사용할 수 있는 권한이 없습니다. (관리자 전용)');
+        }
+
         const amount = parseInt(args[0]);
         const targetUser = message.mentions.users.first();
 
         if (isNaN(amount) || !targetUser) {
-            return message.reply('❌ 사용법: `$유저구매금액 (추가할 금액) (@유저멘션)`');
+            return message.reply('❌ 사용법: `$유저구매금액 (변경할 금액) (@유저멘션)`');
         }
 
-        await db.add(`user_${targetUser.id}.totalAmount`, amount);
+        // 값 직접 변경 (set)
+        await db.set(`user_${targetUser.id}.totalAmount`, amount);
 
-        // BIGGEST DEAL 갱신
+        // BIGGEST DEAL 조건 판단 및 변경
         const currentBiggest = (await db.get(`user_${targetUser.id}.biggestDeal`)) || 0;
         if (amount > currentBiggest) {
             await db.set(`user_${targetUser.id}.biggestDeal`, amount);
         }
 
-        const newTotal = (await db.get(`user_${targetUser.id}.totalAmount`)) || 0;
-
-        await message.reply(`✅ ${targetUser.username} 님의 누적 금액에 ₩${amount.toLocaleString()}이 추가되었습니다. (현재: ₩${newTotal.toLocaleString()})`);
+        await message.reply(`✅ ${targetUser.username} 님의 누적 금액이 **₩${amount.toLocaleString()}**으로 변경되었습니다.`);
 
         const infoLogChannelId = await db.get('info_log_channel_id');
         if (infoLogChannelId) {
@@ -230,8 +240,7 @@ client.on('messageCreate', async message => {
                         .addFields(
                             { name: '처리 관리자', value: `${message.author} (${message.author.tag})`, inline: true },
                             { name: '대상 유저', value: `${targetUser} (${targetUser.tag})`, inline: true },
-                            { name: '추가된 금액', value: `₩${amount.toLocaleString()}`, inline: false },
-                            { name: '변경 후 총 누적 금액', value: `₩${newTotal.toLocaleString()}`, inline: false }
+                            { name: '변경 후 총 누적 금액', value: `₩${amount.toLocaleString()}`, inline: false }
                         )
                         .setTimestamp();
 
