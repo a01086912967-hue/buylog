@@ -11,7 +11,7 @@ const client = new Client({
         GatewayIntentBits.Guilds, 
         GatewayIntentBits.GuildMessages, 
         GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildMembers // 멤버 조회를 위한 인텐트
+        GatewayIntentBits.GuildMembers
     ] 
 });
 
@@ -42,29 +42,47 @@ function loadOnlineFont() {
     });
 }
 
-// 서버 멤버 전체 대상 랭킹 집계 함수 (봇 제외 & 0원 유저도 포함)
+// 고속 랭킹 집계 함수
 async function getUserRank(guild, targetUserId) {
     try {
-        // 서버의 모든 멤버 캐싱/페치
         const members = await guild.members.fetch();
         const nonBotMembers = members.filter(m => !m.user.bot);
 
-        const userList = [];
+        const allData = await db.all();
+        const amountMap = new Map();
+        const countMap = new Map();
 
-        for (const [id, member] of nonBotMembers) {
-            const amount = (await db.get(`user_${id}.totalAmount`)) || 0;
-            userList.push({ id, amount });
+        for (const item of allData) {
+            const keyStr = item.id || item.key || '';
+            const val = item.value !== undefined ? item.value : item.data;
+
+            if (typeof keyStr === 'string' && keyStr.startsWith('user_')) {
+                const parts = keyStr.split('.');
+                const uid = parts[0].replace('user_', '');
+                const prop = parts[1];
+
+                if (prop === 'totalAmount') amountMap.set(uid, Number(val) || 0);
+                if (prop === 'buyCount') countMap.set(uid, Number(val) || 0);
+            }
         }
 
-        // TOTAL VOLUME 기준 내림차순 정렬
-        userList.sort((a, b) => b.amount - a.amount);
+        const userList = [];
+        for (const [id] of nonBotMembers) {
+            const amount = amountMap.get(id) || 0;
+            const count = countMap.get(id) || 0;
+            userList.push({ id, amount, count });
+        }
 
-        // 순위 계산 (1부터 시작)
+        userList.sort((a, b) => {
+            if (b.amount !== a.amount) return b.amount - a.amount;
+            return b.count - a.count;
+        });
+
         const rankIndex = userList.findIndex(u => u.id === targetUserId);
-        return rankIndex !== -1 ? `#${rankIndex + 1}` : '#-';
+        return rankIndex !== -1 ? `#${rankIndex + 1}` : '#1';
     } catch (e) {
         console.error('랭킹 집계 오류:', e);
-        return '#-';
+        return '#1';
     }
 }
 
@@ -72,7 +90,6 @@ client.once('ready', async () => {
     await loadOnlineFont();
     console.log(`봇 접속 성공: ${client.user.tag}`);
 
-    // /지급완료 슬래시 명령어 등록
     const commands = [
         new SlashCommandBuilder()
             .setName('지급완료')
@@ -97,7 +114,6 @@ client.once('ready', async () => {
     }
 });
 
-// /지급완료 상호작용 처리
 client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
 
@@ -142,14 +158,12 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-// 일반 $ 명령어 처리
 client.on('messageCreate', async message => {
     if (message.author.bot || !message.content.startsWith('$')) return;
 
     const args = message.content.slice(1).trim().split(/ +/);
     const command = args.shift();
 
-    // 1. $유저정보변경로그 (채널ID) - 관리자 전용
     if (command === '유저정보변경로그') {
         if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
             return message.reply('❌ 이 명령어를 사용할 수 있는 권한이 없습니다. (관리자 전용)');
@@ -171,7 +185,6 @@ client.on('messageCreate', async message => {
         }
     }
 
-    // 2. $유저구매횟수 (변경할 횟수) (@유저) - 관리자 전용
     if (command === '유저구매횟수') {
         if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
             return message.reply('❌ 이 명령어를 사용할 수 있는 권한이 없습니다. (관리자 전용)');
@@ -211,7 +224,6 @@ client.on('messageCreate', async message => {
         }
     }
 
-    // 3. $유저구매금액 (변경할 금액) (@유저) - 관리자 전용
     if (command === '유저구매금액') {
         if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
             return message.reply('❌ 이 명령어를 사용할 수 있는 권한이 없습니다. (관리자 전용)');
@@ -256,7 +268,6 @@ client.on('messageCreate', async message => {
         }
     }
 
-    // 4. $정보 (@유저 - 생략 시 본인)
     if (command === '정보') {
         const targetUser = message.mentions.users.first() || message.author;
         let targetMember;
@@ -271,7 +282,6 @@ client.on('messageCreate', async message => {
         const buyCount = (await db.get(`user_${targetUser.id}.buyCount`)) || 0;
         const biggestDeal = (await db.get(`user_${targetUser.id}.biggestDeal`)) || 0;
         
-        // 서버 전체 유저(봇 제외) 기준 랭킹 계산
         const userRank = await getUserRank(message.guild, targetUser.id);
 
         const joinedAt = targetMember?.joinedAt 
@@ -281,13 +291,11 @@ client.on('messageCreate', async message => {
         const canvas = createCanvas(800, 420);
         const ctx = canvas.getContext('2d');
 
-        // 배경
         ctx.fillStyle = '#0F0F12';
         ctx.beginPath();
         ctx.roundRect(0, 0, 800, 420, 20);
         ctx.fill();
 
-        // 아바타
         const avatarURL = targetUser.displayAvatarURL({ extension: 'png', size: 128 });
         try {
             const avatar = await loadImage(avatarURL);
@@ -300,17 +308,14 @@ client.on('messageCreate', async message => {
             ctx.restore();
         } catch (e) { }
 
-        // 유저명
         ctx.fillStyle = '#FFFFFF';
         ctx.font = '30px CustomFont';
         ctx.fillText(`${targetUser.username}`, 160, 95);
 
-        // 가입일
         ctx.fillStyle = '#72767D';
         ctx.font = '14px CustomFont';
         ctx.fillText(`JOINED: ${joinedAt}`, 600, 80);
 
-        // TOTAL VOLUME
         ctx.fillStyle = '#18181C';
         ctx.beginPath();
         ctx.roundRect(40, 160, 350, 170, 15);
@@ -332,7 +337,6 @@ client.on('messageCreate', async message => {
         ctx.font = '16px CustomFont';
         ctx.fillText(`₩${Number(biggestDeal).toLocaleString()}`, 65, 312);
 
-        // TOTAL DEALS & RANK
         ctx.fillStyle = '#18181C';
         ctx.beginPath();
         ctx.roundRect(410, 160, 350, 170, 15);
@@ -354,7 +358,6 @@ client.on('messageCreate', async message => {
         ctx.font = '18px CustomFont';
         ctx.fillText(`${userRank}`, 435, 312);
 
-        // 하단 문구
         ctx.fillStyle = '#EE4B2B';
         ctx.font = '12px CustomFont';
         ctx.fillText('* Data recorded starting from 2026.09.06', 40, 370);
