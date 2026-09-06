@@ -1,406 +1,169 @@
 import os
-from PIL import Image, ImageDraw, ImageFont
-
-W, H = 1536, 808
-BASE = os.path.dirname(os.path.abspath(__file__))
-
-FONT_REG = os.path.join(BASE, "fonts", "Pretendard-Regular.ttf")
-FONT_BOLD = os.path.join(BASE, "fonts", "Pretendard-Bold.ttf")
+import sqlite3
+import discord
+from discord.ext import commands
+from image_generator import make_info, ROLE_COLORS  # 기존 image_generator.py 모듈 불러오기
 
 # ──────────────────────────────────────────
-# 역할별 색상 매핑 테이블
+# 봇 기본 설정
 # ──────────────────────────────────────────
-ROLE_COLORS = {
-    "서버 오너": "#FF79C6",
-    "서버 관리자": "#F58FBD",
-    "판매자": "#50FA7B",
-    "회원": "#A3E635",
-    "Crystal": "#C084FC",
-    "Emerald": "#34D399",
-    "Ruby": "#F87171",
-    "Gold": "#FACC15",
-    "Silver": "#FB923C",
-    "Bronze": "#D97706"
-}
+INTENTS = discord.Intents.default()
+INTENTS.message_content = True
+INTENTS.members = True
 
-DEFAULT_PINK = "#F58FBD"
-WHITE = "#F2EDF0"
-GRAY = "#9B969B"
-DARK_GRAY = "#656166"
-CARD = "#171719"
-LINE = "#353236"
+bot = commands.Bot(command_prefix="$", intents=INTENTS)
 
+# ──────────────────────────────────────────
+# SQLite DB 설정 (거래/통계/순위 관리)
+# ──────────────────────────────────────────
+DB_PATH = "bot_database.db"
 
-def F(size, bold=False):
-    font_path = FONT_BOLD if bold else FONT_REG
-    if os.path.exists(font_path):
-        return ImageFont.truetype(font_path, size)
-    return ImageFont.load_default()
-
-
-def text(draw, xy, value, size, color=WHITE, bold=False):
-    draw.text(
-        xy,
-        str(value),
-        font=F(size, bold),
-        fill=color
-    )
-
-
-def rounded(draw, xy, radius, fill, outline=None, width=1):
-    draw.rounded_rectangle(
-        xy,
-        radius=radius,
-        fill=fill,
-        outline=outline,
-        width=width
-    )
-
-
-def make_info(
-    username,
-    discriminator,
-    joined,
-    role,
-    total_trade,
-    trade_count,
-    max_trade,
-    invites,
-    rank,
-    avatar=None
-):
-    # 역할에 따른 테마 색상 자동 결정
-    theme_color = ROLE_COLORS.get(role, DEFAULT_PINK)
-
-    img = Image.new("RGB", (W, H), "#0D0D0F")
-    draw = ImageDraw.Draw(img)
-
-    # ==========================================
-    # 전체 테두리
-    # ==========================================
-    rounded(
-        draw,
-        (23, 40, 1513, 767),
-        31,
-        "#101012",
-        "#543747",
-        2
-    )
-
-    # ==========================================
-    # 프로필 이미지
-    # ==========================================
-    if avatar and os.path.exists(avatar):
-        av = Image.open(avatar).convert("RGB")
-        av = av.resize((205, 205))
-
-        mask = Image.new("L", (205, 205), 0)
-        md = ImageDraw.Draw(mask)
-        md.ellipse((0, 0, 205, 205), fill=255)
-
-        img.paste(av, (88, 113), mask)
-
-    # 테마 색상 테두리
-    draw.ellipse(
-        (78, 103, 303, 328),
-        outline=theme_color,
-        width=4
-    )
-
-    # 온라인 표시
-    draw.ellipse(
-        (249, 270, 294, 315),
-        fill=theme_color,
-        outline="#101012",
-        width=6
-    )
-
-    # ==========================================
-    # 사용자 이름 & 역할
-    # ==========================================
-    text(
-        draw,
-        (352, 127),
-        username,
-        64,
-        "#F5EAF0",
-        True
-    )
-
-    text(
-        draw,
-        (353, 209),
-        discriminator,
-        31,
-        DARK_GRAY
-    )
-
-    # 역할 텍스트 (깨짐 방지를 위해 특수문자 왕관 제거 후 테마색 적용)
-    text(
-        draw,
-        (352, 266),
-        role,
-        30,
-        theme_color,
-        True
-    )
-
-    # ==========================================
-    # 가입일
-    # ==========================================
-    # 깨지는 ▣ 대신 호환되는 ■ 사용
-    text(
-        draw,
-        (772, 195),
-        "■",
-        28,
-        "#AAA5AA"
-    )
-
-    text(
-        draw,
-        (825, 193),
-        "가입일",
-        24,
-        "#AAA5AA"
-    )
-
-    text(
-        draw,
-        (825, 231),
-        joined,
-        29,
-        WHITE
-    )
-
-    # 세로선
-    draw.line(
-        (1039, 166, 1039, 273),
-        fill="#3A373A",
-        width=2
-    )
-
-    # ==========================================
-    # 서버 정보
-    # ==========================================
-    text(
-        draw,
-        (1100, 190),
-        "●",
-        28,
-        "#B9B5B9"
-    )
-
-    text(
-        draw,
-        (1150, 184),
-        "서버",
-        24,
-        "#AAA5AA"
-    )
-
-    text(
-        draw,
-        (1150, 220),
-        "SODDU DISCORD SERVER",
-        17,
-        WHITE,
-        True
-    )
-
-    text(
-        draw,
-        (1449, 216),
-        ">",
-        32,
-        theme_color,
-        True
-    )
-
-    text(
-        draw,
-        (1150, 257),
-        "S I N C E  2 0 2 0",
-        12,
-        "#644354"
-    )
-
-    # ==========================================
-    # 통계 카드 배경
-    # ==========================================
-    card_y1 = 354
-    card_y2 = 650
-
-    cards = [
-        (56, card_y1, 400, card_y2),
-        (418, card_y1, 760, card_y2),
-        (778, card_y1, 1120, card_y2),
-        (1138, card_y1, 1480, card_y2)
-    ]
-
-    for box in cards:
-        rounded(
-            draw,
-            box,
-            24,
-            CARD,
-            "#303033",
-            2
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            user_id TEXT PRIMARY KEY,
+            total_trade INTEGER DEFAULT 0,
+            trade_count INTEGER DEFAULT 0,
+            max_trade INTEGER DEFAULT 0,
+            invites INTEGER DEFAULT 0
         )
+    ''')
+    conn.commit()
+    conn.close()
 
-    # ==========================================
-    # 1번 카드 - 총 거래량
-    # ==========================================
-    text(draw, (94, 396), "◆", 28, theme_color)
-    text(draw, (140, 403), "총 거래량", 25, "#C1BCC1")
+init_db()
 
-    text(
-        draw,
-        (95, 465),
-        total_trade,
-        47,
-        WHITE,
-        True
+def get_user_data(user_id):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT total_trade, trade_count, max_trade, invites FROM users WHERE user_id = ?", (str(user_id),))
+    row = cursor.fetchone()
+    conn.close()
+    
+    if row:
+        return {
+            "total_trade": row[0],
+            "trade_count": row[1],
+            "max_trade": row[2],
+            "invites": row[3]
+        }
+    return {"total_trade": 0, "trade_count": 0, "max_trade": 0, "invites": 0}
+
+def get_user_rank(user_id):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT user_id, RANK() OVER (ORDER BY total_trade DESC) as rank
+        FROM users
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    
+    for uid, rank in rows:
+        if uid == str(user_id):
+            return f"#{rank}"
+    return "#1"
+
+def update_user_trade(user_id, amount):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    data = get_user_data(user_id)
+    new_total = data["total_trade"] + amount
+    new_count = data["trade_count"] + 1
+    new_max = max(data["max_trade"], amount)
+    
+    cursor.execute('''
+        INSERT INTO users (user_id, total_trade, trade_count, max_trade)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET
+            total_trade = ?,
+            trade_count = ?,
+            max_trade = ?
+    ''', (str(user_id), new_total, new_count, new_max, new_total, new_count, new_max))
+    
+    conn.commit()
+    conn.close()
+
+# ──────────────────────────────────────────
+# 디스코드 이벤트 & 명령어
+# ──────────────────────────────────────────
+
+@bot.event
+async def on_ready():
+    print(f"Logged in as {bot.user.name} (ID: {bot.user.id})")
+
+# [$정보 명령어]
+@bot.command(name="정보")
+async def info_command(ctx, member: discord.Member = None):
+    target = member or ctx.author
+    
+    # 1. 디스코드 프로필 이미지 다운로드
+    avatar_filename = f"avatar_{target.id}.png"
+    await target.display_avatar.save(avatar_filename)
+    
+    # 2. 역할 파악
+    target_role = "회원"
+    for r in target.roles:
+        if r.name in ROLE_COLORS:
+            target_role = r.name
+            break
+
+    # 3. DB 통계 데이터 조회
+    user_data = get_user_data(target.id)
+    rank = get_user_rank(target.id)
+    
+    # 4. 이미지 생성
+    joined_date = target.joined_at.strftime("%Y. %m. %d") if target.joined_at else "2026. 03. 18"
+    
+    img = make_info(
+        username=target.name,
+        discriminator=f"#{target.discriminator}" if target.discriminator != "0" else "#0001",
+        joined=joined_date,
+        role=target_role,
+        total_trade=f"₩{user_data['total_trade']:,}",
+        trade_count=str(user_data["trade_count"]),
+        max_trade=f"₩{user_data['max_trade']:,}",
+        invites=str(user_data["invites"]),
+        rank=rank,
+        avatar=avatar_filename
     )
+    
+    # 5. 임시 이미지 저장 후 전송
+    output_filename = f"profile_{target.id}.png"
+    img.save(output_filename)
+    
+    await ctx.send(file=discord.File(output_filename))
+    
+    # 임시 파일 정리
+    if os.path.exists(avatar_filename):
+        os.remove(avatar_filename)
+    if os.path.exists(output_filename):
+        os.remove(output_filename)
 
-    draw.line(
-        (95, 535, 360, 535),
-        fill=LINE,
-        width=2
-    )
+# [$지급완료 명령어] 관리자용: 구매 시 역할 지급 + 금액 DB 반영
+@bot.command(name="지급완료")
+@commands.has_permissions(administrator=True)
+async def grant_trade(ctx, member: discord.Member, amount: int, role_name: str = None):
+    # 1. DB 거래 금액 및 횟수 기록
+    update_user_trade(member.id, amount)
+    
+    # 2. 역할 부여 (역할명이 지정된 경우)
+    assigned_role_msg = ""
+    if role_name:
+        role = discord.utils.get(ctx.guild.roles, name=role_name)
+        if role:
+            await member.add_roles(role)
+            assigned_role_msg = f" 및 **{role.name}** 역할 부여 완료"
+        else:
+            assigned_role_msg = f" (주의: '{role_name}' 역할을 찾을 수 없음)"
 
-    text(draw, (95, 558), "최대 거래 금액", 20, "#AAA5AA")
+    await ctx.send(f"✅ {member.mention}님에게 **₩{amount:,}원** 거래 기록 완료{assigned_role_msg}!")
 
-    text(
-        draw,
-        (95, 593),
-        max_trade,
-        27,
-        WHITE,
-        True
-    )
-
-    # ==========================================
-    # 2번 카드 - 거래 횟수
-    # ==========================================
-    text(draw, (456, 396), "■", 28, theme_color)
-    text(draw, (500, 403), "총 거래 횟수", 25, "#C1BCC1")
-
-    text(
-        draw,
-        (456, 466),
-        trade_count,
-        47,
-        WHITE,
-        True
-    )
-
-    # ==========================================
-    # 3번 카드 - 역할
-    # ==========================================
-    text(draw, (816, 396), "★", 28, theme_color)
-    text(draw, (860, 403), "역할", 25, "#C1BCC1")
-
-    text(
-        draw,
-        (817, 479),
-        role,
-        31,
-        theme_color,
-        True
-    )
-
-    # ==========================================
-    # 4번 카드 - 초대
-    # ==========================================
-    text(draw, (1177, 396), "●", 28, theme_color)
-    text(draw, (1220, 403), "초대 횟수", 25, "#C1BCC1")
-
-    text(
-        draw,
-        (1177, 466),
-        invites,
-        47,
-        WHITE,
-        True
-    )
-
-    draw.line(
-        (1177, 535, 1440, 535),
-        fill=LINE,
-        width=2
-    )
-
-    text(
-        draw,
-        (1177, 558),
-        "서버 순위",
-        20,
-        "#AAA5AA"
-    )
-
-    text(
-        draw,
-        (1378, 549),
-        rank,
-        42,
-        theme_color,
-        True
-    )
-
-    # ==========================================
-    # 하단
-    # ==========================================
-    text(
-        draw,
-        (66, 703),
-        "i",
-        22,
-        theme_color,
-        True
-    )
-
-    text(
-        draw,
-        (95, 707),
-        "2026.09.06 이후의 데이터만 기록됩니다.",
-        19,
-        "#AAA5AA"
-    )
-
-    draw.line(
-        (704, 718, 1141, 718),
-        fill=LINE,
-        width=2
-    )
-
-    text(
-        draw,
-        (1172, 708),
-        "S O D D U  D I S C O R D  S E R V E R",
-        12,
-        "#634353",
-        True
-    )
-
-    return img
-
-
-# ==========================================
-# 테스트
-# ==========================================
-if __name__ == "__main__":
-    image = make_info(
-        username="lawf_luna",
-        discriminator="#0001",
-        joined="2026. 3. 18",
-        role="서버 관리자",
-        total_trade="₩0",
-        trade_count="0",
-        max_trade="₩0",
-        invites="0",
-        rank="#1",
-        avatar="avatar.png"
-    )
-
-    image.save("user_info.png")
+# ──────────────────────────────────────────
+# 봇 실행
+# ──────────────────────────────────────────
+TOKEN = "여기에_디스코드_봇_토큰을_넣으세요"
+bot.run(TOKEN)
