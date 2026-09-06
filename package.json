@@ -1,15 +1,8 @@
 {
-  "name": "discord-bot",
-  "version": "1.0.0",
-  "description": "Discord Ticket & Log Bot",
-  "main": "index.js",
-  "scripts": {
-    "start": "node index.js"
-  },
   "dependencies": {
-    "@napi-rs/canvas": "^0.1.44",
-    "better-sqlite3": "^11.8.0",
-    "discord.js": "^14.14.1",
+    "canvas": "^3.2.3",
+    "discord.js": "^14.18.0",
+    "dotenv": "^16.4.7",
     "quick.db": "^9.1.7"
   }
 }
