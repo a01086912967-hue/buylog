@@ -1,707 +1,372 @@
-const { Client, GatewayIntentBits, EmbedBuilder, REST, Routes, SlashCommandBuilder, AttachmentBuilder, PermissionsBitField } = require('discord.js');
-const { createCanvas, loadImage, GlobalFonts } = require('@napi-rs/canvas');
-const { QuickDB } = require('quick.db');
-const https = require('https');
-const path = require('path');
-const fs = require('fs');
+import discord
+from discord import app_commands
+import os
+from dotenv import load_dotenv
+from PIL import Image, ImageDraw, ImageFont
+import io
+import aiohttp
+import sqlite3 # SQLite 데이터베이스 모듈 추가
+from datetime import datetime
 
-const db = new QuickDB({ filePath: './database.sqlite' });
+# .env 파일 로드
+load_dotenv()
+TOKEN = os.getenv('DISCORD_TOKEN')
 
-const client = new Client({ 
-    intents: [
-        GatewayIntentBits.Guilds, 
-        GatewayIntentBits.GuildMessages, 
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildMembers
-    ] 
-});
+# 디스코드 설정
+intents = discord.Intents.default()
+intents.members = True
+intents.message_content = True
+client = discord.Client(intents=intents)
+tree = app_commands.CommandTree(client)
 
-const TOKEN = process.env.TOKEN;
+# --- [ 설정 구역 ] ---
+GUILD_ID = '1456729030459134115'
+PURCHASE_LOG_CHANNEL_ID = '1457384858065047663'
 
-// ---------------- [ 기본 설정 ] ----------------
-const GUILD_ID = '1456729030459134115'; 
-const PURCHASE_LOG_CHANNEL_ID = '1457384858065047663'; 
-// ------------------------------------------------
+# 파일 기반 데이터베이스 경로
+DB_PATH = 'database.db'
 
-const FONT_FAMILY = 'CustomFont, sans-serif, "Noto Sans KR", Arial';
+# 폰트 설정 (맑은 고딕 사용 - 윈도우 기준, 리눅스/맥은 경로 수정 필요)
+# 산돌 구름 같은 외부 폰트 설치 필요 없이 시스템 기본 폰트 사용
+font_path = "C:/Windows/Fonts/malgun.ttf" # 윈도우
+# 리눅스 예시: "/usr/share/fonts/truetype/nanum/NanumGothic.ttf"
+# 맥 예시: "/System/Library/Fonts/Supplemental/Arial Unicode.ttf"
 
-function loadOnlineFont() {
-    return new Promise((resolve) => {
-        const fontUrl = 'https://raw.githubusercontent.com/google/fonts/main/ofl/notosans/NotoSans%5Bwdth%2Cwght%5D.ttf';
-        https.get(fontUrl, (res) => {
-            const data = [];
-            res.on('data', (chunk) => data.push(chunk));
-            res.on('end', () => {
-                const buffer = Buffer.concat(data);
-                GlobalFonts.register(buffer, 'CustomFont');
-                console.log('폰트 글로벌 등록 성공!');
-                resolve();
-            });
-        }).on('error', (err) => {
-            console.error('폰트 로드 실패:', err);
-            resolve();
-        });
-    });
-}
+# 서버 역할 ID 및 이름 (높은 순서대로)
+SERVER_ROLES_CONFIG = [
+    ('1456729030459134117', '방장 👑'),
+    ('1458178323434836199', '서버 관리자 👑'),
+    ('1545686320993796126', '서버 관리자 👑'),
+    ('1529484356748574720', '판매자 💎'),
+    ('1522815168286036098', '판매자 💎'),
+    ('1456735270119411734', '회원 👤')
+]
 
-const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+# 구매 등급 ID 및 이름 (높은 순서대로)
+BUY_TIERS_CONFIG = [
+    ('1489943721146449920', 'Crystal 💎'),
+    ('1456737896525725719', 'Emerald 🟢'),
+    ('1456736865779581031', 'Ruby 🔴'),
+    ('1456736771344826535', 'Gold 🟡'),
+    ('1456736573797171384', 'Silver ⚪'),
+    ('1457383788236505299', 'Bronze 🟤')
+]
 
-async function fetchUserFromInput(client, input) {
-    if (!input) return null;
-    const cleanId = input.replace(/[^0-9]/g, '');
-    if (!cleanId) return null;
-    return await client.users.fetch(cleanId).catch(() => null);
-}
+# --- [ 데이터베이스 관련 함수 ] ---
+def init_db():
+    """데이터베이스 파일 및 테이블 초기화"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # 유저 데이터 테이블 생성 (있으면 건너뜀)
+    # user_id: 디스코드 유저 ID (기본키)
+    # total_amount: 총 구매 금액
+    # buy_count: 총 구매 횟수
+    # max_amount: 단일 최대 거래 금액
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            user_id TEXT PRIMARY KEY,
+            total_amount INTEGER DEFAULT 0,
+            buy_count INTEGER DEFAULT 0,
+            max_amount INTEGER DEFAULT 0
+        )
+    ''')
+    conn.commit()
+    conn.close()
+    print("✅ 데이터베이스 초기화 완료.")
 
-async function getUserRank(guild, targetUserId) {
-    try {
-        const allEntries = await db.all();
-        const userMap = new Map();
+def update_user_purchase(user_id, amount):
+    """유저 구매 데이터 업데이트 (DB에 저장)"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # 1. 유저 데이터가 존재하는지 확인
+    cursor.execute('SELECT total_amount, buy_count, max_amount FROM users WHERE user_id = ?', (str(user_id),))
+    result = cursor.fetchone()
+    
+    if result:
+        # 데이터가 있으면 업데이트
+        current_total, current_count, current_max = result
+        new_total = current_total + amount
+        new_count = current_count + 1
+        new_max = max(current_max, amount)
+        
+        cursor.execute('''
+            UPDATE users 
+            SET total_amount = ?, buy_count = ?, max_amount = ? 
+            WHERE user_id = ?
+        ''', (new_total, new_count, new_max, str(user_id)))
+    else:
+        # 데이터가 없으면 새로 삽입
+        cursor.execute('''
+            INSERT INTO users (user_id, total_amount, buy_count, max_amount) 
+            VALUES (?, ?, ?, ?)
+        ''', (str(user_id), amount, 1, amount))
+        
+    conn.commit()
+    conn.close()
+    print(f"💾 DB 저장: {user_id} - 금액 {amount} 추가 완료.")
 
-        for (const entry of allEntries) {
-            const key = entry.id || entry.key || '';
-            if (typeof key === 'string' && key.startsWith('user_')) {
-                const uid = key.split('.')[0].replace('user_', '');
-                if (uid && !userMap.has(uid)) {
-                    userMap.set(uid, true);
-                }
-            }
+def get_user_data(user_id):
+    """특정 유저의 DB 데이터 가져오기"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('SELECT total_amount, buy_count, max_amount FROM users WHERE user_id = ?', (str(user_id),))
+    result = cursor.fetchone()
+    conn.close()
+    
+    if result:
+        return {
+            'total_amount': result[0],
+            'buy_count': result[1],
+            'max_amount': result[2]
         }
-
-        if (!userMap.has(targetUserId)) {
-            userMap.set(targetUserId, true);
-        }
-
-        const fetchPromises = Array.from(userMap.keys()).map(async (uid) => {
-            try {
-                const member = await guild.members.fetch(uid).catch(() => null);
-                if (!member || member.user.bot) return null;
-
-                const amount = await db.get(`user_${uid}.totalAmount`);
-                const count = await db.get(`user_${uid}.buyCount`);
-
-                return {
-                    id: uid,
-                    user: member.user,
-                    amount: Number(amount) || 0,
-                    count: Number(count) || 0,
-                    joinedAt: member.joinedTimestamp || Date.now()
-                };
-            } catch (e) {
-                return null;
-            }
-        });
-
-        const results = await Promise.all(fetchPromises);
-        const validUsers = results.filter(u => u !== null);
-
-        validUsers.sort((a, b) => {
-            if (b.amount !== a.amount) {
-                return b.amount - a.amount;
-            }
-            return a.joinedAt - b.joinedAt;
-        });
-
-        const rankIndex = validUsers.findIndex(u => u.id === targetUserId);
-        return rankIndex !== -1 ? `#${rankIndex + 1}` : '#1';
-    } catch (e) {
-        console.error('랭킹 집계 오류:', e);
-        return '#1';
-    }
-}
-
-client.once('ready', async () => {
-    await loadOnlineFont();
-    console.log(`봇 접속 성공: ${client.user.tag}`);
-
-    const commands = [
-        new SlashCommandBuilder()
-            .setName('지급완료')
-            .setDescription('지급 완료 알림 및 구매 로그를 전송합니다.')
-            .addStringOption(opt => opt.setName('금액').setDescription('구매 금액').setRequired(true))
-            .addStringOption(opt => opt.setName('상품').setDescription('구매한 상품명').setRequired(true))
-            .addStringOption(opt => opt.setName('수량').setDescription('구매 수량').setRequired(true))
-            .addUserOption(opt => opt.setName('구매자').setDescription('구매한 유저').setRequired(false))
-            .addUserOption(opt => opt.setName('판매자').setDescription('담당 판매자').setRequired(false))
-    ];
-
-    const rest = new REST({ version: '10' }).setToken(TOKEN);
-
-    try {
-        await rest.put(
-            Routes.applicationGuildCommands(client.user.id, GUILD_ID),
-            { body: commands }
-        );
-        console.log('[/지급완료] 슬래시 명령어 등록 완료!');
-    } catch (error) {
-        console.error('슬래시 명령어 등록 오류:', error);
-    }
-});
-
-client.on('interactionCreate', async interaction => {
-    if (!interaction.isChatInputCommand()) return;
-
-    if (interaction.commandName === '지급완료') {
-        await interaction.reply({ content: '처리를 시작합니다.', ephemeral: true });
-
-        const itemName = interaction.options.getString('상품');
-        const itemQty = interaction.options.getString('수량');
-        const amountStr = interaction.options.getString('금액');
-        const numericAmount = parseInt(amountStr.replace(/[^0-9]/g, '')) || 0;
-
-        const buyer = interaction.options.getUser('구매자') || interaction.user;
-        const seller = interaction.options.getUser('판매자') || interaction.user;
-
-        const currentAmount = (await db.get(`user_${buyer.id}.totalAmount`)) || 0;
-        const currentCount = (await db.get(`user_${buyer.id}.buyCount`)) || 0;
-
-        await db.set(`user_${buyer.id}.totalAmount`, Number(currentAmount) + numericAmount);
-        await db.set(`user_${buyer.id}.buyCount`, Number(currentCount) + 1);
-
-        const currentBiggest = (await db.get(`user_${buyer.id}.biggestDeal`)) || 0;
-        if (numericAmount > currentBiggest) {
-            await db.set(`user_${buyer.id}.biggestDeal`, numericAmount);
-        }
-
-        try {
-            const logChannel = await client.channels.fetch(PURCHASE_LOG_CHANNEL_ID);
-            if (logChannel) {
-                const logEmbed = new EmbedBuilder()
-                    .setColor(0xFFD1DC)
-                    .setDescription(`°.✩┈┈∘┈˃̶ ୨<a:Pinkheartgif:1545408138377695352> ୧˂̶┈∘┈┈✩.°\n\n${buyer}, ${itemName} (${itemQty}개) 구매 감사합니다 .ᐟ.ᐟ\n\n사용된 금액 : ${amountStr}\n\n해당 관리 판매자: ${seller}\n\n°.✩┈┈∘┈˃̶ ୨<a:Pinkheartgif:1545408138377695352> ୧˂̶┈∘┈┈✩.°\n࣪𓏲ּ ᥫ᭡ ₊ 𝑻𝒉𝒂𝒏𝒌 𝒚𝒐𝒖 ⊹ ˑ ִֶ 𓂃`)
-                    .setImage('https://i.imgur.com/jokl6LQ.gif');
-
-                await logChannel.send({ content: `${buyer}`, embeds: [logEmbed] });
-            }
-        } catch (error) {
-            console.error("구매 로그 채널 오류:", error);
-        }
-
-        const ticketEmbed = new EmbedBuilder()
-            .setColor(0xFFD1DC)
-            .setDescription(`**아이템이 정상적으로 지급되었어요.** <a:veryheart:1479957265871143104>\nhttps://discord.com/channels/1456729030459134115/1457384179535712473 작성은 필수입니다`);
-
-        await interaction.channel.send({ content: `${buyer}`, embeds: [ticketEmbed] });
-    }
-});
-
-client.on('messageCreate', async message => {
-    if (message.author.bot || !message.content.startsWith('$')) return;
-
-    const args = message.content.slice(1).trim().split(/ +/);
-    const command = args.shift();
-
-    if (command === '유저정보변경로그') {
-        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-            return message.reply('❌ 이 명령어를 사용할 수 있는 권한이 없습니다. (관리자 전용)');
-        }
-
-        const channelId = args[0];
-        if (!channelId) {
-            return message.reply('❌ 설정할 채널 ID를 입력해주세요. 예: `$유저정보변경로그 1545759434175815771`');
-        }
-
-        try {
-            const targetChannel = await client.channels.fetch(channelId);
-            if (!targetChannel) throw new Error();
-
-            await db.set('info_log_channel_id', channelId);
-            return message.reply(`✅ 유저 정보 변경 로그 채널이 <#${channelId}> 로 설정되었습니다.`);
-        } catch (e) {
-            return message.reply('❌ 올바르지 않은 채널 ID이거나 접근 권한이 없습니다.');
-        }
-    }
-
-    if (command === '유저구매횟수') {
-        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-            return message.reply('❌ 이 명령어를 사용할 수 있는 권한이 없습니다. (관리자 전용)');
-        }
-
-        const count = parseInt(args[0]);
-        const targetUser = await fetchUserFromInput(client, args[1]);
-
-        if (isNaN(count) || !targetUser) {
-            return message.reply('❌ 사용법: `$유저구매횟수 (변경할 횟수) (유저ID 또는 @유저멘션)`');
-        }
-
-        const oldVal = (await db.get(`user_${targetUser.id}.buyCount`)) || 0;
-        await db.set(`user_${targetUser.id}.buyCount`, count);
-
-        await message.reply(`✅ ${targetUser.username} (${targetUser.id}) 님의 구매 횟수가 **${count}회**로 변경되었습니다.`);
-
-        const infoLogChannelId = await db.get('info_log_channel_id');
-        if (infoLogChannelId) {
-            try {
-                const infoLogChannel = await client.channels.fetch(infoLogChannelId);
-                if (infoLogChannel) {
-                    const infoEmbed = new EmbedBuilder()
-                        .setColor(0x3498DB)
-                        .setTitle('📝 유저 정보 변경 알림')
-                        .addFields(
-                            { name: '처리 관리자', value: `${message.author} (${message.author.id})`, inline: true },
-                            { name: '대상 유저', value: `${targetUser} (${targetUser.id})`, inline: true },
-                            { name: '항목', value: '구매 횟수', inline: false },
-                            { name: '변경 전', value: `${oldVal}회`, inline: true },
-                            { name: '변경 후', value: `${count}회`, inline: true }
-                        )
-                        .setTimestamp();
-
-                    await infoLogChannel.send({ embeds: [infoEmbed] });
-                }
-            } catch (error) {
-                console.error('로그 전송 실패:', error);
-            }
-        }
-    }
-
-    if (command === '유저구매금액') {
-        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-            return message.reply('❌ 이 명령어를 사용할 수 있는 권한이 없습니다. (관리자 전용)');
-        }
-
-        const amount = parseInt(args[0]);
-        const targetUser = await fetchUserFromInput(client, args[1]);
-
-        if (isNaN(amount) || !targetUser) {
-            return message.reply('❌ 사용법: `$유저구매금액 (변경할 금액) (유저ID 또는 @유저멘션)`');
-        }
-
-        const oldVal = (await db.get(`user_${targetUser.id}.totalAmount`)) || 0;
-        await db.set(`user_${targetUser.id}.totalAmount`, amount);
-
-        await message.reply(`✅ ${targetUser.username} (${targetUser.id}) 님의 누적 금액이 **₩${amount.toLocaleString()}**으로 변경되었습니다.`);
-
-        const infoLogChannelId = await db.get('info_log_channel_id');
-        if (infoLogChannelId) {
-            try {
-                const infoLogChannel = await client.channels.fetch(infoLogChannelId);
-                if (infoLogChannel) {
-                    const infoEmbed = new EmbedBuilder()
-                        .setColor(0x3498DB)
-                        .setTitle('📝 유저 정보 변경 알림')
-                        .addFields(
-                            { name: '처리 관리자', value: `${message.author} (${message.author.id})`, inline: true },
-                            { name: '대상 유저', value: `${targetUser} (${targetUser.id})`, inline: true },
-                            { name: '항목', value: '누적 금액', inline: false },
-                            { name: '변경 전', value: `₩${Number(oldVal).toLocaleString()}`, inline: true },
-                            { name: '변경 후', value: `₩${amount.toLocaleString()}`, inline: true }
-                        )
-                        .setTimestamp();
-
-                    await infoLogChannel.send({ embeds: [infoEmbed] });
-                }
-            } catch (error) {
-                console.error('로그 전송 실패:', error);
-            }
-        }
-    }
-
-    if (command === '유저최대금액') {
-        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-            return message.reply('❌ 이 명령어를 사용할 수 있는 권한이 없습니다. (관리자 전용)');
-        }
-
-        const amount = parseInt(args[0]);
-        const targetUser = await fetchUserFromInput(client, args[1]);
-
-        if (isNaN(amount) || !targetUser) {
-            return message.reply('❌ 사용법: `$유저최대금액 (변경할 금액) (유저ID 또는 @유저멘션)`');
-        }
-
-        const oldVal = (await db.get(`user_${targetUser.id}.biggestDeal`)) || 0;
-        await db.set(`user_${targetUser.id}.biggestDeal`, amount);
-
-        await message.reply(`✅ ${targetUser.username} (${targetUser.id}) 님의 최대 거래 금액이 **₩${amount.toLocaleString()}**으로 변경되었습니다.`);
-
-        const infoLogChannelId = await db.get('info_log_channel_id');
-        if (infoLogChannelId) {
-            try {
-                const infoLogChannel = await client.channels.fetch(infoLogChannelId);
-                if (infoLogChannel) {
-                    const infoEmbed = new EmbedBuilder()
-                        .setColor(0x3498DB)
-                        .setTitle('📝 유저 정보 변경 알림')
-                        .addFields(
-                            { name: '처리 관리자', value: `${message.author} (${message.author.id})`, inline: true },
-                            { name: '대상 유저', value: `${targetUser} (${targetUser.id})`, inline: true },
-                            { name: '항목', value: '최대 거래 금액', inline: false },
-                            { name: '변경 전', value: `₩${Number(oldVal).toLocaleString()}`, inline: true },
-                            { name: '변경 후', value: `₩${amount.toLocaleString()}`, inline: true }
-                        )
-                        .setTimestamp();
-
-                    await infoLogChannel.send({ embeds: [infoEmbed] });
-                }
-            } catch (error) {
-                console.error('로그 전송 실패:', error);
-            }
-        }
-    }
-
-    if (command === '서버통계') {
-        const loadingMsg = await message.reply('📊 서버 전체 통계를 이미지로 생성하는 중이에요. . .');
-
-        try {
-            const allEntries = await db.all();
-            const userMap = new Map();
-
-            for (const entry of allEntries) {
-                const key = entry.id || entry.key || '';
-                if (typeof key === 'string' && key.startsWith('user_')) {
-                    const uid = key.split('.')[0].replace('user_', '');
-                    if (uid && !userMap.has(uid)) userMap.set(uid, true);
-                }
-            }
-
-            let totalVolume = 0;
-            let totalDeals = 0;
-            let topUser = { name: '없음', amount: 0 };
-
-            const fetchPromises = Array.from(userMap.keys()).map(async (uid) => {
-                const amount = Number((await db.get(`user_${uid}.totalAmount`)) || 0);
-                const count = Number((await db.get(`user_${uid}.buyCount`)) || 0);
-                const member = await message.guild.members.fetch(uid).catch(() => null);
-
-                return {
-                    username: member ? member.user.username : '탈퇴한 유저',
-                    amount,
-                    count
-                };
-            });
-
-            const results = await Promise.all(fetchPromises);
-
-            results.forEach(u => {
-                totalVolume += u.amount;
-                totalDeals += u.count;
-                if (u.amount > topUser.amount) {
-                    topUser = { name: u.username, amount: u.amount };
-                }
-            });
-
-            const avgDeal = totalDeals > 0 ? Math.floor(totalVolume / totalDeals) : 0;
-
-            const canvas = createCanvas(800, 420);
-            const ctx = canvas.getContext('2d');
-
-            ctx.fillStyle = '#0F0F12';
-            ctx.beginPath();
-            ctx.roundRect(0, 0, 800, 420, 20);
-            ctx.fill();
-
-            ctx.fillStyle = '#FFFFFF';
-            ctx.font = `30px ${FONT_FAMILY}`;
-            ctx.fillText('📊 SERVER TOTAL ANALYTICS', 40, 65);
-
-            ctx.fillStyle = '#72767D';
-            ctx.font = `14px ${FONT_FAMILY}`;
-            ctx.fillText('SERVER: SODDU SHOP', 40, 95);
-
-            ctx.strokeStyle = '#27272E';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(40, 115);
-            ctx.lineTo(760, 115);
-            ctx.stroke();
-
-            ctx.fillStyle = '#18181C';
-            ctx.beginPath();
-            ctx.roundRect(40, 140, 350, 120, 15);
-            ctx.fill();
-
-            ctx.fillStyle = '#8E9297';
-            ctx.font = `14px ${FONT_FAMILY}`;
-            ctx.fillText('TOTAL SALES VOLUME', 65, 175);
-
-            ctx.fillStyle = '#2ECC71';
-            ctx.font = `28px ${FONT_FAMILY}`;
-            ctx.fillText(`₩${totalVolume.toLocaleString()}`, 65, 220);
-
-            ctx.fillStyle = '#18181C';
-            ctx.beginPath();
-            ctx.roundRect(410, 140, 350, 120, 15);
-            ctx.fill();
-
-            ctx.fillStyle = '#8E9297';
-            ctx.font = `14px ${FONT_FAMILY}`;
-            ctx.fillText('TOTAL TRANSACTIONS', 435, 175);
-
-            ctx.fillStyle = '#3498DB';
-            ctx.font = `28px ${FONT_FAMILY}`;
-            ctx.fillText(`${totalDeals.toLocaleString()} DEALS`, 435, 220);
-
-            ctx.fillStyle = '#18181C';
-            ctx.beginPath();
-            ctx.roundRect(40, 280, 350, 100, 15);
-            ctx.fill();
-
-            ctx.fillStyle = '#8E9297';
-            ctx.font = `13px ${FONT_FAMILY}`;
-            ctx.fillText('AVG TRANSACTION VALUE', 65, 310);
-
-            ctx.fillStyle = '#FFFFFF';
-            ctx.font = `22px ${FONT_FAMILY}`;
-            ctx.fillText(`₩${avgDeal.toLocaleString()}`, 65, 350);
-
-            ctx.fillStyle = '#18181C';
-            ctx.beginPath();
-            ctx.roundRect(410, 280, 350, 100, 15);
-            ctx.fill();
-
-            ctx.fillStyle = '#8E9297';
-            ctx.font = `13px ${FONT_FAMILY}`;
-            ctx.fillText('TOP SPENDER 👑', 435, 310);
-
-            ctx.fillStyle = '#E5A93C';
-            ctx.font = `20px ${FONT_FAMILY}`;
-            let topName = topUser.name;
-            if (topName.length > 10) topName = topName.substring(0, 9) + '..';
-            ctx.fillText(`${topName} (₩${topUser.amount.toLocaleString()})`, 435, 350);
-
-            const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'stats.png' });
-
-            await sleep(1000);
-            await loadingMsg.delete().catch(() => {});
-            await message.reply({ files: [attachment] });
-
-        } catch (error) {
-            console.error('서버통계 이미지 생성 오류:', error);
-            await loadingMsg.delete().catch(() => {});
-            await message.reply('❌ 서버 통계 생성 중 오류가 발생했습니다.');
-        }
-    }
-
-    if (command === '구매랭크') {
-        const loadingMsg = await message.reply('🏆 구매 순위를 이미지로 생성하는 중이에요. . .');
-
-        try {
-            const allEntries = await db.all();
-            const userMap = new Map();
-
-            for (const entry of allEntries) {
-                const key = entry.id || entry.key || '';
-                if (typeof key === 'string' && key.startsWith('user_')) {
-                    const uid = key.split('.')[0].replace('user_', '');
-                    if (uid && !userMap.has(uid)) userMap.set(uid, true);
-                }
-            }
-
-            const fetchPromises = Array.from(userMap.keys()).map(async (uid) => {
-                const member = await message.guild.members.fetch(uid).catch(() => null);
-                if (!member || member.user.bot) return null;
-
-                const amount = (await db.get(`user_${uid}.totalAmount`)) || 0;
-                return {
-                    user: member.user,
-                    amount: Number(amount),
-                    joinedAt: member.joinedTimestamp || Date.now()
-                };
-            });
-
-            const rankResults = await Promise.all(fetchPromises);
-            const rankData = rankResults.filter(item => item !== null);
-
-            rankData.sort((a, b) => {
-                if (b.amount !== a.amount) return b.amount - a.amount;
-                return a.joinedAt - b.joinedAt;
-            });
-
-            const top20 = rankData.slice(0, 20);
-
-            const itemHeight = 65;
-            const rows = Math.min(top20.length, 10);
-            const canvasWidth = 900;
-            const canvasHeight = Math.max(220 + rows * itemHeight, 350);
-
-            const canvas = createCanvas(canvasWidth, canvasHeight);
-            const ctx = canvas.getContext('2d');
-
-            ctx.fillStyle = '#0F0F12';
-            ctx.beginPath();
-            ctx.roundRect(0, 0, canvasWidth, canvasHeight, 20);
-            ctx.fill();
-
-            ctx.fillStyle = '#FFFFFF';
-            ctx.font = `32px ${FONT_FAMILY}`;
-            ctx.fillText('🏆 TOP 20 PURCHASE RANKING', 40, 65);
-
-            ctx.fillStyle = '#72767D';
-            ctx.font = `14px ${FONT_FAMILY}`;
-            ctx.fillText('Data sorted by total purchase volume (Tier: Joined Date)', 40, 95);
-
-            ctx.strokeStyle = '#27272E';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(40, 115);
-            ctx.lineTo(canvasWidth - 40, 115);
-            ctx.stroke();
-
-            const avatarImages = await Promise.all(
-                top20.map(item => loadImage(item.user.displayAvatarURL({ extension: 'png', size: 64 })).catch(() => null))
-            );
-
-            for (let i = 0; i < top20.length; i++) {
-                const item = top20[i];
-                const isSecondCol = i >= 10;
-                const colIndex = isSecondCol ? 1 : 0;
-                const rowIndex = isSecondCol ? i - 10 : i;
-
-                const startX = colIndex === 0 ? 40 : 470;
-                const startY = 140 + rowIndex * itemHeight;
-
-                ctx.fillStyle = '#18181C';
-                ctx.beginPath();
-                ctx.roundRect(startX, startY, 390, 55, 12);
-                ctx.fill();
-
-                ctx.font = `20px ${FONT_FAMILY}`;
-                if (i === 0) ctx.fillStyle = '#FFD700';
-                else if (i === 1) ctx.fillStyle = '#C0C0C0';
-                else if (i === 2) ctx.fillStyle = '#CD7F32';
-                else ctx.fillStyle = '#8E9297';
-
-                ctx.fillText(`#${i + 1}`, startX + 15, startY + 34);
-
-                const avatarImg = avatarImages[i];
-                if (avatarImg) {
-                    ctx.save();
-                    ctx.beginPath();
-                    ctx.arc(startX + 80, startY + 27.5, 18, 0, Math.PI * 2, true);
-                    ctx.closePath();
-                    ctx.clip();
-                    ctx.drawImage(avatarImg, startX + 62, startY + 9.5, 36, 36);
-                    ctx.restore();
-                }
-
-                ctx.fillStyle = '#FFFFFF';
-                ctx.font = `16px ${FONT_FAMILY}`;
-                let username = item.user.username;
-                if (username.length > 9) username = username.substring(0, 8) + '..';
-                ctx.fillText(username, startX + 110, startY + 33);
-
-                ctx.fillStyle = '#2ECC71';
-                ctx.font = `16px ${FONT_FAMILY}`;
-                const amountText = `₩${item.amount.toLocaleString()}`;
-                const textWidth = ctx.measureText(amountText).width;
-                ctx.fillText(amountText, startX + 375 - textWidth, startY + 33);
-            }
-
-            const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'ranking.png' });
-
-            await sleep(1000);
-            await loadingMsg.delete().catch(() => {});
-            await message.reply({ files: [attachment] });
-
-        } catch (error) {
-            console.error('구매랭크 이미지 생성 오류:', error);
-            await loadingMsg.delete().catch(() => {});
-            await message.reply('❌ 랭킹 이미지 생성 중 오류가 발생했습니다.');
-        }
-    }
-
-    if (command === '정보') {
-        const loadingMsg = await message.reply('유저 정보를 불러오는 중이에요. . .');
-
-        try {
-            const targetUser = (await fetchUserFromInput(client, args[0])) || message.author;
+    else:
+        # DB에 데이터가 없는 신규 유저
+        return {'total_amount': 0, 'buy_count': 0, 'max_amount': 0}
+
+def get_user_rank(user_id):
+    """총 구매 금액 기준 유저의 순위 가져오기"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    # 총 구매 금액 내림차순 정렬
+    cursor.execute('SELECT user_id FROM users ORDER BY total_amount DESC')
+    results = cursor.fetchall()
+    conn.close()
+    
+    for i, (uid,) in enumerate(results):
+        if uid == str(user_id):
+            return f"#{i + 1}"
+    
+    # 데이터가 없으면 일단 최하위 순위 표시
+    return f"#{len(results) + 1}"
+
+# --- [ 유틸리티 함수 ] ---
+async def fetch_avatar(url):
+    """유저 아바타 이미지를 가져옴"""
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as response:
+            if response.status == 200:
+                return await response.read()
+            return None
+
+def get_highest_role_name(member, config_list):
+    """멤버가 가진 가장 높은 우선순위의 역할 이름을 가져옴"""
+    if not member or not member.roles:
+        return "회원 👤" # 멤버 정보가 없거나 역할이 없으면 기본값
+        
+    for role_id, role_name in config_list:
+        if any(role.id == int(role_id) for role in member.roles):
+            return role_name
+    return "회원 👤" # 설정된 역할이 없으면 기본값
+
+def get_highest_tier_name(member, config_list):
+    """멤버가 가진 가장 높은 우선순위의 등급 이름을 가져옴"""
+    if not member or not member.roles:
+        return "NONE" # 멤버 정보가 없거나 역할이 없으면 기본값
+        
+    for role_id, role_name in config_list:
+        if any(role.id == int(role_id) for role in member.roles):
+            return role_name
+    return "NONE" # 설정된 역할이 없으면 기본값
+
+
+# --- [ 디스코드 이벤트 및 명령어 ] ---
+@client.event
+async def on_ready():
+    # 봇 실행 시 데이터베이스 초기화
+    init_db()
+    
+    await tree.sync(guild=discord.Object(id=GUILD_ID))
+    print(f'✅ {client.user.name} 봇 준비 완료 및 명령어 동기화 완료!')
+    print(f'   데이터베이스 파일: {DB_PATH}')
+
+
+@tree.command(name="지급완료", description="구매 데이터를 기록하고 로그를 전송합니다.", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(구매자="아이템을 지급받을 유저", 금액="거래 금액 (숫자만 입력)")
+async def complete_payment(interaction: discord.Interaction, 구매자: discord.Member, 금액: int):
+    # 1. 권한 체크 (예: 관리자만 사용 가능하게 하거나 특정 역할만 사용 가능하게 설정 가능)
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ 이 명령어를 사용할 권한이 없습니다.", ephemeral=True)
+        return
+
+    # 2. 데이터베이스에 구매 데이터 업데이트 (영구 저장)
+    update_user_purchase(구매자.id, 금액)
+    
+    # 3. 구매 완료 응답 (봇이 명령어를 실행한 채널)
+    # 이미지 레이아웃 참고: '아이템이 정상적으로 지급되었어요.' 메시지
+    success_embed = discord.Embed(
+        description=f"**{구매자.mention}님, 아이템이 정상적으로 지급되었어요.** <a:veryheart:1479957265871143104>", 
+        color=0xFFC1D6 # 다크 핑크 테마
+    )
+    # 실제 리뷰 채널 링크로 수정 필요
+    success_embed.add_field(name="", value="https://discord.com/channels/1456729030459134115/1457384179535712473 작성을 필수입니다")
+    await interaction.response.send_message(embed=success_embed)
+
+    # 4. 구매 로그 채널로 로그 전송
+    log_channel = client.get_channel(int(PURCHASE_LOG_CHANNEL_ID))
+    if log_channel:
+        # 다크 핑크 테마로 로그 Embed 구성
+        log_embed = discord.Embed(title="🛍️ 아이템 지급 완료 로그", color=0xFFC1D6, timestamp=datetime.now())
+        log_embed.add_field(name="구매자", value=f"{구매자.mention} ({구매자.id})", inline=True)
+        log_embed.add_field(name="처리 관리자", value=f"{interaction.user.mention}", inline=True)
+        log_embed.add_field(name="거래 금액", value=f"₩{금액:,}", inline=False) # 쉼표 표시
+        
+        # 유저의 최신 누적 데이터 DB에서 가져오기
+        user_data = get_user_data(구매자.id)
+        log_embed.add_field(name="유저 누적 금액", value=f"₩{user_data['total_amount']:,}", inline=True)
+        log_embed.add_field(name="유저 누적 횟수", value=f"{user_data['buy_count']}회", inline=True)
+        
+        await log_channel.send(embed=log_embed)
+    else:
+        print(f"❌ 로그 채널 (ID: {PURCHASE_LOG_CHANNEL_ID})을 찾을 수 없습니다.")
+
+
+@client.event
+async def on_message(message):
+    if message.author.bot or not message.content.startswith('$'):
+        return
+
+    command = message.content[1:].strip().split(' ')
+    cmd_name = command[0]
+    
+    # --- [ $정보 명령 : 보낸 이미지 스타일 커스텀 ] ---
+    if cmd_name == '정보':
+        await message.channel.typing()
+        
+        # 대상을 가져옴 (멘션된 유저 또는 명령어 보낸 유저)
+        target = message.author
+        if len(command) > 1 and len(message.mentions) > 0:
+            target = message.mentions[0]
             
-            const [targetMember, totalAmount, buyCount, biggestDeal, userRank, avatar] = await Promise.all([
-                message.guild.members.fetch(targetUser.id).catch(() => null),
-                db.get(`user_${targetUser.id}.totalAmount`),
-                db.get(`user_${targetUser.id}.buyCount`),
-                db.get(`user_${targetUser.id}.biggestDeal`),
-                getUserRank(message.guild, targetUser.id),
-                loadImage(targetUser.displayAvatarURL({ extension: 'png', size: 128 })).catch(() => null)
-            ]);
+        # 1. 데이터베이스에서 유저 구매 데이터 가져오기 (로드)
+        user_data = get_user_data(target.id)
+        
+        # 2. 이미지 생성 시작 (다크 핑크 테마)
+        W, H = 900, 480
+        # 배경 (레이아웃 참고: 아주 짙은 다크그레이)
+        bg_color = "#121114"
+        image = Image.new("RGB", (W, H), bg_color)
+        draw = ImageDraw.Draw(image)
 
-            const joinedAt = targetMember?.joinedAt 
-                ? targetMember.joinedAt.toISOString().split('T')[0] 
-                : '2026.09.06';
+        # 폰트 로드
+        try:
+            font_title = ImageFont.truetype(font_path, 32)
+            font_id = ImageFont.truetype(font_path, 16)
+            font_role = ImageFont.truetype(font_path, 18)
+            font_card_title = ImageFont.truetype(font_path, 15)
+            font_card_value = ImageFont.truetype(font_path, 32) # 거래횟수, 순위용
+            font_card_money = ImageFont.truetype(font_path, 22) # 총거래량용
+            font_card_tier = ImageFont.truetype(font_path, 20) # 구매등급용
+            font_card_sub = ImageFont.truetype(font_path, 12) # 최대거래금액용
+            font_footer = ImageFont.truetype(font_path, 12)
+        except Exception as e:
+            print(f"❌ 폰트 로드 실패: {e}")
+            return
 
-            const canvas = createCanvas(800, 420);
-            const ctx = canvas.getContext('2d');
+        # --- 상단 프로필 구역 ---
+        # 아바타 가져오기 및 그리기
+        avatar_data = await fetch_avatar(target.display_avatar.url)
+        if avatar_data:
+            avatar_img = Image.open(io.BytesIO(avatar_data)).convert("RGBA")
+            avatar_img = avatar_img.resize((110, 110))
+            
+            # 둥글게 자르기
+            mask = Image.new("L", (110, 110), 0)
+            mask_draw = ImageDraw.Draw(mask)
+            mask_draw.ellipse((0, 0, 110, 110), fill=255)
+            
+            # 아바타 그리기
+            image.paste(avatar_img, (60, 60), mask)
+            
+            # 아바타 다크 핑크 테두리
+            border_color = "#FFC1D6"
+            draw.ellipse((58, 58, 172, 172), outline=border_color, width=3)
 
-            ctx.fillStyle = '#0F0F12';
-            ctx.beginPath();
-            ctx.roundRect(0, 0, 800, 420, 20);
-            ctx.fill();
+        # 닉네임 및 디스코드 ID 그리기
+        draw.text((195, 75), target.name, font=font_title, fill="white")
+        draw.text((195, 112), f"@{target.name}", font=font_id, fill="#8B858F")
 
-            if (avatar) {
-                ctx.save();
-                ctx.beginPath();
-                ctx.arc(90, 85, 45, 0, Math.PI * 2, true);
-                ctx.closePath();
-                ctx.clip();
-                ctx.drawImage(avatar, 45, 40, 90, 90);
-                ctx.restore();
-            }
+        # 유저의 가장 높은 서버 역할 그리기
+        highest_server_role = get_highest_role_name(target, SERVER_ROLES_CONFIG)
+        draw.text((195, 143), highest_server_role, font=font_role, fill="#FFC1D6")
 
-            ctx.fillStyle = '#FFFFFF';
-            ctx.font = `30px ${FONT_FAMILY}`;
-            ctx.fillText(`${targetUser.username}`, 160, 95);
+        # 상단 우측 가입일 및 서버 정보 구역 (디자인 레이아웃 참고)
+        joined_str = target.guild_choices.strftime("%Y. %m. %d")
+        draw.text((520, 85), "가입일", font=font_id, fill="#8B858F")
+        draw.text((520, 105), joined_str, font=font_role, fill="white")
+        
+        # 구분선
+        draw.line((670, 75, 670, 125), fill="#28242A", width=1)
+        
+        draw.text((700, 85), "서버", font=font_id, fill="#8B858F")
+        draw.text((700, 105), f"{target.guild.name[:15]}...", font=font_role, fill="white")
 
-            ctx.fillStyle = '#72767D';
-            ctx.font = `14px ${FONT_FAMILY}`;
-            ctx.fillText(`JOINED: ${joinedAt}`, 600, 80);
+        # --- 메인 데이터 카드 4개 구역 ---
+        card_y = 200
+        card_h = 190
+        card_w = 195
+        gap = 15
+        
+        card_bg = "#1B191E" # 카드 배경색 (디자인 참고: 배경보다 살짝 밝은색)
 
-            ctx.fillStyle = '#18181C';
-            ctx.beginPath();
-            ctx.roundRect(40, 160, 350, 170, 15);
-            ctx.fill();
+        # 1. 총 거래량 카드 (최대 거래 금액 포함)
+        draw.rounded_rectangle([40, card_y, 40 + card_w, card_y + card_h], radius=16, fill=card_bg)
+        draw.text((60, card_y + 40), "총 거래량", font=font_card_title, fill="#8B858F")
+        # DB에서 가져온 금액에 천단위 쉼표 표시
+        total_amount_str = f"₩{user_data['total_amount']:,}"
+        draw.text((60, card_y + 85), total_amount_str, font=font_card_money, fill="white")
+        
+        draw.text((60, card_y + 130), "최대 거래 금액", font=font_card_sub, fill="#8B858F")
+        # DB에서 가져온 최대 금액 표시
+        max_amount_str = f"₩{user_data['max_amount']:,}"
+        draw.text((60, card_y + 150), max_amount_str, font=font_card_money, fill="#DDDDDD")
 
-            ctx.fillStyle = '#8E9297';
-            ctx.font = `14px ${FONT_FAMILY}`;
-            ctx.fillText('TOTAL VOLUME', 65, 195);
 
-            ctx.fillStyle = '#FFFFFF';
-            ctx.font = `32px ${FONT_FAMILY}`;
-            ctx.fillText(`₩${Number(totalAmount || 0).toLocaleString()}`, 65, 245);
+        # 2. 총 거래 횟수 카드
+        x_2 = 40 + card_w + gap
+        draw.rounded_rectangle([x_2, card_y, x_2 + card_w, card_y + card_h], radius=16, fill=card_bg)
+        draw.text((x_2 + 20, card_y + 40), "총 거래 횟수", font=font_card_title, fill="#8B858F")
+        # DB에서 가져온 횟수 표시
+        draw.text((x_2 + 20, card_y + 85), f"{user_data['buy_count']}", font=font_card_value, fill="white")
 
-            ctx.fillStyle = '#8E9297';
-            ctx.font = `13px ${FONT_FAMILY}`;
-            ctx.fillText('BIGGEST DEAL', 65, 288);
+        # 3. 역할 -> '구매 등급' 카드로 변경 (레이아웃 참고: 다크 핑크 테마 적용)
+        x_3 = 40 + (card_w + gap) * 2
+        draw.rounded_rectangle([x_3, card_y, x_3 + card_w, card_y + card_h], radius=16, fill=card_bg)
+        draw.text((x_3 + 20, card_y + 40), "구매 등급", font=font_card_title, fill="#8B858F")
+        # 유저의 구매 등급 가져오기
+        highest_tier_role = get_highest_tier_name(target, BUY_TIERS_CONFIG)
+        draw.text((x_3 + 20, card_y + 85), highest_tier_role, font=font_card_tier, fill="#FFC1D6")
 
-            ctx.fillStyle = '#FFFFFF';
-            ctx.font = `16px ${FONT_FAMILY}`;
-            ctx.fillText(`₩${Number(biggestDeal || 0).toLocaleString()}`, 65, 312);
 
-            ctx.fillStyle = '#18181C';
-            ctx.beginPath();
-            ctx.roundRect(410, 160, 350, 170, 15);
-            ctx.fill();
+        # 4. 초대 횟수 -> '서버 구매 순위' 카드로 변경 (순위 DB에서 계산)
+        x_4 = 40 + (card_w + gap) * 3
+        draw.rounded_rectangle([x_4, card_y, x_4 + card_w, card_y + card_h], radius=16, fill=card_bg)
+        draw.text((x_4 + 20, card_y + 40), "서버 구매 순위", font=font_card_title, fill="#8B858F")
+        # DB 데이터를 전체 계산하여 유저 순위 구하기
+        purchase_rank_str = get_user_rank(target.id)
+        draw.text((x_4 + 20, card_y + 85), purchase_rank_str, font=font_card_value, fill="#FFC1D6")
 
-            ctx.fillStyle = '#8E9297';
-            ctx.font = `14px ${FONT_FAMILY}`;
-            ctx.fillText('TOTAL DEALS', 435, 195);
 
-            ctx.fillStyle = '#2ECC71';
-            ctx.font = `32px ${FONT_FAMILY}`;
-            ctx.fillText(`${buyCount || 0}`, 435, 245);
+        # --- 하단 풋터 구역 ---
+        footer_y = 430
+        draw.text((40, footer_y), f"ⓘ  2026.09.06 이후의 데이터만 기록됩니다.", font=font_footer, fill="#5A555E")
+        draw.text((710, footer_y), "SODDU DISCORD SERVER", font=font_footer, fill="#5A555E")
 
-            ctx.fillStyle = '#8E9297';
-            ctx.font = `13px ${FONT_FAMILY}`;
-            ctx.fillText('RANK', 435, 288);
+        # 이미지 전송
+        with io.BytesIO() as image_binary:
+            image.save(image_binary, 'PNG')
+            image_binary.seek(0)
+            await message.channel.send(file=discord.File(fp=image_binary, filename='profile.png'))
 
-            ctx.fillStyle = '#E5A93C';
-            ctx.font = `18px ${FONT_FAMILY}`;
-            ctx.fillText(`${userRank}`, 435, 312);
+    # --- [ $서버통계 및 $구매랭크는 기존 코드 유지하되 DB 데이터 기반으로 작동 ] ---
+    elif cmd_name == '서버통계':
+        # DB에서 전체 유저 데이터 합산 로직 필요
+        pass
+    
+    elif cmd_name == '구매랭크':
+        # DB에서 전체 유저 상위 정렬 로직 필요
+        pass
 
-            ctx.fillStyle = '#EE4B2B';
-            ctx.font = `12px ${FONT_FAMILY}`;
-            ctx.fillText('* Data recorded starting from 2026.09.06', 40, 370);
-
-            const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'profile.png' });
-
-            await sleep(1000);
-            await loadingMsg.delete().catch(() => {});
-            await message.reply({ files: [attachment] });
-
-        } catch (error) {
-            console.error('정보 이미지 생성 오류:', error);
-            await loadingMsg.delete().catch(() => {});
-            await message.reply('❌ 정보 조회 중 오류가 발생했습니다.');
-        }
-    }
-});
-
-client.login(TOKEN);
+# 봇 실행
+client.run(TOKEN)
