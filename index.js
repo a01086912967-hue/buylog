@@ -1,17 +1,15 @@
 const { Client, GatewayIntentBits, EmbedBuilder, REST, Routes, SlashCommandBuilder, AttachmentBuilder } = require('discord.js');
-const { createCanvas, loadImage } = require('canvas');
+const { createCanvas, loadImage, registerFont } = require('canvas');
 const { QuickDB } = require('quick.db');
 const dotenv = require('dotenv');
+const fs = require('fs');
+const path = require('path');
 
 dotenv.config();
 
-// Node.js 기본 내장 fetch 사용 (ESM 모듈 충돌 방지)
 const fetch = globalThis.fetch;
-
-// Railway Variables 또는 .env 파일에서 토큰 로드
 const TOKEN = process.env.DISCORD_TOKEN;
 
-// 디스코드 클라이언트 설정
 const intents = [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
@@ -24,36 +22,50 @@ const client = new Client({ intents });
 const GUILD_ID = '1456729030459134115';
 const PURCHASE_LOG_CHANNEL_ID = '1457384858065047663';
 
-// 데이터베이스 초기화 (SQLite 파일 저장)
 const db = new QuickDB();
 
-// 기본 폰트
-const FONT_FAMILY = 'Malgun Gothic, AppleGothic, sans-serif';
+// 한글 폰트 자동 다운로드 및 등록
+let FONT_FAMILY = 'sans-serif';
 
-// 서버 역할 우선순위 (높은 순)
+async function setupFont() {
+    const fontPath = path.join(__dirname, 'NanumGothic.ttf');
+    try {
+        if (!fs.existsSync(fontPath)) {
+            console.log('한글 폰트 다운로드 중...');
+            const res = await fetch('https://github.com/google/fonts/raw/main/ofl/nanumgothic/NanumGothic-Regular.ttf');
+            const buffer = Buffer.from(await res.arrayBuffer());
+            fs.writeFileSync(fontPath, buffer);
+        }
+        registerFont(fontPath, { family: 'NanumGothic' });
+        FONT_FAMILY = 'NanumGothic';
+        console.log('한글 폰트 등록 완료!');
+    } catch (e) {
+        console.error('폰트 로드 실패, 기본 폰트를 사용합니다:', e);
+    }
+}
+
+// 서버 역할 우선순위
 const SERVER_ROLES_CONFIG = [
-    { id: '1456729030459134117', name: '방장 👑' },
-    { id: '1458178323434836199', name: '서버 관리자 👑' },
-    { id: '1545686320993796126', name: '서버 관리자 👑' },
-    { id: '1529484356748574720', name: '판매자 💎' },
-    { id: '1522815168286036098', name: '판매자 💎' },
-    { id: '1456735270119411734', name: '회원 👤' }
+    { id: '1456729030459134117', name: '방장' },
+    { id: '1458178323434836199', name: '서버 관리자' },
+    { id: '1545686320993796126', name: '서버 관리자' },
+    { id: '1529484356748574720', name: '판매자' },
+    { id: '1522815168286036098', name: '판매자' },
+    { id: '1456735270119411734', name: '회원' }
 ];
 
-// 구매 등급 우선순위 (높은 순)
+// 구매 등급 우선순위
 const BUY_TIERS_CONFIG = [
-    { id: '1489943721146449920', name: 'Crystal 💎' },
-    { id: '1456737896525725719', name: 'Emerald 🟢' },
-    { id: '1456736865779581031', name: 'Ruby 🔴' },
-    { id: '1456736771344826535', name: 'Gold 🟡' },
-    { id: '1456736573797171384', name: 'Silver ⚪' },
-    { id: '1457383788236505299', name: 'Bronze 🟤' }
+    { id: '1489943721146449920', name: 'Crystal' },
+    { id: '1456737896525725719', name: 'Emerald' },
+    { id: '1456736865779581031', name: 'Ruby' },
+    { id: '1456736771344826535', name: 'Gold' },
+    { id: '1456736573797171384', name: 'Silver' },
+    { id: '1457383788236505299', name: 'Bronze' }
 ];
-
 
 // --- [ DB 및 유틸리티 함수 ] ---
 
-// 구매 데이터 업데이트
 async function update_user_purchase(user_id, amount) {
     const user_key = `user_${user_id}`;
     if (!await db.has(user_key)) {
@@ -69,7 +81,6 @@ async function update_user_purchase(user_id, amount) {
     }
 }
 
-// 순위 실시간 계산
 async function get_user_rank(user_id) {
     const all_data = await db.all();
     const user_entries = all_data.filter(entry => entry.id.startsWith('user_'));
@@ -80,8 +91,7 @@ async function get_user_rank(user_id) {
     return rankIndex !== -1 ? `#${rankIndex + 1}` : `#${user_entries.length + 1}`;
 }
 
-// 역할 이름 가공
-function getHighestRoleName(member, config_list, default_name = '회원 👤') {
+function getHighestRoleName(member, config_list, default_name = '회원') {
     if (!member) return default_name;
     for (const role_info of config_list) {
         if (member.roles.cache.has(role_info.id)) {
@@ -91,7 +101,6 @@ function getHighestRoleName(member, config_list, default_name = '회원 👤') {
     return default_name;
 }
 
-// 원형 아바타 그리기
 async function drawCircleAvatar(ctx, url, x, y, size) {
     try {
         const res = await fetch(url);
@@ -111,14 +120,15 @@ async function drawCircleAvatar(ctx, url, x, y, size) {
         ctx.lineWidth = 3;
         ctx.stroke();
     } catch (e) {
-        console.error(`❌ 아바타 로드 오류: ${e}`);
+        console.error(`아바타 로드 오류: ${e}`);
     }
 }
 
-
-// --- [ 디스코드 이벤트 핸들러 ] ---
+// --- [ 이벤트 핸들러 ] ---
 
 client.once('ready', async () => {
+    await setupFont(); // 폰트 준비
+
     const commands = [
         new SlashCommandBuilder()
             .setName('지급완료')
@@ -130,19 +140,18 @@ client.once('ready', async () => {
     const rest = new REST({ version: '10' }).setToken(TOKEN);
     try {
         await rest.put(Routes.applicationGuildCommands(client.user.id, GUILD_ID), { body: commands });
-        console.log(`✅ ${client.user.username} 구동 완료! (Railway 정상 연결)`);
+        console.log(`${client.user.username} 구동 완료!`);
     } catch (error) {
-        console.error('❌ 슬래시 명령어 동기화 실패:', error);
+        console.error('슬래시 명령어 동기화 실패:', error);
     }
 });
 
-// /지급완료 슬래시 명령어 처리
 client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
 
     if (interaction.commandName === '지급완료') {
         if (!interaction.member.permissions.has(GatewayIntentBits.Administrator)) {
-            return interaction.reply({ content: "❌ 권한이 없습니다.", ephemeral: true });
+            return interaction.reply({ content: "권한이 없습니다.", ephemeral: true });
         }
 
         const 구매자 = interaction.options.getUser('구매자');
@@ -151,7 +160,7 @@ client.on('interactionCreate', async interaction => {
         await update_user_purchase(구매자.id, 금액);
         
         const success_embed = new EmbedBuilder()
-            .setDescription(`**${구매자}님, 아이템이 정상적으로 지급되었어요.** <a:veryheart:1479957265871143104>`)
+            .setDescription(`**${구매자}님, 아이템이 정상적으로 지급되었어요.**`)
             .setColor(0xFFC1D6)
             .setFields([{ name: "", value: "리뷰 작성은 필수입니다." }]);
         await interaction.reply({ embeds: [success_embed] });
@@ -160,7 +169,7 @@ client.on('interactionCreate', async interaction => {
         if (log_channel) {
             const user_data = await db.get(`user_${구매자.id}`);
             const log_embed = new EmbedBuilder()
-                .setTitle("🛍️ 아이템 지급 완료 로그")
+                .setTitle("아이템 지급 완료 로그")
                 .setColor(0xFFC1D6)
                 .setTimestamp()
                 .addFields(
@@ -175,7 +184,7 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-// $정보 텍스트 명령어 처리
+// $정보 명령어
 client.on('messageCreate', async message => {
     if (message.author.bot || !message.content.startsWith('$')) return;
 
@@ -188,7 +197,6 @@ client.on('messageCreate', async message => {
         const user_key = `user_${target.id}`;
         let user_data = await db.get(user_key) || { total_amount: 0, buy_count: 0, max_amount: 0 };
         
-        // 프로필 카드 이미지 생성
         const W = 900, H = 480;
         const canvas = createCanvas(W, H);
         const ctx = canvas.getContext('2d');
@@ -196,7 +204,7 @@ client.on('messageCreate', async message => {
         ctx.fillStyle = "#121114";
         ctx.fillRect(0, 0, W, H);
 
-        // 아바타 & 유저 정보
+        // 아바타 및 유저 정보
         await drawCircleAvatar(ctx, target.displayAvatarURL({ extension: 'png', size: 128 }), 60, 60, 110);
 
         ctx.fillStyle = "white";
@@ -236,7 +244,7 @@ client.on('messageCreate', async message => {
         const guild_name = message.guild.name.length > 15 ? `${message.guild.name.substring(0, 15)}...` : message.guild.name;
         ctx.fillText(guild_name, 700, 105);
 
-        // 데이터 정보 카드 4개
+        // 데이터 카드 4개
         const card_y = 200, card_h = 190, card_w = 195, gap = 15;
         const card_bg = "#1B191E";
 
@@ -302,13 +310,14 @@ client.on('messageCreate', async message => {
         // 하단 문구
         ctx.fillStyle = "#5A555E";
         ctx.font = `12px ${FONT_FAMILY}`;
-        ctx.fillText('ⓘ  2026.09.06 이후의 데이터만 기록됩니다.', 40, 435);
+        ctx.fillText('2026.09.06 이후의 데이터만 기록됩니다.', 40, 435);
         ctx.fillText('SODDU DISCORD SERVER', 710, 435);
 
         const attachment = new AttachmentBuilder(canvas.toBuffer(), { name: 'profile.png' });
-        await message.channel.send({ files: [attachment] });
+        
+        // 답장(Reply) 형식으로 이미지 전송
+        await message.reply({ files: [attachment] });
     }
 });
 
-// 봇 로그인
 client.login(TOKEN);
