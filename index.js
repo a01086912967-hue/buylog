@@ -24,7 +24,7 @@ const PURCHASE_LOG_CHANNEL_ID = '1457384858065047663';
 // 데이터베이스 초기화 (코드가 있는 폴더에 database.sqlite 파일이 생기며 데이터가 영구 저장됩니다)
 const db = new QuickDB();
 
-// 폰트 설정 (윈도우/리눅스/맥 시스템 기본 고딕체 사용 - 산돌 구름 등 외부 폰트 불필요)
+// 폰트 설정 (윈도우/리눅스/맥 시스템 기본 고딕체 사용)
 const FONT_FAMILY = 'Malgun Gothic, AppleGothic, sans-serif';
 
 // 서버 역할 우선순위 (위에서부터 높은 순)
@@ -145,10 +145,10 @@ client.once('ready', async () => {
 
     const rest = new REST({ version: '10' }).setToken(TOKEN);
     try {
-        // 길드 전용 명령어로 등록 (반영 속도가 빠름)
+        // 길드 전용 명령어로 등록
         await rest.put(Routes.applicationGuildCommands(client.user.id, GUILD_ID), { body: commands });
-        print(f`✅ {client.user.name} 봇 준비 완료 및 명령어 동기화 완료!`);
-        print(f`   데이터베이스: database.sqlite 파일에 영구 저장됩니다.`);
+        console.log(`✅ ${client.user.username} 봇 준비 완료 및 명령어 동기화 완료!`);
+        console.log(`   데이터베이스: database.sqlite 파일에 영구 저장됩니다.`);
     } catch (error) {
         console.error('❌ 명령어 동기화 실패:', error);
     }
@@ -208,7 +208,7 @@ client.on('messageCreate', async message => {
     const command = message.content.substring(1).trim().split(' ');
     const cmd_name = command[0];
     
-    // --- [ $정보 명령 : 보낸 디자인 이미지 스타일로 커스텀 ] ---
+    // --- [ $정보 명령 ] ---
     if (cmd_name == '정보') {
         const target = message.mentions.users.first() || message.author;
         // 멤버 객체 가져오기 (역할 확인용)
@@ -251,7 +251,7 @@ client.on('messageCreate', async message => {
         ctx.font = `18px ${FONT_FAMILY}`;
         ctx.fillText(highest_server_role, 195, 153);
 
-        // 상단 우측 가입일 및 서버 정보 구역 (디자인 참고)
+        // 상단 우측 가입일 및 서버 정보 구역
         const joined_str = member ? member.joinedAt.toLocaleDateString('ko-KR') : "2026. 09. 06";
         ctx.fillStyle = "#8B858F";
         ctx.font = `14px ${FONT_FAMILY}`;
@@ -321,7 +321,7 @@ client.on('messageCreate', async message => {
         ctx.font = font_card_value;
         ctx.fillText(`${user_data.buy_count}`, x_2 + 20, card_y + 85);
 
-        // 3. '구매 등급' 카드 (요청 사항 반영: 다크 핑크 테마)
+        // 3. '구매 등급' 카드 (다크 핑크 테마)
         const x_3 = 40 + (card_w + gap) * 2;
         ctx.fillStyle = card_bg;
         ctx.beginPath();
@@ -337,7 +337,7 @@ client.on('messageCreate', async message => {
         ctx.fillText(highest_tier_role, x_3 + 20, card_y + 85);
 
 
-        // 4. '서버 구매 순위' 카드 (요청 사항 반영: DB에서 실시간 계산)
+        // 4. '서버 구매 순위' 카드 (DB에서 실시간 계산)
         const x_4 = 40 + (card_w + gap) * 3;
         ctx.fillStyle = card_bg;
         ctx.beginPath();
