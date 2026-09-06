@@ -40,14 +40,44 @@ async function setupFont() {
     }
 }
 
-// 역할별 지정 색상 및 왕관 보유 여부 매핑
+// 역할별 색상 및 SVG 아이콘 매핑 (오너: 왕관, 관리자: 렌치, 판매자: 동전, 회원: 새싹)
 const SERVER_ROLES_CONFIG = [
-    { id: '1456729030459134117', name: '서버 오너', color: '#FF79C6', hasCrown: true },    // 핑크 (왕관 O)
-    { id: '1458178323434836199', name: '서버 관리자', color: '#5775A8', hasCrown: true },  // 남색 (왕관 O)
-    { id: '1545686320993796126', name: '서버 관리자', color: '#5775A8', hasCrown: true },  // 남색 (왕관 O)
-    { id: '1529484356748574720', name: '판매자', color: '#50FA7B', hasCrown: false },     // 민트 (왕관 X)
-    { id: '1522815168286036098', name: '판매자', color: '#50FA7B', hasCrown: false },     // 민트 (왕관 X)
-    { id: '1456735270119411734', name: '회원', color: '#A3E635', hasCrown: false }        // 연두 (왕관 X)
+    { 
+        id: '1456729030459134117', 
+        name: '서버 오너', 
+        color: '#FF79C6',
+        icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#FF79C6"><path d="M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5zm14 3c0 .6-.4 1-1 1H6c-.6 0-1-.4-1-1v-1h14v1z"/></svg>`
+    },
+    { 
+        id: '1458178323434836199', 
+        name: '서버 관리자', 
+        color: '#5775A8',
+        icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#5775A8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>`
+    },
+    { 
+        id: '1545686320993796126', 
+        name: '서버 관리자', 
+        color: '#5775A8',
+        icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#5775A8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>`
+    },
+    { 
+        id: '1529484356748574720', 
+        name: '판매자', 
+        color: '#50FA7B',
+        icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#50FA7B" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"></circle><line x1="12" y1="8" x2="12" y2="16"></line><path d="M9.5 9.5a2.5 2.5 0 0 1 5 0c0 2-3 2-3 4s3 2 3 4a2.5 2.5 0 0 1-5 0"></path></svg>`
+    },
+    { 
+        id: '1522815168286036098', 
+        name: '판매자', 
+        color: '#50FA7B',
+        icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#50FA7B" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"></circle><line x1="12" y1="8" x2="12" y2="16"></line><path d="M9.5 9.5a2.5 2.5 0 0 1 5 0c0 2-3 2-3 4s3 2 3 4a2.5 2.5 0 0 1-5 0"></path></svg>`
+    },
+    { 
+        id: '1456735270119411734', 
+        name: '회원', 
+        color: '#A3E635',
+        icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#A3E635" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 20h10"></path><path d="M10 20c0-4.4 3.6-8 8-8v-1c-5 0-9 4-9 9"></path><path d="M14 20c0-7.7-6.3-14-14-14v1c7 0 13 6 13 13"></path></svg>`
+    }
 ];
 
 const BUY_TIERS_CONFIG = [
@@ -58,6 +88,19 @@ const BUY_TIERS_CONFIG = [
     { id: '1456736573797171384', name: 'Silver', color: '#FB923C' },
     { id: '1457383788236505299', name: 'Bronze', color: '#D97706' }
 ];
+
+// 카드용 동적 아이콘 생성 함수 (유저의 역할 색상 stroke 적용)
+function getDynamicCardIcons(color) {
+    return {
+        calendar: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#726D7A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>`,
+        discord: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#726D7A"><path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994.021-.041.001-.09-.041-.106a13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.061 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.028zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg>`,
+        info: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#484350" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>`,
+        coin: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="6" rx="8" ry="3"></ellipse><path d="M4 6v6c0 1.66 3.58 3 8 3s8-1.34 8-3V6"></path><path d="M4 12v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"></path></svg>`,
+        list: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"></rect><line x1="7" y1="8" x2="17" y2="8"></line><line x1="7" y1="12" x2="17" y2="12"></line><line x1="7" y1="16" x2="13" y2="16"></line></svg>`,
+        user: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>`,
+        users: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path><path d="M21 21v-2a4 4 0 0 0-3-3.85"></path><path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"></path><path d="M1 21v-2a4 4 0 0 1 4-4h6a4 4 0 0 1 4 4v2"></path></svg>`
+    };
+}
 
 async function update_user_purchase(user_id, amount) {
     const user_key = `user_${user_id}`;
@@ -84,14 +127,15 @@ async function get_user_rank(user_id) {
     return rankIndex !== -1 ? `#${rankIndex + 1}` : `#${user_entries.length + 1}`;
 }
 
-function getRoleInfo(member, config_list, default_name = '회원', default_color = '#A3E635', default_crown = false) {
-    if (!member) return { name: default_name, color: default_color, hasCrown: default_crown };
-    for (const role_info of config_list) {
+function getRoleInfo(member) {
+    const defaultRole = SERVER_ROLES_CONFIG[SERVER_ROLES_CONFIG.length - 1]; // 회원
+    if (!member) return defaultRole;
+    for (const role_info of SERVER_ROLES_CONFIG) {
         if (member.roles.cache.has(role_info.id)) {
-            return { name: role_info.name, color: role_info.color, hasCrown: role_info.hasCrown || false };
+            return role_info;
         }
     }
-    return { name: default_name, color: default_color, hasCrown: default_crown };
+    return defaultRole;
 }
 
 function getBuyTierInfo(member) {
@@ -114,17 +158,6 @@ async function drawSvgIcon(ctx, svgString, x, y, width, height) {
     ctx.drawImage(img, x, y, width, height);
 }
 
-// 고정 핑크 포인트(#FCA5A5) 아이콘 SVG
-const ICONS = {
-    calendar: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#726D7A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>`,
-    discord: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="#726D7A"><path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994.021-.041.001-.09-.041-.106a13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.061 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.028zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg>`,
-    info: `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#484350" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>`,
-    coin: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#FCA5A5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="6" rx="8" ry="3"></ellipse><path d="M4 6v6c0 1.66 3.58 3 8 3s8-1.34 8-3V6"></path><path d="M4 12v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"></path></svg>`,
-    list: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#FCA5A5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"></rect><line x1="7" y1="8" x2="17" y2="8"></line><line x1="7" y1="12" x2="17" y2="12"></line><line x1="7" y1="16" x2="13" y2="16"></line></svg>`,
-    user: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#FCA5A5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>`,
-    users: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#FCA5A5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path><path d="M21 21v-2a4 4 0 0 0-3-3.85"></path><path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"></path><path d="M1 21v-2a4 4 0 0 1 4-4h6a4 4 0 0 1 4 4v2"></path></svg>`
-};
-
 function drawRoundedRect(ctx, x, y, w, h, r) {
     ctx.beginPath();
     ctx.moveTo(x + r, y);
@@ -135,23 +168,7 @@ function drawRoundedRect(ctx, x, y, w, h, r) {
     ctx.closePath();
 }
 
-function drawCrownIcon(ctx, x, y, size, color) {
-    ctx.save();
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.moveTo(x, y + size);
-    ctx.lineTo(x, y + size * 0.3);
-    ctx.lineTo(x + size * 0.3, y + size * 0.6);
-    ctx.lineTo(x + size * 0.5, y);
-    ctx.lineTo(x + size * 0.7, y + size * 0.6);
-    ctx.lineTo(x + size, y + size * 0.3);
-    ctx.lineTo(x + size, y + size);
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
-}
-
-async function drawCircleAvatar(ctx, url, x, y, size, roleColor, hasCrown) {
+async function drawCircleAvatar(ctx, url, x, y, size, roleInfo) {
     try {
         const res = await fetch(url);
         const arrayBuffer = await res.arrayBuffer();
@@ -166,21 +183,19 @@ async function drawCircleAvatar(ctx, url, x, y, size, roleColor, hasCrown) {
         ctx.drawImage(avatarImg, x, y, size, size);
         ctx.restore();
         
-        ctx.strokeStyle = roleColor;
-        ctx.lineWidth = 3;
+        ctx.strokeStyle = roleInfo.color;
+        ctx.lineWidth = 3.5;
         ctx.stroke();
 
-        // 왕관 권한이 있는 관리자/오너만 뱃지 표시
-        if (hasCrown) {
-            const badgeX = x + size - 14;
-            const badgeY = y + size - 18;
-            ctx.fillStyle = roleColor;
-            ctx.beginPath();
-            ctx.arc(badgeX, badgeY, 11, 0, Math.PI * 2);
-            ctx.fill();
-            
-            drawCrownIcon(ctx, badgeX - 6, badgeY - 6, 12, '#16151A');
-        }
+        // 아바타 오른쪽 아래 뱃지
+        const badgeX = x + size - 14;
+        const badgeY = y + size - 16;
+        ctx.fillStyle = roleInfo.color;
+        ctx.beginPath();
+        ctx.arc(badgeX, badgeY, 11, 0, Math.PI * 2);
+        ctx.fill();
+        
+        await drawSvgIcon(ctx, roleInfo.icon, badgeX - 6, badgeY - 6, 12, 12);
     } catch (e) {
         console.error(`아바타 로드 오류: ${e}`);
     }
@@ -256,14 +271,15 @@ client.on('messageCreate', async message => {
         const user_key = `user_${target.id}`;
         let user_data = await db.get(user_key) || { total_amount: 0, buy_count: 0, max_amount: 0 };
         
-        const roleInfo = getRoleInfo(member, SERVER_ROLES_CONFIG);
+        const roleInfo = getRoleInfo(member);
         const buyTier = getBuyTierInfo(member);
+        const dynamicIcons = getDynamicCardIcons(roleInfo.color);
 
         const W = 1000, H = 480;
         const canvas = createCanvas(W, H);
         const ctx = canvas.getContext('2d');
 
-        // 메인 박스
+        // 메인 프레임
         drawRoundedRect(ctx, 10, 10, W - 20, H - 20, 24);
         ctx.fillStyle = "#141318";
         ctx.fill();
@@ -271,7 +287,7 @@ client.on('messageCreate', async message => {
         ctx.lineWidth = 1.5;
         ctx.stroke();
 
-        // 핑크 네온 글로우
+        // 핑크 네온 글로우 효과
         const glow = ctx.createRadialGradient(W - 80, 20, 10, W - 80, 20, 320);
         glow.addColorStop(0, 'rgba(252, 165, 165, 0.07)');
         glow.addColorStop(1, 'rgba(0,0,0,0)');
@@ -279,7 +295,7 @@ client.on('messageCreate', async message => {
         ctx.fillRect(0, 0, W, H);
 
         // 아바타
-        await drawCircleAvatar(ctx, target.displayAvatarURL({ extension: 'png', size: 128 }), 50, 48, 110, roleInfo.color, roleInfo.hasCrown);
+        await drawCircleAvatar(ctx, target.displayAvatarURL({ extension: 'png', size: 128 }), 50, 48, 110, roleInfo);
 
         // 닉네임 & 디스코드 ID
         ctx.fillStyle = "#FFFFFF";
@@ -290,18 +306,14 @@ client.on('messageCreate', async message => {
         ctx.font = `16px ${FONT_FAMILY}`;
         ctx.fillText("#0001", 185, 113);
 
-        // 역할 표시 (관리자/오너만 왕관 출력)
-        let roleStartX = 185;
-        if (roleInfo.hasCrown) {
-            drawCrownIcon(ctx, 185, 128, 14, roleInfo.color);
-            roleStartX = 205;
-        }
+        // 역할 표시 (역할 아이콘 + 역할 이름)
+        await drawSvgIcon(ctx, roleInfo.icon, 185, 126, 16, 16);
         ctx.fillStyle = roleInfo.color;
         ctx.font = `bold 16px ${FONT_FAMILY}`;
-        ctx.fillText(roleInfo.name, roleStartX, 141);
+        ctx.fillText(roleInfo.name, 207, 140);
 
         // 가입일
-        await drawSvgIcon(ctx, ICONS.calendar, 510, 62, 20, 20);
+        await drawSvgIcon(ctx, dynamicIcons.calendar, 510, 62, 20, 20);
         ctx.fillStyle = "#726D7A";
         ctx.font = `13px ${FONT_FAMILY}`;
         ctx.fillText("가입일", 538, 74);
@@ -319,7 +331,7 @@ client.on('messageCreate', async message => {
         ctx.stroke();
 
         // 서버 정보
-        await drawSvgIcon(ctx, ICONS.discord, 678, 62, 22, 22);
+        await drawSvgIcon(ctx, dynamicIcons.discord, 678, 62, 22, 22);
         ctx.fillStyle = "#726D7A";
         ctx.font = `13px ${FONT_FAMILY}`;
         ctx.fillText("서버", 708, 74);
@@ -334,7 +346,7 @@ client.on('messageCreate', async message => {
         ctx.font = `10px ${FONT_FAMILY}`;
         ctx.fillText("SINCE 2020", 708, 114);
 
-        // 하단 카드 4개 규격 조정
+        // 하단 카드 4개
         const card_y = 190, card_h = 200, card_w = 210, gap = 16, start_x = 42;
         const card_bg = "#1A1820";
 
@@ -342,7 +354,7 @@ client.on('messageCreate', async message => {
         drawRoundedRect(ctx, start_x, card_y, card_w, card_h, 16);
         ctx.fillStyle = card_bg;
         ctx.fill();
-        await drawSvgIcon(ctx, ICONS.coin, start_x + 16, card_y + 18, 22, 22);
+        await drawSvgIcon(ctx, dynamicIcons.coin, start_x + 16, card_y + 18, 22, 22);
         ctx.fillStyle = "#A39EAB";
         ctx.font = `15px ${FONT_FAMILY}`;
         ctx.fillText("총 거래량", start_x + 48, card_y + 35);
@@ -363,7 +375,7 @@ client.on('messageCreate', async message => {
         drawRoundedRect(ctx, x_2, card_y, card_w, card_h, 16);
         ctx.fillStyle = card_bg;
         ctx.fill();
-        await drawSvgIcon(ctx, ICONS.list, x_2 + 16, card_y + 18, 22, 22);
+        await drawSvgIcon(ctx, dynamicIcons.list, x_2 + 16, card_y + 18, 22, 22);
         ctx.fillStyle = "#A39EAB";
         ctx.font = `15px ${FONT_FAMILY}`;
         ctx.fillText("총 거래 횟수", x_2 + 48, card_y + 35);
@@ -372,12 +384,12 @@ client.on('messageCreate', async message => {
         ctx.font = `bold 36px ${FONT_FAMILY}`;
         ctx.fillText(`${user_data.buy_count}`, x_2 + 16, card_y + 105);
 
-        // Card 3: 역할 / 구매 등급 (구매 등급 없으면 NONE)
+        // Card 3: 역할 (구매 등급 없으면 NONE)
         const x_3 = start_x + (card_w + gap) * 2;
         drawRoundedRect(ctx, x_3, card_y, card_w, card_h, 16);
         ctx.fillStyle = card_bg;
         ctx.fill();
-        await drawSvgIcon(ctx, ICONS.user, x_3 + 16, card_y + 18, 22, 22);
+        await drawSvgIcon(ctx, dynamicIcons.user, x_3 + 16, card_y + 18, 22, 22);
         ctx.fillStyle = "#A39EAB";
         ctx.font = `15px ${FONT_FAMILY}`;
         ctx.fillText("역할", x_3 + 48, card_y + 35);
@@ -397,7 +409,7 @@ client.on('messageCreate', async message => {
         drawRoundedRect(ctx, x_4, card_y, card_w, card_h, 16);
         ctx.fillStyle = card_bg;
         ctx.fill();
-        await drawSvgIcon(ctx, ICONS.users, x_4 + 16, card_y + 18, 22, 22);
+        await drawSvgIcon(ctx, dynamicIcons.users, x_4 + 16, card_y + 18, 22, 22);
         ctx.fillStyle = "#A39EAB";
         ctx.font = `15px ${FONT_FAMILY}`;
         ctx.fillText("초대 횟수", x_4 + 48, card_y + 35);
@@ -410,13 +422,14 @@ client.on('messageCreate', async message => {
         ctx.font = `14px ${FONT_FAMILY}`;
         ctx.fillText("서버 순위", x_4 + 16, card_y + 168);
 
+        // 서버 순위 텍스트 색상: 노란색(#FACC15) 고정
         const purchase_rank_str = await get_user_rank(target.id);
-        ctx.fillStyle = roleInfo.color;
+        ctx.fillStyle = "#FACC15";
         ctx.font = `bold 28px ${FONT_FAMILY}`;
         ctx.fillText(purchase_rank_str, x_4 + 125, card_y + 168);
 
         // 하단 안내 정보
-        await drawSvgIcon(ctx, ICONS.info, 42, 425, 16, 16);
+        await drawSvgIcon(ctx, dynamicIcons.info, 42, 425, 16, 16);
         ctx.fillStyle = "#484350";
         ctx.font = `12px ${FONT_FAMILY}`;
         ctx.fillText("2026.09.06 이후의 데이터만 기록됩니다.", 64, 438);
