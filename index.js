@@ -21,28 +21,51 @@ const client = new Client({ intents });
 const db = new QuickDB();
 
 // ─────────────────────────────────────
-// 색상 및 폰트 설정 (제시해주신 파이썬 코드 기반)
+// 역할별 설정 (ID, 이름, 테마 색상)
 // ─────────────────────────────────────
-const CONFIG = {
-    W: 1536,
-    H: 808,
-    BG: "#0d0d0f",
-    CARD: "#141416",
-    CARD_BORDER: "#303034",
-    WHITE: "#f4eef2",
-    GRAY: "#8f8b90",
-    PINK: "#f48fbd",
-    BORDER: "#4b3440",
-    LINE: "#363338"
-};
+const SERVER_ROLES_CONFIG = [
+    { id: '1456729030459134117', name: '서버 오너', color: '#FF79C6' },
+    { id: '1458178323434836199', name: '서버 관리자', color: '#f48fbd' },
+    { id: '1545686320993796126', name: '서버 관리자', color: '#f48fbd' },
+    { id: '1529484356748574720', name: '판매자', color: '#50FA7B' },
+    { id: '1522815168286036098', name: '판매자', color: '#50FA7B' },
+    { id: '1456735270119411734', name: '회원', color: '#A3E635' }
+];
 
+const BUY_TIERS_CONFIG = [
+    { id: '1489943721146449920', name: 'Crystal', color: '#C084FC' },
+    { id: '1456737896525725719', name: 'Emerald', color: '#34D399' },
+    { id: '1456736865779581031', name: 'Ruby', color: '#F87171' },
+    { id: '1456736771344826535', name: 'Gold', color: '#FACC15' },
+    { id: '1456736573797171384', name: 'Silver', color: '#FB923C' },
+    { id: '1457383788236505299', name: 'Bronze', color: '#D97706' }
+];
+
+function getRoleInfo(member) {
+    const defaultRole = SERVER_ROLES_CONFIG[SERVER_ROLES_CONFIG.length - 1]; // 기본 회원
+    if (!member) return defaultRole;
+    for (const role_info of SERVER_ROLES_CONFIG) {
+        if (member.roles.cache.has(role_info.id)) return role_info;
+    }
+    return defaultRole;
+}
+
+function getBuyTierInfo(member) {
+    if (!member) return null;
+    for (const tier of BUY_TIERS_CONFIG) {
+        if (member.roles.cache.has(tier.id)) return tier;
+    }
+    return null;
+}
+
+// ─────────────────────────────────────
+// 폰트 설정
+// ─────────────────────────────────────
 let FONT_FAMILY = 'sans-serif';
 
 async function setupFont() {
     const fontsDir = path.join(__dirname, 'fonts');
-    if (!fs.existsSync(fontsDir)) {
-        fs.mkdirSync(fontsDir, { recursive: true });
-    }
+    if (!fs.existsSync(fontsDir)) fs.mkdirSync(fontsDir, { recursive: true });
 
     const fontPath = path.join(fontsDir, 'Pretendard-Bold.otf');
     try {
@@ -59,9 +82,8 @@ async function setupFont() {
 }
 
 // ─────────────────────────────────────
-// 유틸리티 함수
+// 유틸리티
 // ─────────────────────────────────────
-
 function drawRoundedRect(ctx, x, y, w, h, r, fill, outline = null, strokeWidth = 1) {
     ctx.beginPath();
     ctx.moveTo(x + r, y);
@@ -82,7 +104,7 @@ function drawRoundedRect(ctx, x, y, w, h, r, fill, outline = null, strokeWidth =
     }
 }
 
-function drawGlowText(ctx, text, x, y, font, fill = CONFIG.PINK) {
+function drawGlowText(ctx, text, x, y, font, fill) {
     ctx.save();
     ctx.font = font;
     ctx.shadowColor = fill;
@@ -101,22 +123,25 @@ async function get_user_rank(user_id) {
 }
 
 // ─────────────────────────────────────
-// 이미지 생성 메인 로직
+// 프로필 이미지 생성
 // ─────────────────────────────────────
-
 async function generateProfileImage(target, member, userData) {
-    const { W, H } = CONFIG;
+    const W = 1536, H = 808;
     const canvas = createCanvas(W, H);
     const ctx = canvas.getContext('2d');
 
+    const roleInfo = getRoleInfo(member);
+    const buyTier = getBuyTierInfo(member);
+    const THEME_COLOR = roleInfo.color; // 역할별 지정 색상 적용
+
     // 1. 전체 배경
-    ctx.fillStyle = CONFIG.BG;
+    ctx.fillStyle = "#0d0d0f";
     ctx.fillRect(0, 0, W, H);
 
-    // 2. 바깥 테두리 카드 (23, 40) ~ (W - 23, H - 40)
-    drawRoundedRect(ctx, 23, 40, W - 46, H - 80, 30, "#101012", CONFIG.BORDER, 2);
+    // 2. 바깥 테두리 카드
+    drawRoundedRect(ctx, 23, 40, W - 46, H - 80, 30, "#101012", "#4b3440", 2);
 
-    // 3. 상단 아바타 (77, 104, size: 225)
+    // 3. 상단 아바타 (225x225)
     const avatarX = 77, avatarY = 104, avatarSize = 225;
     try {
         const avatarUrl = target.displayAvatarURL({ extension: 'png', size: 256 });
@@ -124,7 +149,6 @@ async function generateProfileImage(target, member, userData) {
         const avatarBuffer = Buffer.from(await res.arrayBuffer());
         const avatarImg = await loadImage(avatarBuffer);
 
-        // 원형 클리핑 아바타
         ctx.save();
         ctx.beginPath();
         ctx.arc(avatarX + avatarSize / 2, avatarY + avatarSize / 2, 102.5, 0, Math.PI * 2);
@@ -133,18 +157,18 @@ async function generateProfileImage(target, member, userData) {
         ctx.drawImage(avatarImg, avatarX + 10, avatarY + 10, 205, 205);
         ctx.restore();
 
-        // 외곽선 테두리
+        // 역할 테두리 색상
         ctx.lineWidth = 5;
-        ctx.strokeStyle = CONFIG.PINK;
+        ctx.strokeStyle = THEME_COLOR;
         ctx.beginPath();
         ctx.arc(avatarX + avatarSize / 2, avatarY + avatarSize / 2, avatarSize / 2, 0, Math.PI * 2);
         ctx.stroke();
     } catch (e) {
-        console.error('아바타 로드 오류:', e);
+        console.error('아바타 로드 에러:', e);
     }
 
-    // 온라인 점 (핑크)
-    ctx.fillStyle = CONFIG.PINK;
+    // 온라인 점 (역할 색상)
+    ctx.fillStyle = THEME_COLOR;
     ctx.beginPath();
     ctx.arc(270, 292, 22, 0, Math.PI * 2);
     ctx.fill();
@@ -152,34 +176,26 @@ async function generateProfileImage(target, member, userData) {
     ctx.strokeStyle = "#101012";
     ctx.stroke();
 
-    // 4. 사용자 이름 & 글로우
-    drawGlowText(ctx, target.username, 352, 182, `bold 66px ${FONT_FAMILY}`, CONFIG.PINK);
+    // 4. 사용자 이름 & 디스코드 태그
+    drawGlowText(ctx, target.username, 352, 182, `bold 66px ${FONT_FAMILY}`, THEME_COLOR);
 
-    // 디스코드 태그
     ctx.fillStyle = "#666267";
     ctx.font = `34px ${FONT_FAMILY}`;
     ctx.fillText("#0001", 352, 236);
 
-    // 역할 아이콘 & 이름
-    ctx.fillStyle = CONFIG.PINK;
-    ctx.font = `bold 38px ${FONT_FAMILY}`;
-    ctx.fillText("♛", 352, 295);
-
+    // 역할 텍스트 (깨지는 특수문자 제거)
+    ctx.fillStyle = THEME_COLOR;
     ctx.font = `bold 29px ${FONT_FAMILY}`;
-    ctx.fillText("서버 관리자", 407, 295);
+    ctx.fillText(roleInfo.name, 352, 295);
 
     // 5. 가입일 영역
-    ctx.fillStyle = "#a7a2a7";
-    ctx.font = `40px ${FONT_FAMILY}`;
-    ctx.fillText("▣", 770, 225);
-
     ctx.fillStyle = "#aaa5aa";
     ctx.font = `25px ${FONT_FAMILY}`;
     ctx.fillText("가입일", 836, 210);
 
-    const joinedStr = member ? member.joinedAt.toLocaleDateString('ko-KR').replace(/\. /g, '. ').slice(0, -1) : "2020. 01. 02";
-    ctx.fillStyle = CONFIG.WHITE;
-    ctx.font = `29px ${FONT_FAMILY}`;
+    const joinedStr = member ? member.joinedAt.toLocaleDateString('ko-KR').replace(/\. /g, '. ').slice(0, -1) : "2026. 3. 18";
+    ctx.fillStyle = "#f4eef2";
+    ctx.font = `bold 29px ${FONT_FAMILY}`;
     ctx.fillText(joinedStr, 836, 252);
 
     // 세로 구분선
@@ -191,27 +207,23 @@ async function generateProfileImage(target, member, userData) {
     ctx.stroke();
 
     // 6. 서버 영역
-    ctx.fillStyle = "#bcb7bc";
-    ctx.font = `bold 45px ${FONT_FAMILY}`;
-    ctx.fillText("◉", 1100, 225);
-
     ctx.fillStyle = "#aaa5aa";
     ctx.font = `25px ${FONT_FAMILY}`;
     ctx.fillText("서버", 1175, 205);
 
-    ctx.fillStyle = CONFIG.WHITE;
+    ctx.fillStyle = "#f4eef2";
     ctx.font = `bold 19px ${FONT_FAMILY}`;
     ctx.fillText("SODDU DISCORD SERVER", 1175, 238);
 
-    ctx.fillStyle = CONFIG.PINK;
+    ctx.fillStyle = THEME_COLOR;
     ctx.font = `bold 35px ${FONT_FAMILY}`;
-    ctx.fillText("›", 1450, 241);
+    ctx.fillText(">", 1450, 241);
 
     ctx.fillStyle = "#634353";
-    ctx.font = `13px ${FONT_FAMILY}`;
+    ctx.font = `bold 13px ${FONT_FAMILY}`;
     ctx.fillText("S I N C E   2 0 2 0", 1175, 271);
 
-    // 7. 통계 4개 카드 (배치 및 내부 디자인)
+    // 7. 하단 4개 카드
     const cards = [
         { x1: 56, x2: 400 },
         { x1: 418, x2: 760 },
@@ -220,23 +232,19 @@ async function generateProfileImage(target, member, userData) {
     ];
 
     for (const card of cards) {
-        drawRoundedRect(ctx, card.x1, 354, card.x2 - card.x1, 296, 25, CONFIG.CARD, CONFIG.CARD_BORDER, 2);
+        drawRoundedRect(ctx, card.x1, 354, card.x2 - card.x1, 296, 25, "#141416", "#303034", 2);
     }
 
     // [카드 1] 총 거래량
-    ctx.fillStyle = CONFIG.PINK;
-    ctx.font = `45px ${FONT_FAMILY}`;
-    ctx.fillText("◎", 94, 425);
-
     ctx.fillStyle = "#bdb8bd";
     ctx.font = `26px ${FONT_FAMILY}`;
-    ctx.fillText("총 거래량", 163, 424);
+    ctx.fillText("총 거래량", 95, 424);
 
-    ctx.fillStyle = CONFIG.WHITE;
+    ctx.fillStyle = "#f4eef2";
     ctx.font = `bold 48px ${FONT_FAMILY}`;
     ctx.fillText(`₩${userData.total_amount || 0}`, 95, 502);
 
-    ctx.strokeStyle = CONFIG.LINE;
+    ctx.strokeStyle = "#363338";
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(95, 535);
@@ -247,53 +255,44 @@ async function generateProfileImage(target, member, userData) {
     ctx.font = `21px ${FONT_FAMILY}`;
     ctx.fillText("최대 거래 금액", 95, 572);
 
-    ctx.fillStyle = CONFIG.WHITE;
+    ctx.fillStyle = "#f4eef2";
     ctx.font = `bold 28px ${FONT_FAMILY}`;
     ctx.fillText(`₩${userData.max_amount || 0}`, 95, 612);
 
     // [카드 2] 총 거래 횟수
-    ctx.fillStyle = CONFIG.PINK;
-    ctx.font = `43px ${FONT_FAMILY}`;
-    ctx.fillText("▤", 456, 425);
-
     ctx.fillStyle = "#bdb8bd";
     ctx.font = `26px ${FONT_FAMILY}`;
-    ctx.fillText("총 거래 횟수", 535, 424);
+    ctx.fillText("총 거래 횟수", 456, 424);
 
-    ctx.fillStyle = CONFIG.WHITE;
+    ctx.fillStyle = "#f4eef2";
     ctx.font = `bold 48px ${FONT_FAMILY}`;
     ctx.fillText(`${userData.buy_count || 0}`, 456, 503);
 
-    // [카드 3] 역할
-    ctx.fillStyle = CONFIG.PINK;
-    ctx.font = `48px ${FONT_FAMILY}`;
-    ctx.fillText("♙", 817, 425);
-
+    // [카드 3] 역할 / 구매 티어
     ctx.fillStyle = "#bdb8bd";
     ctx.font = `26px ${FONT_FAMILY}`;
-    ctx.fillText("역할", 895, 424);
+    ctx.fillText("역할", 817, 424);
 
-    ctx.fillStyle = CONFIG.PINK;
-    ctx.font = `bold 32px ${FONT_FAMILY}`;
-    ctx.fillText("서버 관리자", 817, 504);
-
-    ctx.font = `42px ${FONT_FAMILY}`;
-    ctx.fillText("♛", 1000, 506);
+    if (buyTier) {
+        ctx.fillStyle = buyTier.color;
+        ctx.font = `bold 38px ${FONT_FAMILY}`;
+        ctx.fillText(buyTier.name, 817, 504);
+    } else {
+        ctx.fillStyle = THEME_COLOR;
+        ctx.font = `bold 34px ${FONT_FAMILY}`;
+        ctx.fillText(roleInfo.name, 817, 504);
+    }
 
     // [카드 4] 초대 횟수 & 서버 순위
-    ctx.fillStyle = CONFIG.PINK;
-    ctx.font = `46px ${FONT_FAMILY}`;
-    ctx.fillText("♧", 1177, 425);
-
     ctx.fillStyle = "#bdb8bd";
     ctx.font = `26px ${FONT_FAMILY}`;
-    ctx.fillText("초대 횟수", 1250, 424);
+    ctx.fillText("초대 횟수", 1177, 424);
 
-    ctx.fillStyle = CONFIG.WHITE;
+    ctx.fillStyle = "#f4eef2";
     ctx.font = `bold 48px ${FONT_FAMILY}`;
     ctx.fillText("0", 1177, 503);
 
-    ctx.strokeStyle = CONFIG.LINE;
+    ctx.strokeStyle = "#363338";
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(1177, 535);
@@ -305,20 +304,16 @@ async function generateProfileImage(target, member, userData) {
     ctx.fillText("서버 순위", 1177, 572);
 
     const userRank = await get_user_rank(target.id);
-    ctx.fillStyle = CONFIG.PINK;
+    ctx.fillStyle = THEME_COLOR;
     ctx.font = `bold 42px ${FONT_FAMILY}`;
     ctx.fillText(userRank, 1378, 582);
 
-    // 8. 하단 텍스트 영역
-    ctx.fillStyle = CONFIG.PINK;
-    ctx.font = `31px ${FONT_FAMILY}`;
-    ctx.fillText("ⓘ", 66, 728);
-
+    // 8. 하단 텍스트
     ctx.fillStyle = "#aaa5aa";
     ctx.font = `20px ${FONT_FAMILY}`;
-    ctx.fillText("2026.09.06 이후의 데이터만 기록됩니다.", 115, 723);
+    ctx.fillText("2026.09.06 이후의 데이터만 기록됩니다.", 66, 723);
 
-    ctx.strokeStyle = CONFIG.LINE;
+    ctx.strokeStyle = "#363338";
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(705, 717);
@@ -333,12 +328,11 @@ async function generateProfileImage(target, member, userData) {
 }
 
 // ─────────────────────────────────────
-// 디스코드 명령어 처리
+// 디스코드 명령어
 // ─────────────────────────────────────
-
 client.once('ready', async () => {
     await setupFont();
-    console.log(`${client.user.username} 파이썬 스타일 이미지 변환봇 준비 완료!`);
+    console.log(`${client.user.username} 시스템 가동 완료!`);
 });
 
 client.on('messageCreate', async message => {
@@ -354,11 +348,11 @@ client.on('messageCreate', async message => {
             const userData = await db.get(`user_${target.id}`) || { total_amount: 0, buy_count: 0, max_amount: 0 };
 
             const imageBuffer = await generateProfileImage(target, member, userData);
-            const attachment = new AttachmentBuilder(imageBuffer, { name: 'user_info.png' });
+            const attachment = new AttachmentBuilder(imageBuffer, { name: 'profile.png' });
 
             await message.reply({ files: [attachment] });
         } catch (err) {
-            console.error('명령어 처리 중 에러 발생:', err);
+            console.error('명령어 실행중 오류:', err);
         }
     }
 });
