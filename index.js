@@ -1,12 +1,14 @@
 const { Client, GatewayIntentBits, EmbedBuilder, REST, Routes, SlashCommandBuilder, AttachmentBuilder } = require('discord.js');
 const { createCanvas, loadImage } = require('canvas');
-const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 const { QuickDB } = require('quick.db');
 const dotenv = require('dotenv');
 
 dotenv.config();
 
-// Railway Variables 또는 .env 파일에서 토큰을 불러옵니다.
+// Node.js 기본 내장 fetch 사용 (ESM 모듈 충돌 방지)
+const fetch = globalThis.fetch;
+
+// Railway Variables 또는 .env 파일에서 토큰 로드
 const TOKEN = process.env.DISCORD_TOKEN;
 
 // 디스코드 클라이언트 설정
@@ -22,7 +24,7 @@ const client = new Client({ intents });
 const GUILD_ID = '1456729030459134115';
 const PURCHASE_LOG_CHANNEL_ID = '1457384858065047663';
 
-// 데이터베이스 초기화 (SQLite 파일로 저장)
+// 데이터베이스 초기화 (SQLite 파일 저장)
 const db = new QuickDB();
 
 // 기본 폰트
@@ -92,8 +94,9 @@ function getHighestRoleName(member, config_list, default_name = '회원 👤') {
 // 원형 아바타 그리기
 async function drawCircleAvatar(ctx, url, x, y, size) {
     try {
-        const avatarBuffer = await fetch(url).then(res => res.arrayBuffer());
-        const avatarImg = await loadImage(Buffer.from(avatarBuffer));
+        const res = await fetch(url);
+        const arrayBuffer = await res.arrayBuffer();
+        const avatarImg = await loadImage(Buffer.from(arrayBuffer));
         
         ctx.save();
         ctx.beginPath();
@@ -113,7 +116,7 @@ async function drawCircleAvatar(ctx, url, x, y, size) {
 }
 
 
-// --- [ 이벤트 핸들러 ] ---
+// --- [ 디스코드 이벤트 핸들러 ] ---
 
 client.once('ready', async () => {
     const commands = [
@@ -127,7 +130,7 @@ client.once('ready', async () => {
     const rest = new REST({ version: '10' }).setToken(TOKEN);
     try {
         await rest.put(Routes.applicationGuildCommands(client.user.id, GUILD_ID), { body: commands });
-        console.log(`✅ ${client.user.username} 구동 완료! (Railway 연결 성공)`);
+        console.log(`✅ ${client.user.username} 구동 완료! (Railway 정상 연결)`);
     } catch (error) {
         console.error('❌ 슬래시 명령어 동기화 실패:', error);
     }
@@ -185,7 +188,7 @@ client.on('messageCreate', async message => {
         const user_key = `user_${target.id}`;
         let user_data = await db.get(user_key) || { total_amount: 0, buy_count: 0, max_amount: 0 };
         
-        // 이미지 생성 (900x480 다크 테마)
+        // 프로필 카드 이미지 생성
         const W = 900, H = 480;
         const canvas = createCanvas(W, H);
         const ctx = canvas.getContext('2d');
@@ -233,7 +236,7 @@ client.on('messageCreate', async message => {
         const guild_name = message.guild.name.length > 15 ? `${message.guild.name.substring(0, 15)}...` : message.guild.name;
         ctx.fillText(guild_name, 700, 105);
 
-        // 4개 데이터 정보 카드
+        // 데이터 정보 카드 4개
         const card_y = 200, card_h = 190, card_w = 195, gap = 15;
         const card_bg = "#1B191E";
 
@@ -296,7 +299,7 @@ client.on('messageCreate', async message => {
         ctx.font = `bold 32px ${FONT_FAMILY}`;
         ctx.fillText(purchase_rank_str, x_4 + 20, card_y + 85);
 
-        // 하단 텍스트
+        // 하단 문구
         ctx.fillStyle = "#5A555E";
         ctx.font = `12px ${FONT_FAMILY}`;
         ctx.fillText('ⓘ  2026.09.06 이후의 데이터만 기록됩니다.', 40, 435);
@@ -307,5 +310,5 @@ client.on('messageCreate', async message => {
     }
 });
 
-// Railway Variables 환경 변수 적용
+// 봇 로그인
 client.login(TOKEN);
