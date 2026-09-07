@@ -1,1718 +1,707 @@
-const {
-    Client,
-    GatewayIntentBits,
-    EmbedBuilder,
-    REST,
-    Routes,
-    SlashCommandBuilder,
-    AttachmentBuilder,
-    PermissionFlagsBits
-} = require('discord.js');
-
-const {
-    createCanvas,
-    loadImage,
-    registerFont
-} = require('canvas');
-
-const fetch = (...args) =>
-    import('node-fetch').then(({ default: fetch }) => fetch(...args));
-
+const { Client, GatewayIntentBits, EmbedBuilder, REST, Routes, SlashCommandBuilder, AttachmentBuilder, PermissionsBitField } = require('discord.js');
+const { createCanvas, loadImage, GlobalFonts } = require('@napi-rs/canvas');
 const { QuickDB } = require('quick.db');
-const dotenv = require('dotenv');
+const https = require('https');
 const path = require('path');
+const fs = require('fs');
 
-dotenv.config();
+const db = new QuickDB({ filePath: './database.sqlite' });
 
-const TOKEN = process.env.DISCORD_TOKEN;
+const client = new Client({ 
+    intents: [
+        GatewayIntentBits.Guilds, 
+        GatewayIntentBits.GuildMessages, 
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildMembers
+    ] 
+});
 
-// ======================================================
-// 디스코드 설정
-// ======================================================
+const TOKEN = process.env.TOKEN;
 
-const intents = [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildMembers
-];
+// ---------------- [ 기본 설정 ] ----------------
+const GUILD_ID = '1456729030459134115'; 
+const PURCHASE_LOG_CHANNEL_ID = '1457384858065047663'; 
+// ------------------------------------------------
 
-const client = new Client({ intents });
+const FONT_FAMILY = 'CustomFont, sans-serif, "Noto Sans KR", Arial';
 
-// ======================================================
-// 서버 설정
-// ======================================================
-
-const GUILD_ID = '1456729030459134115';
-
-const PURCHASE_LOG_CHANNEL_ID =
-    '1457384858065047663';
-
-// ======================================================
-// 데이터베이스
-// ======================================================
-
-const db = new QuickDB();
-
-// ======================================================
-// 폰트
-// GitHub:
-// fonts/
-// ├─ Pretendard-Regular.ttf
-// └─ Pretendard-Bold.ttf
-// ======================================================
-
-const FONT_REGULAR_PATH = path.join(
-    __dirname,
-    'fonts',
-    'Pretendard-Regular.ttf'
-);
-
-const FONT_BOLD_PATH = path.join(
-    __dirname,
-    'fonts',
-    'Pretendard-Bold.ttf'
-);
-
-try {
-    registerFont(FONT_REGULAR_PATH, {
-        family: 'Pretendard',
-        weight: '400'
-    });
-
-    registerFont(FONT_BOLD_PATH, {
-        family: 'Pretendard',
-        weight: '700'
-    });
-
-    console.log('✅ Pretendard 폰트 로드 완료');
-} catch (error) {
-    console.error('❌ Pretendard 폰트 로드 실패');
-    console.error(error);
-}
-
-// ======================================================
-// 색상
-// ======================================================
-
-const COLORS = {
-    background: '#0D0D0F',
-    panel: '#101012',
-    card: '#171719',
-
-    white: '#F2EDF0',
-    gray: '#AAA5AA',
-    darkGray: '#656166',
-
-    pink: '#F58FBD',
-    pinkBorder: '#543747',
-
-    cardBorder: '#303033',
-    divider: '#363338',
-
-    footer: '#634354'
-};
-
-// ======================================================
-// 서버 역할 설정
-// ======================================================
-
-const SERVER_ROLES_CONFIG = [
-
-    {
-        id: '1456729030459134117',
-        name: '방장',
-        color: '#FF82B5',
-        icon: 'crown'
-    },
-
-    {
-        id: '1458178323434836199',
-        name: '서버 관리자',
-        color: '#FF82B5',
-        icon: 'crown'
-    },
-
-    {
-        id: '1545686320993796126',
-        name: '서버 관리자',
-        color: '#FF82B5',
-        icon: 'crown'
-    },
-
-    {
-        id: '1529484356748574720',
-        name: '판매자',
-        color: '#B78CFF',
-        icon: 'diamond'
-    },
-
-    {
-        id: '1522815168286036098',
-        name: '판매자',
-        color: '#B78CFF',
-        icon: 'diamond'
-    },
-
-    {
-        id: '1456735270119411734',
-        name: '회원',
-        color: '#9B969B',
-        icon: 'user'
-    }
-];
-
-// ======================================================
-// 구매 등급 설정
-// ======================================================
-
-const BUY_TIERS_CONFIG = [
-
-    {
-        id: '1489943721146449920',
-        name: 'Crystal',
-        color: '#8EEBFF',
-        icon: 'crystal'
-    },
-
-    {
-        id: '1456737896525725719',
-        name: 'Emerald',
-        color: '#69E6A1',
-        icon: 'emerald'
-    },
-
-    {
-        id: '1456736865779581031',
-        name: 'Ruby',
-        color: '#FF7188',
-        icon: 'ruby'
-    },
-
-    {
-        id: '1456736771344826535',
-        name: 'Gold',
-        color: '#FFD76A',
-        icon: 'gold'
-    },
-
-    {
-        id: '1456736573797171384',
-        name: 'Silver',
-        color: '#D6D6DE',
-        icon: 'silver'
-    },
-
-    {
-        id: '1457383788236505299',
-        name: 'Bronze',
-        color: '#C98A62',
-        icon: 'bronze'
-    }
-];
-
-// ======================================================
-// 폰트
-// ======================================================
-
-function font(size, bold = false) {
-    return `${bold ? '700' : '400'} ${size}px "Pretendard"`;
-}
-
-// ======================================================
-// 역할 가져오기
-// ======================================================
-
-function getHighestRole(
-    member,
-    configList,
-    defaultRole
-) {
-    if (!member) {
-        return defaultRole;
-    }
-
-    for (const role of configList) {
-
-        if (member.roles.cache.has(role.id)) {
-            return role;
-        }
-    }
-
-    return defaultRole;
-}
-
-// ======================================================
-// DB - 구매 기록
-// ======================================================
-
-async function update_user_purchase(user_id, amount) {
-
-    const user_key = `user_${user_id}`;
-
-    if (!await db.has(user_key)) {
-
-        await db.set(user_key, {
-            total_amount: 0,
-            buy_count: 0,
-            max_amount: 0
+function loadOnlineFont() {
+    return new Promise((resolve) => {
+        const fontUrl = 'https://raw.githubusercontent.com/google/fonts/main/ofl/notosans/NotoSans%5Bwdth%2Cwght%5D.ttf';
+        https.get(fontUrl, (res) => {
+            const data = [];
+            res.on('data', (chunk) => data.push(chunk));
+            res.on('end', () => {
+                const buffer = Buffer.concat(data);
+                GlobalFonts.register(buffer, 'CustomFont');
+                console.log('폰트 글로벌 등록 성공!');
+                resolve();
+            });
+        }).on('error', (err) => {
+            console.error('폰트 로드 실패:', err);
+            resolve();
         });
-    }
-
-    await db.add(
-        `${user_key}.total_amount`,
-        amount
-    );
-
-    await db.add(
-        `${user_key}.buy_count`,
-        1
-    );
-
-    const current_data =
-        await db.get(user_key);
-
-    if (amount > current_data.max_amount) {
-
-        await db.set(
-            `${user_key}.max_amount`,
-            amount
-        );
-    }
-
-    console.log(
-        `💾 DB 저장 완료: 유저 ${user_id} - ₩${amount.toLocaleString()}`
-    );
+    });
 }
 
-// ======================================================
-// 구매 순위
-// ======================================================
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-async function get_user_rank(user_id) {
-
-    const all_data = await db.all();
-
-    const user_entries = all_data.filter(
-        entry =>
-            entry.id.startsWith('user_') &&
-            entry.value &&
-            typeof entry.value.total_amount === 'number'
-    );
-
-    user_entries.sort(
-        (a, b) =>
-            b.value.total_amount -
-            a.value.total_amount
-    );
-
-    const rankIndex =
-        user_entries.findIndex(
-            entry =>
-                entry.id === `user_${user_id}`
-        );
-
-    if (rankIndex !== -1) {
-        return `#${rankIndex + 1}`;
-    }
-
-    return `#${user_entries.length + 1}`;
+async function fetchUserFromInput(client, input) {
+    if (!input) return null;
+    const cleanId = input.replace(/[^0-9]/g, '');
+    if (!cleanId) return null;
+    return await client.users.fetch(cleanId).catch(() => null);
 }
 
-// ======================================================
-// 원형 아바타
-// ======================================================
-
-async function drawCircleAvatar(
-    ctx,
-    url,
-    x,
-    y,
-    size
-) {
-
+async function getUserRank(guild, targetUserId) {
     try {
+        const allEntries = await db.all();
+        const userMap = new Map();
 
-        const response = await fetch(url);
+        for (const entry of allEntries) {
+            const key = entry.id || entry.key || '';
+            if (typeof key === 'string' && key.startsWith('user_')) {
+                const uid = key.split('.')[0].replace('user_', '');
+                if (uid && !userMap.has(uid)) {
+                    userMap.set(uid, true);
+                }
+            }
+        }
 
-        const avatarBuffer =
-            await response.arrayBuffer();
+        if (!userMap.has(targetUserId)) {
+            userMap.set(targetUserId, true);
+        }
 
-        const avatarImg =
-            await loadImage(
-                Buffer.from(avatarBuffer)
-            );
+        const fetchPromises = Array.from(userMap.keys()).map(async (uid) => {
+            try {
+                const member = await guild.members.fetch(uid).catch(() => null);
+                if (!member || member.user.bot) return null;
 
-        ctx.save();
+                const amount = await db.get(`user_${uid}.totalAmount`);
+                const count = await db.get(`user_${uid}.buyCount`);
 
-        ctx.beginPath();
+                return {
+                    id: uid,
+                    user: member.user,
+                    amount: Number(amount) || 0,
+                    count: Number(count) || 0,
+                    joinedAt: member.joinedTimestamp || Date.now()
+                };
+            } catch (e) {
+                return null;
+            }
+        });
 
-        ctx.arc(
-            x + size / 2,
-            y + size / 2,
-            size / 2,
-            0,
-            Math.PI * 2
-        );
+        const results = await Promise.all(fetchPromises);
+        const validUsers = results.filter(u => u !== null);
 
-        ctx.closePath();
+        validUsers.sort((a, b) => {
+            if (b.amount !== a.amount) {
+                return b.amount - a.amount;
+            }
+            return a.joinedAt - b.joinedAt;
+        });
 
-        ctx.clip();
-
-        ctx.drawImage(
-            avatarImg,
-            x,
-            y,
-            size,
-            size
-        );
-
-        ctx.restore();
-
-        // 아바타 테두리
-
-        ctx.strokeStyle =
-            COLORS.pink;
-
-        ctx.lineWidth = 4;
-
-        ctx.beginPath();
-
-        ctx.arc(
-            x + size / 2,
-            y + size / 2,
-            size / 2,
-            0,
-            Math.PI * 2
-        );
-
-        ctx.stroke();
-
-    } catch (error) {
-
-        console.error(
-            '❌ 아바타 로드 실패:',
-            error
-        );
+        const rankIndex = validUsers.findIndex(u => u.id === targetUserId);
+        return rankIndex !== -1 ? `#${rankIndex + 1}` : '#1';
+    } catch (e) {
+        console.error('랭킹 집계 오류:', e);
+        return '#1';
     }
 }
-
-// ======================================================
-// 역할 아이콘
-// ======================================================
-
-function drawRoleIcon(
-    ctx,
-    type,
-    x,
-    y,
-    size,
-    color
-) {
-
-    ctx.save();
-
-    ctx.strokeStyle = color;
-    ctx.fillStyle = color;
-
-    ctx.lineWidth =
-        Math.max(2, size * 0.08);
-
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-
-    const cx =
-        x + size / 2;
-
-    const cy =
-        y + size / 2;
-
-    // ==================================================
-    // 왕관
-    // ==================================================
-
-    if (type === 'crown') {
-
-        ctx.beginPath();
-
-        ctx.moveTo(
-            x + size * 0.10,
-            y + size * 0.28
-        );
-
-        ctx.lineTo(
-            x + size * 0.28,
-            y + size * 0.46
-        );
-
-        ctx.lineTo(
-            cx,
-            y + size * 0.15
-        );
-
-        ctx.lineTo(
-            x + size * 0.72,
-            y + size * 0.46
-        );
-
-        ctx.lineTo(
-            x + size * 0.90,
-            y + size * 0.28
-        );
-
-        ctx.lineTo(
-            x + size * 0.78,
-            y + size * 0.78
-        );
-
-        ctx.lineTo(
-            x + size * 0.22,
-            y + size * 0.78
-        );
-
-        ctx.closePath();
-
-        ctx.stroke();
-
-        ctx.beginPath();
-
-        ctx.moveTo(
-            x + size * 0.20,
-            y + size * 0.90
-        );
-
-        ctx.lineTo(
-            x + size * 0.80,
-            y + size * 0.90
-        );
-
-        ctx.stroke();
-    }
-
-    // ==================================================
-    // 다이아몬드
-    // ==================================================
-
-    else if (
-        type === 'diamond' ||
-        type === 'crystal'
-    ) {
-
-        ctx.beginPath();
-
-        ctx.moveTo(
-            cx,
-            y + size * 0.08
-        );
-
-        ctx.lineTo(
-            x + size * 0.88,
-            cy
-        );
-
-        ctx.lineTo(
-            cx,
-            y + size * 0.92
-        );
-
-        ctx.lineTo(
-            x + size * 0.12,
-            cy
-        );
-
-        ctx.closePath();
-
-        ctx.stroke();
-
-        ctx.beginPath();
-
-        ctx.moveTo(
-            x + size * 0.12,
-            cy
-        );
-
-        ctx.lineTo(
-            x + size * 0.88,
-            cy
-        );
-
-        ctx.moveTo(
-            cx,
-            y + size * 0.08
-        );
-
-        ctx.lineTo(
-            cx,
-            y + size * 0.92
-        );
-
-        ctx.stroke();
-    }
-
-    // ==================================================
-    // 사람
-    // ==================================================
-
-    else if (type === 'user') {
-
-        ctx.beginPath();
-
-        ctx.arc(
-            cx,
-            y + size * 0.30,
-            size * 0.18,
-            0,
-            Math.PI * 2
-        );
-
-        ctx.stroke();
-
-        ctx.beginPath();
-
-        ctx.arc(
-            cx,
-            y + size * 0.87,
-            size * 0.34,
-            Math.PI,
-            Math.PI * 2
-        );
-
-        ctx.stroke();
-    }
-
-    // ==================================================
-    // Emerald
-    // ==================================================
-
-    else if (type === 'emerald') {
-
-        ctx.beginPath();
-
-        ctx.moveTo(
-            cx,
-            y + size * 0.08
-        );
-
-        ctx.lineTo(
-            x + size * 0.85,
-            y + size * 0.30
-        );
-
-        ctx.lineTo(
-            x + size * 0.68,
-            y + size * 0.84
-        );
-
-        ctx.lineTo(
-            x + size * 0.32,
-            y + size * 0.84
-        );
-
-        ctx.lineTo(
-            x + size * 0.15,
-            y + size * 0.30
-        );
-
-        ctx.closePath();
-
-        ctx.stroke();
-    }
-
-    // ==================================================
-    // Ruby
-    // ==================================================
-
-    else if (type === 'ruby') {
-
-        ctx.beginPath();
-
-        ctx.moveTo(
-            cx,
-            y + size * 0.08
-        );
-
-        ctx.lineTo(
-            x + size * 0.86,
-            y + size * 0.32
-        );
-
-        ctx.lineTo(
-            cx,
-            y + size * 0.92
-        );
-
-        ctx.lineTo(
-            x + size * 0.14,
-            y + size * 0.32
-        );
-
-        ctx.closePath();
-
-        ctx.stroke();
-    }
-
-    // ==================================================
-    // Gold
-    // ==================================================
-
-    else if (type === 'gold') {
-
-        ctx.beginPath();
-
-        ctx.arc(
-            cx,
-            cy,
-            size * 0.34,
-            0,
-            Math.PI * 2
-        );
-
-        ctx.stroke();
-
-        ctx.beginPath();
-
-        ctx.moveTo(
-            cx - size * 0.13,
-            cy
-        );
-
-        ctx.lineTo(
-            cx + size * 0.13,
-            cy
-        );
-
-        ctx.stroke();
-    }
-
-    // ==================================================
-    // Silver
-    // ==================================================
-
-    else if (type === 'silver') {
-
-        ctx.beginPath();
-
-        ctx.arc(
-            cx,
-            cy,
-            size * 0.34,
-            0,
-            Math.PI * 2
-        );
-
-        ctx.stroke();
-    }
-
-    // ==================================================
-    // Bronze
-    // ==================================================
-
-    else if (type === 'bronze') {
-
-        ctx.beginPath();
-
-        ctx.arc(
-            cx,
-            cy,
-            size * 0.34,
-            0,
-            Math.PI * 2
-        );
-
-        ctx.stroke();
-
-        ctx.beginPath();
-
-        ctx.moveTo(
-            cx - size * 0.14,
-            cy + size * 0.14
-        );
-
-        ctx.lineTo(
-            cx + size * 0.14,
-            cy - size * 0.14
-        );
-
-        ctx.stroke();
-    }
-
-    ctx.restore();
-}
-
-// ======================================================
-// 봇 준비
-// ======================================================
 
 client.once('ready', async () => {
+    await loadOnlineFont();
+    console.log(`봇 접속 성공: ${client.user.tag}`);
 
     const commands = [
-
         new SlashCommandBuilder()
             .setName('지급완료')
-            .setDescription(
-                '구매 데이터를 기록하고 로그를 전송합니다.'
-            )
-            .addUserOption(option =>
-                option
-                    .setName('구매자')
-                    .setDescription(
-                        '아이템을 지급받을 유저'
-                    )
-                    .setRequired(true)
-            )
-            .addIntegerOption(option =>
-                option
-                    .setName('금액')
-                    .setDescription(
-                        '거래 금액 (숫자만 입력)'
-                    )
-                    .setRequired(true)
-            )
+            .setDescription('지급 완료 알림 및 구매 로그를 전송합니다.')
+            .addStringOption(opt => opt.setName('금액').setDescription('구매 금액').setRequired(true))
+            .addStringOption(opt => opt.setName('상품').setDescription('구매한 상품명').setRequired(true))
+            .addStringOption(opt => opt.setName('수량').setDescription('구매 수량').setRequired(true))
+            .addUserOption(opt => opt.setName('구매자').setDescription('구매한 유저').setRequired(false))
+            .addUserOption(opt => opt.setName('판매자').setDescription('담당 판매자').setRequired(false))
     ];
 
-    const rest =
-        new REST({ version: '10' })
-            .setToken(TOKEN);
+    const rest = new REST({ version: '10' }).setToken(TOKEN);
 
     try {
-
         await rest.put(
-            Routes.applicationGuildCommands(
-                client.user.id,
-                GUILD_ID
-            ),
-            {
-                body: commands
-            }
+            Routes.applicationGuildCommands(client.user.id, GUILD_ID),
+            { body: commands }
         );
-
-        console.log(
-            `✅ ${client.user.tag} 봇 준비 완료`
-        );
-
-        console.log(
-            '✅ 슬래시 명령어 동기화 완료'
-        );
-
-        console.log(
-            '💾 database.sqlite 영구 저장 사용'
-        );
-
+        console.log('[/지급완료] 슬래시 명령어 등록 완료!');
     } catch (error) {
-
-        console.error(
-            '❌ 명령어 동기화 실패:',
-            error
-        );
+        console.error('슬래시 명령어 등록 오류:', error);
     }
 });
 
-// ======================================================
-// /지급완료
-// ======================================================
+client.on('interactionCreate', async interaction => {
+    if (!interaction.isChatInputCommand()) return;
 
-client.on(
-    'interactionCreate',
-    async interaction => {
+    if (interaction.commandName === '지급완료') {
+        await interaction.reply({ content: '처리를 시작합니다.', ephemeral: true });
 
-        if (!interaction.isChatInputCommand()) {
-            return;
-        }
+        const itemName = interaction.options.getString('상품');
+        const itemQty = interaction.options.getString('수량');
+        const amountStr = interaction.options.getString('금액');
+        const numericAmount = parseInt(amountStr.replace(/[^0-9]/g, '')) || 0;
 
-        if (
-            interaction.commandName !==
-            '지급완료'
-        ) {
-            return;
-        }
+        const buyer = interaction.options.getUser('구매자') || interaction.user;
+        const seller = interaction.options.getUser('판매자') || interaction.user;
 
-        // 관리자 권한
-        if (
-            !interaction.member.permissions.has(
-                PermissionFlagsBits.Administrator
-            )
-        ) {
+        const currentAmount = (await db.get(`user_${buyer.id}.totalAmount`)) || 0;
+        const currentCount = (await db.get(`user_${buyer.id}.buyCount`)) || 0;
 
-            return interaction.reply({
-                content:
-                    '❌ 이 명령어를 사용할 권한이 없습니다.',
-                ephemeral: true
-            });
-        }
+        await db.set(`user_${buyer.id}.totalAmount`, Number(currentAmount) + numericAmount);
+        await db.set(`user_${buyer.id}.buyCount`, Number(currentCount) + 1);
 
-        const 구매자 =
-            interaction.options.getUser('구매자');
-
-        const 금액 =
-            interaction.options.getInteger('금액');
-
-        // 구매 데이터 저장
-        await update_user_purchase(
-            구매자.id,
-            금액
-        );
-
-        // 성공 메시지
-        const success_embed =
-            new EmbedBuilder()
-                .setDescription(
-                    `**${구매자}님, 아이템이 정상적으로 지급되었어요.** <a:veryheart:1479957265871143104>`
-                )
-                .setColor(0xFFC1D6)
-                .addFields([
-                    {
-                        name: '\u200B',
-                        value: '리뷰 작성은 필수입니다.'
-                    }
-                ]);
-
-        await interaction.reply({
-            embeds: [success_embed]
-        });
-
-        // 구매 로그
-        const log_channel =
-            client.channels.cache.get(
-                PURCHASE_LOG_CHANNEL_ID
-            );
-
-        if (!log_channel) {
-
-            console.error(
-                `❌ 로그 채널을 찾을 수 없습니다.`
-            );
-
-            return;
-        }
-
-        const user_data =
-            await db.get(
-                `user_${구매자.id}`
-            );
-
-        const log_embed =
-            new EmbedBuilder()
-                .setTitle(
-                    '🛍️ 아이템 지급 완료 로그'
-                )
-                .setColor(0xFFC1D6)
-                .setTimestamp()
-                .addFields(
-
-                    {
-                        name: '구매자',
-                        value:
-                            `${구매자} (${구매자.id})`,
-                        inline: true
-                    },
-
-                    {
-                        name: '처리 관리자',
-                        value:
-                            `${interaction.user}`,
-                        inline: true
-                    },
-
-                    {
-                        name: '거래 금액',
-                        value:
-                            `₩${금액.toLocaleString()}`,
-                        inline: false
-                    },
-
-                    {
-                        name: '유저 누적 금액',
-                        value:
-                            `₩${user_data.total_amount.toLocaleString()}`,
-                        inline: true
-                    },
-
-                    {
-                        name: '유저 누적 횟수',
-                        value:
-                            `${user_data.buy_count}회`,
-                        inline: true
-                    }
-                );
-
-        await log_channel.send({
-            embeds: [log_embed]
-        });
-    }
-);
-
-// ======================================================
-// $정보
-// ======================================================
-
-client.on(
-    'messageCreate',
-    async message => {
-
-        // 봇 무시
-        if (message.author.bot) {
-            return;
-        }
-
-        // 서버에서만 사용
-        if (!message.guild) {
-            return;
-        }
-
-        // $로 시작하지 않으면 무시
-        if (!message.content.startsWith('$')) {
-            return;
-        }
-
-        const command =
-            message.content
-                .substring(1)
-                .trim()
-                .split(/\s+/);
-
-        const cmd_name =
-            command[0];
-
-        if (cmd_name !== '정보') {
-            return;
+        const currentBiggest = (await db.get(`user_${buyer.id}.biggestDeal`)) || 0;
+        if (numericAmount > currentBiggest) {
+            await db.set(`user_${buyer.id}.biggestDeal`, numericAmount);
         }
 
         try {
+            const logChannel = await client.channels.fetch(PURCHASE_LOG_CHANNEL_ID);
+            if (logChannel) {
+                const logEmbed = new EmbedBuilder()
+                    .setColor(0xFFD1DC)
+                    .setDescription(`°.✩┈┈∘┈˃̶ ୨<a:Pinkheartgif:1545408138377695352> ୧˂̶┈∘┈┈✩.°\n\n${buyer}, ${itemName} (${itemQty}개) 구매 감사합니다 .ᐟ.ᐟ\n\n사용된 금액 : ${amountStr}\n\n해당 관리 판매자: ${seller}\n\n°.✩┈┈∘┈˃̶ ୨<a:Pinkheartgif:1545408138377695352> ୧˂̶┈∘┈┈✩.°\n࣪𓏲ּ ᥫ᭡ ₊ 𝑻𝒉𝒂𝒏𝒌 𝒚𝒐𝒖 ⊹ ˑ ִֶ 𓂃`)
+                    .setImage('https://i.imgur.com/jokl6LQ.gif');
 
-            // ==================================================
-            // 대상 유저
-            // ==================================================
-
-            const target =
-                message.mentions.users.first() ||
-                message.author;
-
-            const member =
-                message.guild.members.cache.get(
-                    target.id
-                );
-
-            // ==================================================
-            // DB 데이터
-            // ==================================================
-
-            const user_key =
-                `user_${target.id}`;
-
-            let user_data =
-                await db.get(user_key);
-
-            if (!user_data) {
-
-                user_data = {
-                    total_amount: 0,
-                    buy_count: 0,
-                    max_amount: 0
-                };
+                await logChannel.send({ content: `${buyer}`, embeds: [logEmbed] });
             }
-
-            const totalAmount =
-                Number(
-                    user_data.total_amount || 0
-                );
-
-            const buyCount =
-                Number(
-                    user_data.buy_count || 0
-                );
-
-            const maxAmount =
-                Number(
-                    user_data.max_amount || 0
-                );
-
-            // ==================================================
-            // 캔버스
-            // ==================================================
-
-            const W = 1536;
-            const H = 808;
-
-            const canvas =
-                createCanvas(W, H);
-
-            const ctx =
-                canvas.getContext('2d');
-
-            // ==================================================
-            // 배경
-            // ==================================================
-
-            ctx.fillStyle =
-                COLORS.background;
-
-            ctx.fillRect(
-                0,
-                0,
-                W,
-                H
-            );
-
-            // ==================================================
-            // 메인 패널
-            // ==================================================
-
-            ctx.fillStyle =
-                COLORS.panel;
-
-            ctx.strokeStyle =
-                COLORS.pinkBorder;
-
-            ctx.lineWidth = 2;
-
-            ctx.beginPath();
-
-            ctx.roundRect(
-                23,
-                40,
-                1490,
-                727,
-                30
-            );
-
-            ctx.fill();
-            ctx.stroke();
-
-            // ==================================================
-            // 아바타
-            // ==================================================
-
-            await drawCircleAvatar(
-                ctx,
-                target.displayAvatarURL({
-                    extension: 'png',
-                    size: 256
-                }),
-                88,
-                113,
-                205
-            );
-
-            // 온라인 점
-            ctx.fillStyle =
-                COLORS.pink;
-
-            ctx.strokeStyle =
-                COLORS.panel;
-
-            ctx.lineWidth = 7;
-
-            ctx.beginPath();
-
-            ctx.arc(
-                271,
-                292,
-                22,
-                0,
-                Math.PI * 2
-            );
-
-            ctx.fill();
-            ctx.stroke();
-
-            // ==================================================
-            // 사용자 이름
-            // ==================================================
-
-            ctx.fillStyle =
-                COLORS.white;
-
-            ctx.font =
-                font(64, true);
-
-            ctx.fillText(
-                target.username,
-                352,
-                180
-            );
-
-            // ==================================================
-            // 태그
-            // ==================================================
-
-            ctx.fillStyle =
-                COLORS.darkGray;
-
-            ctx.font =
-                font(31);
-
-            const tag =
-                target.discriminator &&
-                target.discriminator !== '0'
-                    ? `#${target.discriminator}`
-                    : `#${target.id.slice(-4)}`;
-
-            ctx.fillText(
-                tag,
-                353,
-                235
-            );
-
-            // ==================================================
-            // 서버 역할
-            // ==================================================
-
-            const serverRole =
-                getHighestRole(
-                    member,
-                    SERVER_ROLES_CONFIG,
-                    {
-                        name: '회원',
-                        color: '#9B969B',
-                        icon: 'user'
-                    }
-                );
-
-            drawRoleIcon(
-                ctx,
-                serverRole.icon,
-                350,
-                265,
-                35,
-                serverRole.color
-            );
-
-            ctx.fillStyle =
-                serverRole.color;
-
-            ctx.font =
-                font(27, true);
-
-            ctx.fillText(
-                serverRole.name,
-                405,
-                294
-            );
-
-            // ==================================================
-            // 가입일
-            // ==================================================
-
-            ctx.fillStyle =
-                COLORS.gray;
-
-            ctx.font =
-                font(24);
-
-            ctx.fillText(
-                '가입일',
-                835,
-                213
-            );
-
-            let joined_str =
-                '2026. 09. 06';
-
-            if (
-                member &&
-                member.joinedAt
-            ) {
-
-                const d =
-                    member.joinedAt;
-
-                joined_str =
-                    `${d.getFullYear()}. ` +
-                    `${String(
-                        d.getMonth() + 1
-                    ).padStart(2, '0')}. ` +
-                    `${String(
-                        d.getDate()
-                    ).padStart(2, '0')}`;
-            }
-
-            ctx.fillStyle =
-                COLORS.white;
-
-            ctx.font =
-                font(29);
-
-            ctx.fillText(
-                joined_str,
-                835,
-                255
-            );
-
-            // ==================================================
-            // 구분선
-            // ==================================================
-
-            ctx.strokeStyle =
-                COLORS.divider;
-
-            ctx.lineWidth = 2;
-
-            ctx.beginPath();
-
-            ctx.moveTo(
-                1039,
-                166
-            );
-
-            ctx.lineTo(
-                1039,
-                273
-            );
-
-            ctx.stroke();
-
-            // ==================================================
-            // 서버
-            // ==================================================
-
-            ctx.fillStyle =
-                COLORS.gray;
-
-            ctx.font =
-                font(24);
-
-            ctx.fillText(
-                '서버',
-                1175,
-                213
-            );
-
-            ctx.fillStyle =
-                COLORS.white;
-
-            ctx.font =
-                font(17, true);
-
-            ctx.fillText(
-                'SODDU DISCORD SERVER',
-                1175,
-                250
-            );
-
-            ctx.fillStyle =
-                COLORS.pink;
-
-            ctx.font =
-                font(32, true);
-
-            ctx.fillText(
-                '›',
-                1450,
-                250
-            );
-
-            ctx.fillStyle =
-                COLORS.footer;
-
-            ctx.font =
-                font(12);
-
-            ctx.fillText(
-                'S I N C E  2 0 2 0',
-                1175,
-                285
-            );
-
-            // ==================================================
-            // 카드
-            // ==================================================
-
-            const cardY = 354;
-            const cardH = 296;
-            const cardW = 344;
-
-            const cardX = [
-                56,
-                418,
-                778,
-                1138
-            ];
-
-            for (
-                const x of cardX
-            ) {
-
-                ctx.fillStyle =
-                    COLORS.card;
-
-                ctx.strokeStyle =
-                    COLORS.cardBorder;
-
-                ctx.lineWidth = 2;
-
-                ctx.beginPath();
-
-                ctx.roundRect(
-                    x,
-                    cardY,
-                    cardW,
-                    cardH,
-                    24
-                );
-
-                ctx.fill();
-                ctx.stroke();
-            }
-
-            // ==================================================
-            // 카드 1
-            // 총 거래량
-            // ==================================================
-
-            drawRoleIcon(
-                ctx,
-                'diamond',
-                94,
-                390,
-                38,
-                COLORS.pink
-            );
-
-            ctx.fillStyle =
-                '#C1BCC1';
-
-            ctx.font =
-                font(25);
-
-            ctx.fillText(
-                '총 거래량',
-                163,
-                426
-            );
-
-            ctx.fillStyle =
-                COLORS.white;
-
-            ctx.font =
-                font(47, true);
-
-            ctx.fillText(
-                `₩${totalAmount.toLocaleString()}`,
-                95,
-                512
-            );
-
-            ctx.strokeStyle =
-                COLORS.divider;
-
-            ctx.lineWidth = 2;
-
-            ctx.beginPath();
-
-            ctx.moveTo(
-                95,
-                535
-            );
-
-            ctx.lineTo(
-                360,
-                535
-            );
-
-            ctx.stroke();
-
-            ctx.fillStyle =
-                COLORS.gray;
-
-            ctx.font =
-                font(20);
-
-            ctx.fillText(
-                '최대 거래 금액',
-                95,
-                584
-            );
-
-            ctx.fillStyle =
-                COLORS.white;
-
-            ctx.font =
-                font(27, true);
-
-            ctx.fillText(
-                `₩${maxAmount.toLocaleString()}`,
-                95,
-                620
-            );
-
-            // ==================================================
-            // 카드 2
-            // 총 거래 횟수
-            // ==================================================
-
-            drawRoleIcon(
-                ctx,
-                'silver',
-                456,
-                390,
-                38,
-                COLORS.pink
-            );
-
-            ctx.fillStyle =
-                '#C1BCC1';
-
-            ctx.font =
-                font(25);
-
-            ctx.fillText(
-                '총 거래 횟수',
-                535,
-                426
-            );
-
-            ctx.fillStyle =
-                COLORS.white;
-
-            ctx.font =
-                font(47, true);
-
-            ctx.fillText(
-                `${buyCount}`,
-                456,
-                512
-            );
-
-            // ==================================================
-            // 카드 3
-            // 구매 등급
-            // ==================================================
-
-            const tier =
-                getHighestRole(
-                    member,
-                    BUY_TIERS_CONFIG,
-                    {
-                        name: 'NONE',
-                        color: '#777277',
-                        icon: 'silver'
-                    }
-                );
-
-            drawRoleIcon(
-                ctx,
-                tier.icon,
-                816,
-                390,
-                38,
-                tier.color
-            );
-
-            ctx.fillStyle =
-                '#C1BCC1';
-
-            ctx.font =
-                font(25);
-
-            ctx.fillText(
-                '구매 등급',
-                895,
-                426
-            );
-
-            ctx.fillStyle =
-                tier.color;
-
-            ctx.font =
-                font(31, true);
-
-            ctx.fillText(
-                tier.name,
-                817,
-                512
-            );
-
-            // ==================================================
-            // 카드 4
-            // 초대 횟수
-            // ==================================================
-
-            drawRoleIcon(
-                ctx,
-                'user',
-                1177,
-                390,
-                38,
-                COLORS.pink
-            );
-
-            ctx.fillStyle =
-                '#C1BCC1';
-
-            ctx.font =
-                font(25);
-
-            ctx.fillText(
-                '초대 횟수',
-                1250,
-                426
-            );
-
-            // 현재 초대 시스템 미연동
-            // 기본값 0
-            ctx.fillStyle =
-                COLORS.white;
-
-            ctx.font =
-                font(47, true);
-
-            ctx.fillText(
-                '0',
-                1177,
-                512
-            );
-
-            ctx.strokeStyle =
-                COLORS.divider;
-
-            ctx.lineWidth = 2;
-
-            ctx.beginPath();
-
-            ctx.moveTo(
-                1177,
-                535
-            );
-
-            ctx.lineTo(
-                1440,
-                535
-            );
-
-            ctx.stroke();
-
-            ctx.fillStyle =
-                COLORS.gray;
-
-            ctx.font =
-                font(20);
-
-            ctx.fillText(
-                '서버 순위',
-                1177,
-                584
-            );
-
-            // ==================================================
-            // 구매 순위
-            // ==================================================
-
-            const purchaseRank =
-                await get_user_rank(
-                    target.id
-                );
-
-            ctx.fillStyle =
-                COLORS.pink;
-
-            ctx.font =
-                font(42, true);
-
-            ctx.fillText(
-                purchaseRank,
-                1378,
-                594
-            );
-
-            // ==================================================
-            // 하단 안내
-            // ==================================================
-
-            ctx.fillStyle =
-                COLORS.pink;
-
-            ctx.font =
-                font(28);
-
-            ctx.fillText(
-                'ⓘ',
-                66,
-                728
-            );
-
-            ctx.fillStyle =
-                COLORS.gray;
-
-            ctx.font =
-                font(19);
-
-            ctx.fillText(
-                '2026.09.06 이후의 데이터만 기록됩니다.',
-                115,
-                728
-            );
-
-            // ==================================================
-            // 하단 선
-            // ==================================================
-
-            ctx.strokeStyle =
-                COLORS.divider;
-
-            ctx.lineWidth = 2;
-
-            ctx.beginPath();
-
-            ctx.moveTo(
-                704,
-                718
-            );
-
-            ctx.lineTo(
-                1141,
-                718
-            );
-
-            ctx.stroke();
-
-            // ==================================================
-            // 하단 서버명
-            // ==================================================
-
-            ctx.fillStyle =
-                COLORS.footer;
-
-            ctx.font =
-                font(12, true);
-
-            ctx.fillText(
-                'S O D D U  D I S C O R D  S E R V E R',
-                1172,
-                728
-            );
-
-            // ==================================================
-            // 이미지 전송
-            // ==================================================
-
-            const attachment =
-                new AttachmentBuilder(
-                    canvas.toBuffer('image/png'),
-                    {
-                        name: 'profile.png'
-                    }
-                );
-
-            await message.channel.send({
-                files: [attachment]
-            });
-
         } catch (error) {
+            console.error("구매 로그 채널 오류:", error);
+        }
 
-            console.error(
-                '❌ $정보 이미지 생성 오류:',
-                error
-            );
+        const ticketEmbed = new EmbedBuilder()
+            .setColor(0xFFD1DC)
+            .setDescription(`**아이템이 정상적으로 지급되었어요.** <a:veryheart:1479957265871143104>\nhttps://discord.com/channels/1456729030459134115/1457384179535712473 작성은 필수입니다`);
 
-            await message.channel.send(
-                '❌ 정보 이미지를 생성하는 중 오류가 발생했어요.'
-            );
+        await interaction.channel.send({ content: `${buyer}`, embeds: [ticketEmbed] });
+    }
+});
+
+client.on('messageCreate', async message => {
+    if (message.author.bot || !message.content.startsWith('$')) return;
+
+    const args = message.content.slice(1).trim().split(/ +/);
+    const command = args.shift();
+
+    if (command === '유저정보변경로그') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+            return message.reply('❌ 이 명령어를 사용할 수 있는 권한이 없습니다. (관리자 전용)');
+        }
+
+        const channelId = args[0];
+        if (!channelId) {
+            return message.reply('❌ 설정할 채널 ID를 입력해주세요. 예: `$유저정보변경로그 1545759434175815771`');
+        }
+
+        try {
+            const targetChannel = await client.channels.fetch(channelId);
+            if (!targetChannel) throw new Error();
+
+            await db.set('info_log_channel_id', channelId);
+            return message.reply(`✅ 유저 정보 변경 로그 채널이 <#${channelId}> 로 설정되었습니다.`);
+        } catch (e) {
+            return message.reply('❌ 올바르지 않은 채널 ID이거나 접근 권한이 없습니다.');
         }
     }
-);
 
-// ======================================================
-// 로그인
-// ======================================================
+    if (command === '유저구매횟수') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+            return message.reply('❌ 이 명령어를 사용할 수 있는 권한이 없습니다. (관리자 전용)');
+        }
+
+        const count = parseInt(args[0]);
+        const targetUser = await fetchUserFromInput(client, args[1]);
+
+        if (isNaN(count) || !targetUser) {
+            return message.reply('❌ 사용법: `$유저구매횟수 (변경할 횟수) (유저ID 또는 @유저멘션)`');
+        }
+
+        const oldVal = (await db.get(`user_${targetUser.id}.buyCount`)) || 0;
+        await db.set(`user_${targetUser.id}.buyCount`, count);
+
+        await message.reply(`✅ ${targetUser.username} (${targetUser.id}) 님의 구매 횟수가 **${count}회**로 변경되었습니다.`);
+
+        const infoLogChannelId = await db.get('info_log_channel_id');
+        if (infoLogChannelId) {
+            try {
+                const infoLogChannel = await client.channels.fetch(infoLogChannelId);
+                if (infoLogChannel) {
+                    const infoEmbed = new EmbedBuilder()
+                        .setColor(0x3498DB)
+                        .setTitle('📝 유저 정보 변경 알림')
+                        .addFields(
+                            { name: '처리 관리자', value: `${message.author} (${message.author.id})`, inline: true },
+                            { name: '대상 유저', value: `${targetUser} (${targetUser.id})`, inline: true },
+                            { name: '항목', value: '구매 횟수', inline: false },
+                            { name: '변경 전', value: `${oldVal}회`, inline: true },
+                            { name: '변경 후', value: `${count}회`, inline: true }
+                        )
+                        .setTimestamp();
+
+                    await infoLogChannel.send({ embeds: [infoEmbed] });
+                }
+            } catch (error) {
+                console.error('로그 전송 실패:', error);
+            }
+        }
+    }
+
+    if (command === '유저구매금액') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+            return message.reply('❌ 이 명령어를 사용할 수 있는 권한이 없습니다. (관리자 전용)');
+        }
+
+        const amount = parseInt(args[0]);
+        const targetUser = await fetchUserFromInput(client, args[1]);
+
+        if (isNaN(amount) || !targetUser) {
+            return message.reply('❌ 사용법: `$유저구매금액 (변경할 금액) (유저ID 또는 @유저멘션)`');
+        }
+
+        const oldVal = (await db.get(`user_${targetUser.id}.totalAmount`)) || 0;
+        await db.set(`user_${targetUser.id}.totalAmount`, amount);
+
+        await message.reply(`✅ ${targetUser.username} (${targetUser.id}) 님의 누적 금액이 **₩${amount.toLocaleString()}**으로 변경되었습니다.`);
+
+        const infoLogChannelId = await db.get('info_log_channel_id');
+        if (infoLogChannelId) {
+            try {
+                const infoLogChannel = await client.channels.fetch(infoLogChannelId);
+                if (infoLogChannel) {
+                    const infoEmbed = new EmbedBuilder()
+                        .setColor(0x3498DB)
+                        .setTitle('📝 유저 정보 변경 알림')
+                        .addFields(
+                            { name: '처리 관리자', value: `${message.author} (${message.author.id})`, inline: true },
+                            { name: '대상 유저', value: `${targetUser} (${targetUser.id})`, inline: true },
+                            { name: '항목', value: '누적 금액', inline: false },
+                            { name: '변경 전', value: `₩${Number(oldVal).toLocaleString()}`, inline: true },
+                            { name: '변경 후', value: `₩${amount.toLocaleString()}`, inline: true }
+                        )
+                        .setTimestamp();
+
+                    await infoLogChannel.send({ embeds: [infoEmbed] });
+                }
+            } catch (error) {
+                console.error('로그 전송 실패:', error);
+            }
+        }
+    }
+
+    if (command === '유저최대금액') {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+            return message.reply('❌ 이 명령어를 사용할 수 있는 권한이 없습니다. (관리자 전용)');
+        }
+
+        const amount = parseInt(args[0]);
+        const targetUser = await fetchUserFromInput(client, args[1]);
+
+        if (isNaN(amount) || !targetUser) {
+            return message.reply('❌ 사용법: `$유저최대금액 (변경할 금액) (유저ID 또는 @유저멘션)`');
+        }
+
+        const oldVal = (await db.get(`user_${targetUser.id}.biggestDeal`)) || 0;
+        await db.set(`user_${targetUser.id}.biggestDeal`, amount);
+
+        await message.reply(`✅ ${targetUser.username} (${targetUser.id}) 님의 최대 거래 금액이 **₩${amount.toLocaleString()}**으로 변경되었습니다.`);
+
+        const infoLogChannelId = await db.get('info_log_channel_id');
+        if (infoLogChannelId) {
+            try {
+                const infoLogChannel = await client.channels.fetch(infoLogChannelId);
+                if (infoLogChannel) {
+                    const infoEmbed = new EmbedBuilder()
+                        .setColor(0x3498DB)
+                        .setTitle('📝 유저 정보 변경 알림')
+                        .addFields(
+                            { name: '처리 관리자', value: `${message.author} (${message.author.id})`, inline: true },
+                            { name: '대상 유저', value: `${targetUser} (${targetUser.id})`, inline: true },
+                            { name: '항목', value: '최대 거래 금액', inline: false },
+                            { name: '변경 전', value: `₩${Number(oldVal).toLocaleString()}`, inline: true },
+                            { name: '변경 후', value: `₩${amount.toLocaleString()}`, inline: true }
+                        )
+                        .setTimestamp();
+
+                    await infoLogChannel.send({ embeds: [infoEmbed] });
+                }
+            } catch (error) {
+                console.error('로그 전송 실패:', error);
+            }
+        }
+    }
+
+    if (command === '서버통계') {
+        const loadingMsg = await message.reply('📊 서버 전체 통계를 이미지로 생성하는 중이에요. . .');
+
+        try {
+            const allEntries = await db.all();
+            const userMap = new Map();
+
+            for (const entry of allEntries) {
+                const key = entry.id || entry.key || '';
+                if (typeof key === 'string' && key.startsWith('user_')) {
+                    const uid = key.split('.')[0].replace('user_', '');
+                    if (uid && !userMap.has(uid)) userMap.set(uid, true);
+                }
+            }
+
+            let totalVolume = 0;
+            let totalDeals = 0;
+            let topUser = { name: '없음', amount: 0 };
+
+            const fetchPromises = Array.from(userMap.keys()).map(async (uid) => {
+                const amount = Number((await db.get(`user_${uid}.totalAmount`)) || 0);
+                const count = Number((await db.get(`user_${uid}.buyCount`)) || 0);
+                const member = await message.guild.members.fetch(uid).catch(() => null);
+
+                return {
+                    username: member ? member.user.username : '탈퇴한 유저',
+                    amount,
+                    count
+                };
+            });
+
+            const results = await Promise.all(fetchPromises);
+
+            results.forEach(u => {
+                totalVolume += u.amount;
+                totalDeals += u.count;
+                if (u.amount > topUser.amount) {
+                    topUser = { name: u.username, amount: u.amount };
+                }
+            });
+
+            const avgDeal = totalDeals > 0 ? Math.floor(totalVolume / totalDeals) : 0;
+
+            const canvas = createCanvas(800, 420);
+            const ctx = canvas.getContext('2d');
+
+            ctx.fillStyle = '#0F0F12';
+            ctx.beginPath();
+            ctx.roundRect(0, 0, 800, 420, 20);
+            ctx.fill();
+
+            ctx.fillStyle = '#FFFFFF';
+            ctx.font = `30px ${FONT_FAMILY}`;
+            ctx.fillText('📊 SERVER TOTAL ANALYTICS', 40, 65);
+
+            ctx.fillStyle = '#72767D';
+            ctx.font = `14px ${FONT_FAMILY}`;
+            ctx.fillText('SERVER: SODDU SHOP', 40, 95);
+
+            ctx.strokeStyle = '#27272E';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(40, 115);
+            ctx.lineTo(760, 115);
+            ctx.stroke();
+
+            ctx.fillStyle = '#18181C';
+            ctx.beginPath();
+            ctx.roundRect(40, 140, 350, 120, 15);
+            ctx.fill();
+
+            ctx.fillStyle = '#8E9297';
+            ctx.font = `14px ${FONT_FAMILY}`;
+            ctx.fillText('TOTAL SALES VOLUME', 65, 175);
+
+            ctx.fillStyle = '#2ECC71';
+            ctx.font = `28px ${FONT_FAMILY}`;
+            ctx.fillText(`₩${totalVolume.toLocaleString()}`, 65, 220);
+
+            ctx.fillStyle = '#18181C';
+            ctx.beginPath();
+            ctx.roundRect(410, 140, 350, 120, 15);
+            ctx.fill();
+
+            ctx.fillStyle = '#8E9297';
+            ctx.font = `14px ${FONT_FAMILY}`;
+            ctx.fillText('TOTAL TRANSACTIONS', 435, 175);
+
+            ctx.fillStyle = '#3498DB';
+            ctx.font = `28px ${FONT_FAMILY}`;
+            ctx.fillText(`${totalDeals.toLocaleString()} DEALS`, 435, 220);
+
+            ctx.fillStyle = '#18181C';
+            ctx.beginPath();
+            ctx.roundRect(40, 280, 350, 100, 15);
+            ctx.fill();
+
+            ctx.fillStyle = '#8E9297';
+            ctx.font = `13px ${FONT_FAMILY}`;
+            ctx.fillText('AVG TRANSACTION VALUE', 65, 310);
+
+            ctx.fillStyle = '#FFFFFF';
+            ctx.font = `22px ${FONT_FAMILY}`;
+            ctx.fillText(`₩${avgDeal.toLocaleString()}`, 65, 350);
+
+            ctx.fillStyle = '#18181C';
+            ctx.beginPath();
+            ctx.roundRect(410, 280, 350, 100, 15);
+            ctx.fill();
+
+            ctx.fillStyle = '#8E9297';
+            ctx.font = `13px ${FONT_FAMILY}`;
+            ctx.fillText('TOP SPENDER 👑', 435, 310);
+
+            ctx.fillStyle = '#E5A93C';
+            ctx.font = `20px ${FONT_FAMILY}`;
+            let topName = topUser.name;
+            if (topName.length > 10) topName = topName.substring(0, 9) + '..';
+            ctx.fillText(`${topName} (₩${topUser.amount.toLocaleString()})`, 435, 350);
+
+            const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'stats.png' });
+
+            await sleep(1000);
+            await loadingMsg.delete().catch(() => {});
+            await message.reply({ files: [attachment] });
+
+        } catch (error) {
+            console.error('서버통계 이미지 생성 오류:', error);
+            await loadingMsg.delete().catch(() => {});
+            await message.reply('❌ 서버 통계 생성 중 오류가 발생했습니다.');
+        }
+    }
+
+    if (command === '구매랭크') {
+        const loadingMsg = await message.reply('🏆 구매 순위를 이미지로 생성하는 중이에요. . .');
+
+        try {
+            const allEntries = await db.all();
+            const userMap = new Map();
+
+            for (const entry of allEntries) {
+                const key = entry.id || entry.key || '';
+                if (typeof key === 'string' && key.startsWith('user_')) {
+                    const uid = key.split('.')[0].replace('user_', '');
+                    if (uid && !userMap.has(uid)) userMap.set(uid, true);
+                }
+            }
+
+            const fetchPromises = Array.from(userMap.keys()).map(async (uid) => {
+                const member = await message.guild.members.fetch(uid).catch(() => null);
+                if (!member || member.user.bot) return null;
+
+                const amount = (await db.get(`user_${uid}.totalAmount`)) || 0;
+                return {
+                    user: member.user,
+                    amount: Number(amount),
+                    joinedAt: member.joinedTimestamp || Date.now()
+                };
+            });
+
+            const rankResults = await Promise.all(fetchPromises);
+            const rankData = rankResults.filter(item => item !== null);
+
+            rankData.sort((a, b) => {
+                if (b.amount !== a.amount) return b.amount - a.amount;
+                return a.joinedAt - b.joinedAt;
+            });
+
+            const top20 = rankData.slice(0, 20);
+
+            const itemHeight = 65;
+            const rows = Math.min(top20.length, 10);
+            const canvasWidth = 900;
+            const canvasHeight = Math.max(220 + rows * itemHeight, 350);
+
+            const canvas = createCanvas(canvasWidth, canvasHeight);
+            const ctx = canvas.getContext('2d');
+
+            ctx.fillStyle = '#0F0F12';
+            ctx.beginPath();
+            ctx.roundRect(0, 0, canvasWidth, canvasHeight, 20);
+            ctx.fill();
+
+            ctx.fillStyle = '#FFFFFF';
+            ctx.font = `32px ${FONT_FAMILY}`;
+            ctx.fillText('🏆 TOP 20 PURCHASE RANKING', 40, 65);
+
+            ctx.fillStyle = '#72767D';
+            ctx.font = `14px ${FONT_FAMILY}`;
+            ctx.fillText('Data sorted by total purchase volume (Tier: Joined Date)', 40, 95);
+
+            ctx.strokeStyle = '#27272E';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(40, 115);
+            ctx.lineTo(canvasWidth - 40, 115);
+            ctx.stroke();
+
+            const avatarImages = await Promise.all(
+                top20.map(item => loadImage(item.user.displayAvatarURL({ extension: 'png', size: 64 })).catch(() => null))
+            );
+
+            for (let i = 0; i < top20.length; i++) {
+                const item = top20[i];
+                const isSecondCol = i >= 10;
+                const colIndex = isSecondCol ? 1 : 0;
+                const rowIndex = isSecondCol ? i - 10 : i;
+
+                const startX = colIndex === 0 ? 40 : 470;
+                const startY = 140 + rowIndex * itemHeight;
+
+                ctx.fillStyle = '#18181C';
+                ctx.beginPath();
+                ctx.roundRect(startX, startY, 390, 55, 12);
+                ctx.fill();
+
+                ctx.font = `20px ${FONT_FAMILY}`;
+                if (i === 0) ctx.fillStyle = '#FFD700';
+                else if (i === 1) ctx.fillStyle = '#C0C0C0';
+                else if (i === 2) ctx.fillStyle = '#CD7F32';
+                else ctx.fillStyle = '#8E9297';
+
+                ctx.fillText(`#${i + 1}`, startX + 15, startY + 34);
+
+                const avatarImg = avatarImages[i];
+                if (avatarImg) {
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.arc(startX + 80, startY + 27.5, 18, 0, Math.PI * 2, true);
+                    ctx.closePath();
+                    ctx.clip();
+                    ctx.drawImage(avatarImg, startX + 62, startY + 9.5, 36, 36);
+                    ctx.restore();
+                }
+
+                ctx.fillStyle = '#FFFFFF';
+                ctx.font = `16px ${FONT_FAMILY}`;
+                let username = item.user.username;
+                if (username.length > 9) username = username.substring(0, 8) + '..';
+                ctx.fillText(username, startX + 110, startY + 33);
+
+                ctx.fillStyle = '#2ECC71';
+                ctx.font = `16px ${FONT_FAMILY}`;
+                const amountText = `₩${item.amount.toLocaleString()}`;
+                const textWidth = ctx.measureText(amountText).width;
+                ctx.fillText(amountText, startX + 375 - textWidth, startY + 33);
+            }
+
+            const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'ranking.png' });
+
+            await sleep(1000);
+            await loadingMsg.delete().catch(() => {});
+            await message.reply({ files: [attachment] });
+
+        } catch (error) {
+            console.error('구매랭크 이미지 생성 오류:', error);
+            await loadingMsg.delete().catch(() => {});
+            await message.reply('❌ 랭킹 이미지 생성 중 오류가 발생했습니다.');
+        }
+    }
+
+    if (command === '정보') {
+        const loadingMsg = await message.reply('유저 정보를 불러오는 중이에요. . .');
+
+        try {
+            const targetUser = (await fetchUserFromInput(client, args[0])) || message.author;
+            
+            const [targetMember, totalAmount, buyCount, biggestDeal, userRank, avatar] = await Promise.all([
+                message.guild.members.fetch(targetUser.id).catch(() => null),
+                db.get(`user_${targetUser.id}.totalAmount`),
+                db.get(`user_${targetUser.id}.buyCount`),
+                db.get(`user_${targetUser.id}.biggestDeal`),
+                getUserRank(message.guild, targetUser.id),
+                loadImage(targetUser.displayAvatarURL({ extension: 'png', size: 128 })).catch(() => null)
+            ]);
+
+            const joinedAt = targetMember?.joinedAt 
+                ? targetMember.joinedAt.toISOString().split('T')[0] 
+                : '2026.09.06';
+
+            const canvas = createCanvas(800, 420);
+            const ctx = canvas.getContext('2d');
+
+            ctx.fillStyle = '#0F0F12';
+            ctx.beginPath();
+            ctx.roundRect(0, 0, 800, 420, 20);
+            ctx.fill();
+
+            if (avatar) {
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(90, 85, 45, 0, Math.PI * 2, true);
+                ctx.closePath();
+                ctx.clip();
+                ctx.drawImage(avatar, 45, 40, 90, 90);
+                ctx.restore();
+            }
+
+            ctx.fillStyle = '#FFFFFF';
+            ctx.font = `30px ${FONT_FAMILY}`;
+            ctx.fillText(`${targetUser.username}`, 160, 95);
+
+            ctx.fillStyle = '#72767D';
+            ctx.font = `14px ${FONT_FAMILY}`;
+            ctx.fillText(`JOINED: ${joinedAt}`, 600, 80);
+
+            ctx.fillStyle = '#18181C';
+            ctx.beginPath();
+            ctx.roundRect(40, 160, 350, 170, 15);
+            ctx.fill();
+
+            ctx.fillStyle = '#8E9297';
+            ctx.font = `14px ${FONT_FAMILY}`;
+            ctx.fillText('TOTAL VOLUME', 65, 195);
+
+            ctx.fillStyle = '#FFFFFF';
+            ctx.font = `32px ${FONT_FAMILY}`;
+            ctx.fillText(`₩${Number(totalAmount || 0).toLocaleString()}`, 65, 245);
+
+            ctx.fillStyle = '#8E9297';
+            ctx.font = `13px ${FONT_FAMILY}`;
+            ctx.fillText('BIGGEST DEAL', 65, 288);
+
+            ctx.fillStyle = '#FFFFFF';
+            ctx.font = `16px ${FONT_FAMILY}`;
+            ctx.fillText(`₩${Number(biggestDeal || 0).toLocaleString()}`, 65, 312);
+
+            ctx.fillStyle = '#18181C';
+            ctx.beginPath();
+            ctx.roundRect(410, 160, 350, 170, 15);
+            ctx.fill();
+
+            ctx.fillStyle = '#8E9297';
+            ctx.font = `14px ${FONT_FAMILY}`;
+            ctx.fillText('TOTAL DEALS', 435, 195);
+
+            ctx.fillStyle = '#2ECC71';
+            ctx.font = `32px ${FONT_FAMILY}`;
+            ctx.fillText(`${buyCount || 0}`, 435, 245);
+
+            ctx.fillStyle = '#8E9297';
+            ctx.font = `13px ${FONT_FAMILY}`;
+            ctx.fillText('RANK', 435, 288);
+
+            ctx.fillStyle = '#E5A93C';
+            ctx.font = `18px ${FONT_FAMILY}`;
+            ctx.fillText(`${userRank}`, 435, 312);
+
+            ctx.fillStyle = '#EE4B2B';
+            ctx.font = `12px ${FONT_FAMILY}`;
+            ctx.fillText('* Data recorded starting from 2026.09.06', 40, 370);
+
+            const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'profile.png' });
+
+            await sleep(1000);
+            await loadingMsg.delete().catch(() => {});
+            await message.reply({ files: [attachment] });
+
+        } catch (error) {
+            console.error('정보 이미지 생성 오류:', error);
+            await loadingMsg.delete().catch(() => {});
+            await message.reply('❌ 정보 조회 중 오류가 발생했습니다.');
+        }
+    }
+});
 
 client.login(TOKEN);
