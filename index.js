@@ -2,8 +2,6 @@ const { Client, GatewayIntentBits, EmbedBuilder, REST, Routes, SlashCommandBuild
 const { createCanvas, loadImage, GlobalFonts } = require('@napi-rs/canvas');
 const { QuickDB } = require('quick.db');
 const https = require('https');
-const path = require('path');
-const fs = require('fs');
 
 const db = new QuickDB({ filePath: './database.sqlite' });
 
@@ -23,18 +21,35 @@ const GUILD_ID = '1456729030459134115';
 const PURCHASE_LOG_CHANNEL_ID = '1457384858065047663'; 
 // ------------------------------------------------
 
-const FONT_FAMILY = 'CustomFont, sans-serif, "Noto Sans KR", Arial';
+const FONT_FAMILY = 'CustomFont, "Noto Sans KR", sans-serif';
 
 function loadOnlineFont() {
     return new Promise((resolve) => {
         const fontUrl = 'https://raw.githubusercontent.com/google/fonts/main/ofl/notosans/NotoSans%5Bwdth%2Cwght%5D.ttf';
         https.get(fontUrl, (res) => {
+            // 리다이렉트 대응
+            if (res.statusCode === 301 || res.statusCode === 302) {
+                https.get(res.headers.location, (redirectRes) => {
+                    const data = [];
+                    redirectRes.on('data', (chunk) => data.push(chunk));
+                    redirectRes.on('end', () => {
+                        try {
+                            GlobalFonts.register(Buffer.concat(data), 'CustomFont');
+                            console.log('폰트 글로벌 등록 성공!');
+                        } catch (e) { console.error('폰트 등록 오류:', e); }
+                        resolve();
+                    });
+                });
+                return;
+            }
+
             const data = [];
             res.on('data', (chunk) => data.push(chunk));
             res.on('end', () => {
-                const buffer = Buffer.concat(data);
-                GlobalFonts.register(buffer, 'CustomFont');
-                console.log('폰트 글로벌 등록 성공!');
+                try {
+                    GlobalFonts.register(Buffer.concat(data), 'CustomFont');
+                    console.log('폰트 글로벌 등록 성공!');
+                } catch (e) { console.error('폰트 등록 오류:', e); }
                 resolve();
             });
         }).on('error', (err) => {
@@ -62,43 +77,31 @@ async function getUserRank(guild, targetUserId) {
             const key = entry.id || entry.key || '';
             if (typeof key === 'string' && key.startsWith('user_')) {
                 const uid = key.split('.')[0].replace('user_', '');
-                if (uid && !userMap.has(uid)) {
-                    userMap.set(uid, true);
-                }
+                if (uid && !userMap.has(uid)) userMap.set(uid, true);
             }
         }
 
-        if (!userMap.has(targetUserId)) {
-            userMap.set(targetUserId, true);
-        }
+        if (!userMap.has(targetUserId)) userMap.set(targetUserId, true);
 
         const fetchPromises = Array.from(userMap.keys()).map(async (uid) => {
             try {
-                const member = await guild.members.fetch(uid).catch(() => null);
+                const member = guild.members.cache.get(uid) || await guild.members.fetch(uid).catch(() => null);
                 if (!member || member.user.bot) return null;
 
                 const amount = await db.get(`user_${uid}.totalAmount`);
-                const count = await db.get(`user_${uid}.buyCount`);
-
                 return {
                     id: uid,
-                    user: member.user,
                     amount: Number(amount) || 0,
-                    count: Number(count) || 0,
                     joinedAt: member.joinedTimestamp || Date.now()
                 };
-            } catch (e) {
-                return null;
-            }
+            } catch (e) { return null; }
         });
 
         const results = await Promise.all(fetchPromises);
         const validUsers = results.filter(u => u !== null);
 
         validUsers.sort((a, b) => {
-            if (b.amount !== a.amount) {
-                return b.amount - a.amount;
-            }
+            if (b.amount !== a.amount) return b.amount - a.amount;
             return a.joinedAt - b.joinedAt;
         });
 
@@ -142,7 +145,8 @@ client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
 
     if (interaction.commandName === '지급완료') {
-        await interaction.reply({ content: '처리를 시작합니다.', ephemeral: true });
+        // 응답 시간 초과 방지를 위한 deferReply 사용
+        await interaction.deferReply({ ephemeral: true });
 
         const itemName = interaction.options.getString('상품');
         const itemQty = interaction.options.getString('수량');
@@ -182,6 +186,7 @@ client.on('interactionCreate', async interaction => {
             .setDescription(`**아이템이 정상적으로 지급되었어요.** <a:veryheart:1479957265871143104>\nhttps://discord.com/channels/1456729030459134115/1457384179535712473 작성은 필수입니다`);
 
         await interaction.channel.send({ content: `${buyer}`, embeds: [ticketEmbed] });
+        await interaction.followUp({ content: '✅ 지급 처리가 완료되었습니다.', ephemeral: true });
     }
 });
 
@@ -360,7 +365,7 @@ client.on('messageCreate', async message => {
             const fetchPromises = Array.from(userMap.keys()).map(async (uid) => {
                 const amount = Number((await db.get(`user_${uid}.totalAmount`)) || 0);
                 const count = Number((await db.get(`user_${uid}.buyCount`)) || 0);
-                const member = await message.guild.members.fetch(uid).catch(() => null);
+                const member = message.guild.members.cache.get(uid) || await message.guild.members.fetch(uid).catch(() => null);
 
                 return {
                     username: member ? member.user.username : '탈퇴한 유저',
@@ -460,7 +465,6 @@ client.on('messageCreate', async message => {
 
             const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'stats.png' });
 
-            await sleep(1000);
             await loadingMsg.delete().catch(() => {});
             await message.reply({ files: [attachment] });
 
@@ -487,7 +491,7 @@ client.on('messageCreate', async message => {
             }
 
             const fetchPromises = Array.from(userMap.keys()).map(async (uid) => {
-                const member = await message.guild.members.fetch(uid).catch(() => null);
+                const member = message.guild.members.cache.get(uid) || await message.guild.members.fetch(uid).catch(() => null);
                 if (!member || member.user.bot) return null;
 
                 const amount = (await db.get(`user_${uid}.totalAmount`)) || 0;
@@ -588,7 +592,6 @@ client.on('messageCreate', async message => {
 
             const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'ranking.png' });
 
-            await sleep(1000);
             await loadingMsg.delete().catch(() => {});
             await message.reply({ files: [attachment] });
 
@@ -616,7 +619,7 @@ client.on('messageCreate', async message => {
 
             const joinedAt = targetMember?.joinedAt 
                 ? targetMember.joinedAt.toISOString().split('T')[0] 
-                : '2026.09.06';
+                : '기록 없음';
 
             const canvas = createCanvas(800, 420);
             const ctx = canvas.getContext('2d');
@@ -692,7 +695,6 @@ client.on('messageCreate', async message => {
 
             const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'profile.png' });
 
-            await sleep(1000);
             await loadingMsg.delete().catch(() => {});
             await message.reply({ files: [attachment] });
 
