@@ -1,143 +1,207 @@
-const { Client, GatewayIntentBits, EmbedBuilder, REST, Routes, SlashCommandBuilder, AttachmentBuilder, PermissionsBitField } = require('discord.js');
-const { createCanvas, loadImage, GlobalFonts } = require('@napi-rs/canvas');
+const { Client, GatewayIntentBits, EmbedBuilder, REST, Routes, SlashCommandBuilder, AttachmentBuilder } = require('discord.js');
+const { createCanvas, loadImage, registerFont } = require('canvas');
 const { QuickDB } = require('quick.db');
-const https = require('https');
+const dotenv = require('dotenv');
+const fs = require('fs');
+const path = require('path');
 
-const db = new QuickDB({ filePath: './database.sqlite' });
+dotenv.config();
 
-const client = new Client({ 
-    intents: [
-        GatewayIntentBits.Guilds, 
-        GatewayIntentBits.GuildMessages, 
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildMembers
-    ] 
-});
+const fetch = globalThis.fetch;
+const TOKEN = process.env.DISCORD_TOKEN;
 
-const TOKEN = process.env.TOKEN;
+const intents = [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildMembers
+];
+const client = new Client({ intents });
 
-// ---------------- [ 기본 설정 ] ----------------
-const GUILD_ID = '1456729030459134115'; 
-const PURCHASE_LOG_CHANNEL_ID = '1457384858065047663'; 
-// ------------------------------------------------
+const GUILD_ID = '1456729030459134115';
+const PURCHASE_LOG_CHANNEL_ID = '1457384858065047663';
 
-const FONT_FAMILY = 'CustomFont, "Noto Sans KR", sans-serif';
+const db = new QuickDB();
 
-function loadOnlineFont() {
-    return new Promise((resolve) => {
-        const fontUrl = 'https://raw.githubusercontent.com/google/fonts/main/ofl/notosans/NotoSans%5Bwdth%2Cwght%5D.ttf';
-        https.get(fontUrl, (res) => {
-            // 리다이렉트 대응
-            if (res.statusCode === 301 || res.statusCode === 302) {
-                https.get(res.headers.location, (redirectRes) => {
-                    const data = [];
-                    redirectRes.on('data', (chunk) => data.push(chunk));
-                    redirectRes.on('end', () => {
-                        try {
-                            GlobalFonts.register(Buffer.concat(data), 'CustomFont');
-                            console.log('폰트 글로벌 등록 성공!');
-                        } catch (e) { console.error('폰트 등록 오류:', e); }
-                        resolve();
-                    });
-                });
-                return;
-            }
+let FONT_FAMILY = 'sans-serif';
 
-            const data = [];
-            res.on('data', (chunk) => data.push(chunk));
-            res.on('end', () => {
-                try {
-                    GlobalFonts.register(Buffer.concat(data), 'CustomFont');
-                    console.log('폰트 글로벌 등록 성공!');
-                } catch (e) { console.error('폰트 등록 오류:', e); }
-                resolve();
-            });
-        }).on('error', (err) => {
-            console.error('폰트 로드 실패:', err);
-            resolve();
-        });
-    });
-}
-
-const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-async function fetchUserFromInput(client, input) {
-    if (!input) return null;
-    const cleanId = input.replace(/[^0-9]/g, '');
-    if (!cleanId) return null;
-    return await client.users.fetch(cleanId).catch(() => null);
-}
-
-async function getUserRank(guild, targetUserId) {
+async function setupFont() {
+    const fontPath = path.join(__dirname, 'Pretendard-Bold.otf');
     try {
-        const allEntries = await db.all();
-        const userMap = new Map();
-
-        for (const entry of allEntries) {
-            const key = entry.id || entry.key || '';
-            if (typeof key === 'string' && key.startsWith('user_')) {
-                const uid = key.split('.')[0].replace('user_', '');
-                if (uid && !userMap.has(uid)) userMap.set(uid, true);
-            }
+        if (!fs.existsSync(fontPath)) {
+            const res = await fetch('https://github.com/orioncactus/pretendard/raw/main/packages/pretendard/dist/public/static/Pretendard-Bold.otf');
+            const buffer = Buffer.from(await res.arrayBuffer());
+            fs.writeFileSync(fontPath, buffer);
         }
-
-        if (!userMap.has(targetUserId)) userMap.set(targetUserId, true);
-
-        const fetchPromises = Array.from(userMap.keys()).map(async (uid) => {
-            try {
-                const member = guild.members.cache.get(uid) || await guild.members.fetch(uid).catch(() => null);
-                if (!member || member.user.bot) return null;
-
-                const amount = await db.get(`user_${uid}.totalAmount`);
-                return {
-                    id: uid,
-                    amount: Number(amount) || 0,
-                    joinedAt: member.joinedTimestamp || Date.now()
-                };
-            } catch (e) { return null; }
-        });
-
-        const results = await Promise.all(fetchPromises);
-        const validUsers = results.filter(u => u !== null);
-
-        validUsers.sort((a, b) => {
-            if (b.amount !== a.amount) return b.amount - a.amount;
-            return a.joinedAt - b.joinedAt;
-        });
-
-        const rankIndex = validUsers.findIndex(u => u.id === targetUserId);
-        return rankIndex !== -1 ? `#${rankIndex + 1}` : '#1';
+        registerFont(fontPath, { family: 'Pretendard' });
+        FONT_FAMILY = 'Pretendard';
     } catch (e) {
-        console.error('랭킹 집계 오류:', e);
-        return '#1';
+        console.error('폰트 로드 실패:', e);
+    }
+}
+
+// 요청하신 색상 매핑이 적용된 역할 설정
+const SERVER_ROLES_CONFIG = [
+    { id: '1456729030459134117', name: '서버 오너', color: '#FF79C6' },    // 핑크색
+    { id: '1458178323434836199', name: '서버 관리자', color: '#5775A8' },  // 남색
+    { id: '1545686320993796126', name: '서버 관리자', color: '#5775A8' },  // 남색
+    { id: '1529484356748574720', name: '판매자', color: '#50FA7B' },       // 민트색
+    { id: '1522815168286036098', name: '판매자', color: '#50FA7B' },       // 민트색
+    { id: '1456735270119411734', name: '회원', color: '#A3E635' }          // 연두색
+];
+
+const BUY_TIERS_CONFIG = [
+    { id: '1489943721146449920', name: 'Crystal', color: '#C084FC' },     // 연보라
+    { id: '1456737896525725719', name: 'Emerald', color: '#34D399' },     // 에메랄드
+    { id: '1456736865779581031', name: 'Ruby', color: '#F87171' },        // 빨간색
+    { id: '1456736771344826535', name: 'Gold', color: '#FACC15' },        // 노란색
+    { id: '1456736573797171384', name: 'Silver', color: '#FB923C' },      // 주황색
+    { id: '1457383788236505299', name: 'Bronze', color: '#D97706' }       // 갈색~주황빛
+];
+
+async function update_user_purchase(user_id, amount) {
+    const user_key = `user_${user_id}`;
+    if (!await db.has(user_key)) {
+        await db.set(user_key, { total_amount: 0, buy_count: 0, max_amount: 0 });
+    }
+
+    await db.add(`${user_key}.total_amount`, amount);
+    await db.add(`${user_key}.buy_count`, 1);
+
+    const current_data = await db.get(user_key);
+    if (amount > current_data.max_amount) {
+        await db.set(`${user_key}.max_amount`, amount);
+    }
+}
+
+async function get_user_rank(user_id) {
+    const all_data = await db.all();
+    const user_entries = all_data.filter(entry => entry.id.startsWith('user_'));
+
+    user_entries.sort((a, b) => b.value.total_amount - a.value.total_amount);
+    const rankIndex = user_entries.findIndex(entry => entry.id === `user_${user_id}`);
+    
+    return rankIndex !== -1 ? `#${rankIndex + 1}` : `#${user_entries.length + 1}`;
+}
+
+function getRoleInfo(member, config_list, default_name = '회원', default_color = '#A3E635') {
+    if (!member) return { name: default_name, color: default_color };
+    for (const role_info of config_list) {
+        if (member.roles.cache.has(role_info.id)) {
+            return { name: role_info.name, color: role_info.color };
+        }
+    }
+    return { name: default_name, color: default_color };
+}
+
+function drawRoundedRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+}
+
+// 원본 왕관 백터 그리기
+function drawCrownIcon(ctx, x, y, size, color) {
+    ctx.save();
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(x, y + size);
+    ctx.lineTo(x, y + size * 0.3);
+    ctx.lineTo(x + size * 0.3, y + size * 0.6);
+    ctx.lineTo(x + size * 0.5, y);
+    ctx.lineTo(x + size * 0.7, y + size * 0.6);
+    ctx.lineTo(x + size, y + size * 0.3);
+    ctx.lineTo(x + size, y + size);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+}
+
+// 원본 카드 아이콘 백터화 (동전, 문서, 유저, 초대)
+function drawCardIcon(ctx, x, y, type) {
+    ctx.save();
+    ctx.fillStyle = "#272129";
+    drawRoundedRect(ctx, x, y, 32, 32, 10);
+    ctx.fill();
+
+    ctx.strokeStyle = "#FCA5A5";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+
+    if (type === 'coin') {
+        ctx.ellipse(x + 16, y + 12, 7, 3, 0, 0, Math.PI * 2);
+        ctx.moveTo(x + 9, y + 12); ctx.lineTo(x + 9, y + 19); ctx.arcTo(x + 16, y + 23, x + 23, y + 19, 7); ctx.lineTo(x + 23, y + 12);
+    } else if (type === 'list') {
+        ctx.rect(x + 10, y + 8, 12, 16);
+        ctx.moveTo(x + 13, y + 12); ctx.lineTo(x + 19, y + 12);
+        ctx.moveTo(x + 13, y + 16); ctx.lineTo(x + 17, y + 16);
+    } else if (type === 'user') {
+        ctx.arc(x + 16, y + 12, 4, 0, Math.PI * 2);
+        ctx.moveTo(x + 10, y + 22); ctx.arcTo(x + 16, y + 17, x + 22, y + 22, 6);
+    } else if (type === 'users') {
+        ctx.arc(x + 13, y + 12, 3, 0, Math.PI * 2);
+        ctx.arc(x + 19, y + 12, 3, 0, Math.PI * 2);
+        ctx.moveTo(x + 8, y + 21); ctx.arcTo(x + 13, y + 17, x + 18, y + 21, 5);
+    }
+    ctx.stroke();
+    ctx.restore();
+}
+
+async function drawCircleAvatar(ctx, url, x, y, size, roleColor) {
+    try {
+        const res = await fetch(url);
+        const arrayBuffer = await res.arrayBuffer();
+        const avatarImg = await loadImage(Buffer.from(arrayBuffer));
+        
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(x + size / 2, y + size / 2, size / 2, 0, Math.PI * 2, true);
+        ctx.closePath();
+        ctx.clip();
+        
+        ctx.drawImage(avatarImg, x, y, size, size);
+        ctx.restore();
+        
+        // 원본과 동일한 프로필 테두리 링
+        ctx.strokeStyle = roleColor;
+        ctx.lineWidth = 3.5;
+        ctx.stroke();
+
+        // 우측 하단 왕관 포인트 뱃지
+        const badgeX = x + size - 16;
+        const badgeY = y + size - 20;
+        ctx.fillStyle = roleColor;
+        ctx.beginPath();
+        ctx.arc(badgeX, badgeY, 13, 0, Math.PI * 2);
+        ctx.fill();
+        
+        drawCrownIcon(ctx, badgeX - 7, badgeY - 7, 14, '#16151A');
+    } catch (e) {
+        console.error(`아바타 로드 오류: ${e}`);
     }
 }
 
 client.once('ready', async () => {
-    await loadOnlineFont();
-    console.log(`봇 접속 성공: ${client.user.tag}`);
+    await setupFont();
 
     const commands = [
         new SlashCommandBuilder()
             .setName('지급완료')
-            .setDescription('지급 완료 알림 및 구매 로그를 전송합니다.')
-            .addStringOption(opt => opt.setName('금액').setDescription('구매 금액').setRequired(true))
-            .addStringOption(opt => opt.setName('상품').setDescription('구매한 상품명').setRequired(true))
-            .addStringOption(opt => opt.setName('수량').setDescription('구매 수량').setRequired(true))
-            .addUserOption(opt => opt.setName('구매자').setDescription('구매한 유저').setRequired(false))
-            .addUserOption(opt => opt.setName('판매자').setDescription('담당 판매자').setRequired(false))
+            .setDescription('구매 데이터를 기록하고 로그를 전송합니다.')
+            .addUserOption(option => option.setName('구매자').setDescription('유저 선택').setRequired(true))
+            .addIntegerOption(option => option.setName('금액').setDescription('거래 금액').setRequired(true))
     ];
 
     const rest = new REST({ version: '10' }).setToken(TOKEN);
-
     try {
-        await rest.put(
-            Routes.applicationGuildCommands(client.user.id, GUILD_ID),
-            { body: commands }
-        );
-        console.log('[/지급완료] 슬래시 명령어 등록 완료!');
+        await rest.put(Routes.applicationGuildCommands(client.user.id, GUILD_ID), { body: commands });
+        console.log(`${client.user.username} 구동 완료!`);
     } catch (error) {
-        console.error('슬래시 명령어 등록 오류:', error);
+        console.error('슬래시 명령어 동기화 실패:', error);
     }
 });
 
@@ -145,564 +209,202 @@ client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
 
     if (interaction.commandName === '지급완료') {
-        // 응답 시간 초과 방지를 위한 deferReply 사용
-        await interaction.deferReply({ ephemeral: true });
-
-        const itemName = interaction.options.getString('상품');
-        const itemQty = interaction.options.getString('수량');
-        const amountStr = interaction.options.getString('금액');
-        const numericAmount = parseInt(amountStr.replace(/[^0-9]/g, '')) || 0;
-
-        const buyer = interaction.options.getUser('구매자') || interaction.user;
-        const seller = interaction.options.getUser('판매자') || interaction.user;
-
-        const currentAmount = (await db.get(`user_${buyer.id}.totalAmount`)) || 0;
-        const currentCount = (await db.get(`user_${buyer.id}.buyCount`)) || 0;
-
-        await db.set(`user_${buyer.id}.totalAmount`, Number(currentAmount) + numericAmount);
-        await db.set(`user_${buyer.id}.buyCount`, Number(currentCount) + 1);
-
-        const currentBiggest = (await db.get(`user_${buyer.id}.biggestDeal`)) || 0;
-        if (numericAmount > currentBiggest) {
-            await db.set(`user_${buyer.id}.biggestDeal`, numericAmount);
+        if (!interaction.member.permissions.has(GatewayIntentBits.Administrator)) {
+            return interaction.reply({ content: "권한이 없습니다.", ephemeral: true });
         }
 
-        try {
-            const logChannel = await client.channels.fetch(PURCHASE_LOG_CHANNEL_ID);
-            if (logChannel) {
-                const logEmbed = new EmbedBuilder()
-                    .setColor(0xFFD1DC)
-                    .setDescription(`°.✩┈┈∘┈˃̶ ୨<a:Pinkheartgif:1545408138377695352> ୧˂̶┈∘┈┈✩.°\n\n${buyer}, ${itemName} (${itemQty}개) 구매 감사합니다 .ᐟ.ᐟ\n\n사용된 금액 : ${amountStr}\n\n해당 관리 판매자: ${seller}\n\n°.✩┈┈∘┈˃̶ ୨<a:Pinkheartgif:1545408138377695352> ୧˂̶┈∘┈┈✩.°\n࣪𓏲ּ ᥫ᭡ ₊ 𝑻𝒉𝒂𝒏𝒌 𝒚𝒐𝒖 ⊹ ˑ ִֶ 𓂃`)
-                    .setImage('https://i.imgur.com/jokl6LQ.gif');
+        const 구매자 = interaction.options.getUser('구매자');
+        const 금액 = interaction.options.getInteger('금액');
 
-                await logChannel.send({ content: `${buyer}`, embeds: [logEmbed] });
-            }
-        } catch (error) {
-            console.error("구매 로그 채널 오류:", error);
+        await update_user_purchase(구매자.id, 금액);
+        
+        const success_embed = new EmbedBuilder()
+            .setDescription(`**${구매자}님, 아이템이 정상적으로 지급되었어요.**`)
+            .setColor(0xFFC1D6)
+            .setFields([{ name: "", value: "리뷰 작성은 필수입니다." }]);
+        await interaction.reply({ embeds: [success_embed] });
+
+        const log_channel = client.channels.cache.get(PURCHASE_LOG_CHANNEL_ID);
+        if (log_channel) {
+            const user_data = await db.get(`user_${구매자.id}`);
+            const log_embed = new EmbedBuilder()
+                .setTitle("아이템 지급 완료 로그")
+                .setColor(0xFFC1D6)
+                .setTimestamp()
+                .addFields(
+                    { name: "구매자", value: `${구매자} (${구매자.id})`, inline: true },
+                    { name: "처리 관리자", value: `${interaction.user}`, inline: true },
+                    { name: "거래 금액", value: `₩${금액.toLocaleString()}`, inline: false },
+                    { name: "유저 누적 금액", value: `₩${user_data.total_amount.toLocaleString()}`, inline: true },
+                    { name: "유저 누적 횟수", value: `${user_data.buy_count}회`, inline: true }
+                );
+            await log_channel.send({ embeds: [log_embed] });
         }
-
-        const ticketEmbed = new EmbedBuilder()
-            .setColor(0xFFD1DC)
-            .setDescription(`**아이템이 정상적으로 지급되었어요.** <a:veryheart:1479957265871143104>\nhttps://discord.com/channels/1456729030459134115/1457384179535712473 작성은 필수입니다`);
-
-        await interaction.channel.send({ content: `${buyer}`, embeds: [ticketEmbed] });
-        await interaction.followUp({ content: '✅ 지급 처리가 완료되었습니다.', ephemeral: true });
     }
 });
 
 client.on('messageCreate', async message => {
     if (message.author.bot || !message.content.startsWith('$')) return;
 
-    const args = message.content.slice(1).trim().split(/ +/);
-    const command = args.shift();
+    const command = message.content.substring(1).trim().split(' ');
+    
+    if (command[0] === '정보') {
+        const target = message.mentions.users.first() || message.author;
+        const member = message.guild.members.cache.get(target.id);
+        
+        const user_key = `user_${target.id}`;
+        let user_data = await db.get(user_key) || { total_amount: 0, buy_count: 0, max_amount: 0 };
+        
+        const roleInfo = getRoleInfo(member, SERVER_ROLES_CONFIG);
+        const tierInfo = getRoleInfo(member, BUY_TIERS_CONFIG, 'NONE', '#8B858F');
 
-    if (command === '유저정보변경로그') {
-        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-            return message.reply('❌ 이 명령어를 사용할 수 있는 권한이 없습니다. (관리자 전용)');
+        const W = 1040, H = 510;
+        const canvas = createCanvas(W, H);
+        const ctx = canvas.getContext('2d');
+
+        // 메인 프레임
+        drawRoundedRect(ctx, 12, 12, W - 24, H - 24, 28);
+        ctx.fillStyle = "#121115";
+        ctx.fill();
+        ctx.strokeStyle = "#25222B";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // 핑크 우측 상단 네온 글로우
+        const glow = ctx.createRadialGradient(W - 80, 20, 10, W - 80, 20, 350);
+        glow.addColorStop(0, 'rgba(252, 165, 165, 0.08)');
+        glow.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = glow;
+        ctx.fillRect(0, 0, W, H);
+
+        // 아바타
+        await drawCircleAvatar(ctx, target.displayAvatarURL({ extension: 'png', size: 128 }), 55, 55, 125, roleInfo.color);
+
+        // 닉네임 & 디스코드 ID
+        ctx.fillStyle = "#FFFFFF";
+        ctx.font = `bold 42px ${FONT_FAMILY}`;
+        ctx.fillText(target.username, 215, 95);
+
+        ctx.fillStyle = "#55505C";
+        ctx.font = `20px ${FONT_FAMILY}`;
+        ctx.fillText("#0001", 215, 130);
+
+        // 왕관 아이콘 + 서버 역할 이름
+        drawCrownIcon(ctx, 215, 147, 16, roleInfo.color);
+        ctx.fillStyle = roleInfo.color;
+        ctx.font = `bold 18px ${FONT_FAMILY}`;
+        ctx.fillText(roleInfo.name, 238, 162);
+
+        // 가입일 & 서버 정보 영역
+        ctx.fillStyle = "#726D7A";
+        ctx.font = `14px ${FONT_FAMILY}`;
+        ctx.fillText("가입일", 550, 80);
+        ctx.fillStyle = "#FFFFFF";
+        ctx.font = `bold 19px ${FONT_FAMILY}`;
+        const joined_str = member ? member.joinedAt.toLocaleDateString('ko-KR').replace(/\. /g, '.').slice(0, -1) : "2020.01.02";
+        ctx.fillText(joined_str, 550, 110);
+
+        ctx.strokeStyle = "#25222B";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(690, 70);
+        ctx.lineTo(690, 120);
+        ctx.stroke();
+
+        ctx.fillStyle = "#726D7A";
+        ctx.font = `14px ${FONT_FAMILY}`;
+        ctx.fillText("서버", 720, 80);
+        ctx.fillStyle = "#FFFFFF";
+        ctx.font = `bold 19px ${FONT_FAMILY}`;
+        const guild_name = message.guild.name.length > 16 ? `${message.guild.name.substring(0, 16)}...` : message.guild.name;
+        ctx.fillText(`${guild_name} >`, 720, 110);
+
+        // 하단 카드 4개
+        const card_y = 210, card_h = 215, card_w = 218, gap = 17, start_x = 48;
+        const card_bg = "#1A1820";
+
+        // Card 1: 총 거래량
+        drawRoundedRect(ctx, start_x, card_y, card_w, card_h, 20);
+        ctx.fillStyle = card_bg;
+        ctx.fill();
+        drawCardIcon(ctx, start_x + 18, card_y + 22, 'coin');
+        ctx.fillStyle = "#A39EAB";
+        ctx.font = `16px ${FONT_FAMILY}`;
+        ctx.fillText("총 거래량", start_x + 58, card_y + 43);
+
+        ctx.fillStyle = "#FFFFFF";
+        ctx.font = `bold 32px ${FONT_FAMILY}`;
+        ctx.fillText(`₩${user_data.total_amount.toLocaleString()}`, start_x + 18, card_y + 110);
+
+        ctx.fillStyle = "#635E6C";
+        ctx.font = `13px ${FONT_FAMILY}`;
+        ctx.fillText("최대 거래 금액", start_x + 18, card_y + 160);
+        ctx.fillStyle = "#D1D5DB";
+        ctx.font = `bold 15px ${FONT_FAMILY}`;
+        ctx.fillText(`₩${user_data.max_amount.toLocaleString()}`, start_x + 18, card_y + 185);
+
+        // Card 2: 총 거래 횟수
+        const x_2 = start_x + card_w + gap;
+        drawRoundedRect(ctx, x_2, card_y, card_w, card_h, 20);
+        ctx.fillStyle = card_bg;
+        ctx.fill();
+        drawCardIcon(ctx, x_2 + 18, card_y + 22, 'list');
+        ctx.fillStyle = "#A39EAB";
+        ctx.font = `16px ${FONT_FAMILY}`;
+        ctx.fillText("총 거래 횟수", x_2 + 58, card_y + 43);
+
+        ctx.fillStyle = "#FFFFFF";
+        ctx.font = `bold 40px ${FONT_FAMILY}`;
+        ctx.fillText(`${user_data.buy_count}`, x_2 + 18, card_y + 115);
+
+        // Card 3: 구매 등급 / 역할
+        const x_3 = start_x + (card_w + gap) * 2;
+        drawRoundedRect(ctx, x_3, card_y, card_w, card_h, 20);
+        ctx.fillStyle = card_bg;
+        ctx.fill();
+        drawCardIcon(ctx, x_3 + 18, card_y + 22, 'user');
+        ctx.fillStyle = "#A39EAB";
+        ctx.font = `16px ${FONT_FAMILY}`;
+        ctx.fillText("역할", x_3 + 58, card_y + 43);
+
+        ctx.fillStyle = tierInfo.color;
+        ctx.font = `bold 22px ${FONT_FAMILY}`;
+        ctx.fillText(tierInfo.name, x_3 + 18, card_y + 115);
+        if (tierInfo.name !== 'NONE') {
+            drawCrownIcon(ctx, x_3 + 18 + ctx.measureText(tierInfo.name).width + 8, card_y + 98, 16, tierInfo.color);
         }
 
-        const channelId = args[0];
-        if (!channelId) {
-            return message.reply('❌ 설정할 채널 ID를 입력해주세요. 예: `$유저정보변경로그 1545759434175815771`');
-        }
-
-        try {
-            const targetChannel = await client.channels.fetch(channelId);
-            if (!targetChannel) throw new Error();
-
-            await db.set('info_log_channel_id', channelId);
-            return message.reply(`✅ 유저 정보 변경 로그 채널이 <#${channelId}> 로 설정되었습니다.`);
-        } catch (e) {
-            return message.reply('❌ 올바르지 않은 채널 ID이거나 접근 권한이 없습니다.');
-        }
-    }
-
-    if (command === '유저구매횟수') {
-        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-            return message.reply('❌ 이 명령어를 사용할 수 있는 권한이 없습니다. (관리자 전용)');
-        }
-
-        const count = parseInt(args[0]);
-        const targetUser = await fetchUserFromInput(client, args[1]);
-
-        if (isNaN(count) || !targetUser) {
-            return message.reply('❌ 사용법: `$유저구매횟수 (변경할 횟수) (유저ID 또는 @유저멘션)`');
-        }
-
-        const oldVal = (await db.get(`user_${targetUser.id}.buyCount`)) || 0;
-        await db.set(`user_${targetUser.id}.buyCount`, count);
-
-        await message.reply(`✅ ${targetUser.username} (${targetUser.id}) 님의 구매 횟수가 **${count}회**로 변경되었습니다.`);
-
-        const infoLogChannelId = await db.get('info_log_channel_id');
-        if (infoLogChannelId) {
-            try {
-                const infoLogChannel = await client.channels.fetch(infoLogChannelId);
-                if (infoLogChannel) {
-                    const infoEmbed = new EmbedBuilder()
-                        .setColor(0x3498DB)
-                        .setTitle('📝 유저 정보 변경 알림')
-                        .addFields(
-                            { name: '처리 관리자', value: `${message.author} (${message.author.id})`, inline: true },
-                            { name: '대상 유저', value: `${targetUser} (${targetUser.id})`, inline: true },
-                            { name: '항목', value: '구매 횟수', inline: false },
-                            { name: '변경 전', value: `${oldVal}회`, inline: true },
-                            { name: '변경 후', value: `${count}회`, inline: true }
-                        )
-                        .setTimestamp();
-
-                    await infoLogChannel.send({ embeds: [infoEmbed] });
-                }
-            } catch (error) {
-                console.error('로그 전송 실패:', error);
-            }
-        }
-    }
-
-    if (command === '유저구매금액') {
-        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-            return message.reply('❌ 이 명령어를 사용할 수 있는 권한이 없습니다. (관리자 전용)');
-        }
-
-        const amount = parseInt(args[0]);
-        const targetUser = await fetchUserFromInput(client, args[1]);
-
-        if (isNaN(amount) || !targetUser) {
-            return message.reply('❌ 사용법: `$유저구매금액 (변경할 금액) (유저ID 또는 @유저멘션)`');
-        }
-
-        const oldVal = (await db.get(`user_${targetUser.id}.totalAmount`)) || 0;
-        await db.set(`user_${targetUser.id}.totalAmount`, amount);
-
-        await message.reply(`✅ ${targetUser.username} (${targetUser.id}) 님의 누적 금액이 **₩${amount.toLocaleString()}**으로 변경되었습니다.`);
-
-        const infoLogChannelId = await db.get('info_log_channel_id');
-        if (infoLogChannelId) {
-            try {
-                const infoLogChannel = await client.channels.fetch(infoLogChannelId);
-                if (infoLogChannel) {
-                    const infoEmbed = new EmbedBuilder()
-                        .setColor(0x3498DB)
-                        .setTitle('📝 유저 정보 변경 알림')
-                        .addFields(
-                            { name: '처리 관리자', value: `${message.author} (${message.author.id})`, inline: true },
-                            { name: '대상 유저', value: `${targetUser} (${targetUser.id})`, inline: true },
-                            { name: '항목', value: '누적 금액', inline: false },
-                            { name: '변경 전', value: `₩${Number(oldVal).toLocaleString()}`, inline: true },
-                            { name: '변경 후', value: `₩${amount.toLocaleString()}`, inline: true }
-                        )
-                        .setTimestamp();
-
-                    await infoLogChannel.send({ embeds: [infoEmbed] });
-                }
-            } catch (error) {
-                console.error('로그 전송 실패:', error);
-            }
-        }
-    }
-
-    if (command === '유저최대금액') {
-        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-            return message.reply('❌ 이 명령어를 사용할 수 있는 권한이 없습니다. (관리자 전용)');
-        }
-
-        const amount = parseInt(args[0]);
-        const targetUser = await fetchUserFromInput(client, args[1]);
-
-        if (isNaN(amount) || !targetUser) {
-            return message.reply('❌ 사용법: `$유저최대금액 (변경할 금액) (유저ID 또는 @유저멘션)`');
-        }
-
-        const oldVal = (await db.get(`user_${targetUser.id}.biggestDeal`)) || 0;
-        await db.set(`user_${targetUser.id}.biggestDeal`, amount);
-
-        await message.reply(`✅ ${targetUser.username} (${targetUser.id}) 님의 최대 거래 금액이 **₩${amount.toLocaleString()}**으로 변경되었습니다.`);
-
-        const infoLogChannelId = await db.get('info_log_channel_id');
-        if (infoLogChannelId) {
-            try {
-                const infoLogChannel = await client.channels.fetch(infoLogChannelId);
-                if (infoLogChannel) {
-                    const infoEmbed = new EmbedBuilder()
-                        .setColor(0x3498DB)
-                        .setTitle('📝 유저 정보 변경 알림')
-                        .addFields(
-                            { name: '처리 관리자', value: `${message.author} (${message.author.id})`, inline: true },
-                            { name: '대상 유저', value: `${targetUser} (${targetUser.id})`, inline: true },
-                            { name: '항목', value: '최대 거래 금액', inline: false },
-                            { name: '변경 전', value: `₩${Number(oldVal).toLocaleString()}`, inline: true },
-                            { name: '변경 후', value: `₩${amount.toLocaleString()}`, inline: true }
-                        )
-                        .setTimestamp();
-
-                    await infoLogChannel.send({ embeds: [infoEmbed] });
-                }
-            } catch (error) {
-                console.error('로그 전송 실패:', error);
-            }
-        }
-    }
-
-    if (command === '서버통계') {
-        const loadingMsg = await message.reply('📊 서버 전체 통계를 이미지로 생성하는 중이에요. . .');
-
-        try {
-            const allEntries = await db.all();
-            const userMap = new Map();
-
-            for (const entry of allEntries) {
-                const key = entry.id || entry.key || '';
-                if (typeof key === 'string' && key.startsWith('user_')) {
-                    const uid = key.split('.')[0].replace('user_', '');
-                    if (uid && !userMap.has(uid)) userMap.set(uid, true);
-                }
-            }
-
-            let totalVolume = 0;
-            let totalDeals = 0;
-            let topUser = { name: '없음', amount: 0 };
-
-            const fetchPromises = Array.from(userMap.keys()).map(async (uid) => {
-                const amount = Number((await db.get(`user_${uid}.totalAmount`)) || 0);
-                const count = Number((await db.get(`user_${uid}.buyCount`)) || 0);
-                const member = message.guild.members.cache.get(uid) || await message.guild.members.fetch(uid).catch(() => null);
-
-                return {
-                    username: member ? member.user.username : '탈퇴한 유저',
-                    amount,
-                    count
-                };
-            });
-
-            const results = await Promise.all(fetchPromises);
-
-            results.forEach(u => {
-                totalVolume += u.amount;
-                totalDeals += u.count;
-                if (u.amount > topUser.amount) {
-                    topUser = { name: u.username, amount: u.amount };
-                }
-            });
-
-            const avgDeal = totalDeals > 0 ? Math.floor(totalVolume / totalDeals) : 0;
-
-            const canvas = createCanvas(800, 420);
-            const ctx = canvas.getContext('2d');
-
-            ctx.fillStyle = '#0F0F12';
-            ctx.beginPath();
-            ctx.roundRect(0, 0, 800, 420, 20);
-            ctx.fill();
-
-            ctx.fillStyle = '#FFFFFF';
-            ctx.font = `30px ${FONT_FAMILY}`;
-            ctx.fillText('📊 SERVER TOTAL ANALYTICS', 40, 65);
-
-            ctx.fillStyle = '#72767D';
-            ctx.font = `14px ${FONT_FAMILY}`;
-            ctx.fillText('SERVER: SODDU SHOP', 40, 95);
-
-            ctx.strokeStyle = '#27272E';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(40, 115);
-            ctx.lineTo(760, 115);
-            ctx.stroke();
-
-            ctx.fillStyle = '#18181C';
-            ctx.beginPath();
-            ctx.roundRect(40, 140, 350, 120, 15);
-            ctx.fill();
-
-            ctx.fillStyle = '#8E9297';
-            ctx.font = `14px ${FONT_FAMILY}`;
-            ctx.fillText('TOTAL SALES VOLUME', 65, 175);
-
-            ctx.fillStyle = '#2ECC71';
-            ctx.font = `28px ${FONT_FAMILY}`;
-            ctx.fillText(`₩${totalVolume.toLocaleString()}`, 65, 220);
-
-            ctx.fillStyle = '#18181C';
-            ctx.beginPath();
-            ctx.roundRect(410, 140, 350, 120, 15);
-            ctx.fill();
-
-            ctx.fillStyle = '#8E9297';
-            ctx.font = `14px ${FONT_FAMILY}`;
-            ctx.fillText('TOTAL TRANSACTIONS', 435, 175);
-
-            ctx.fillStyle = '#3498DB';
-            ctx.font = `28px ${FONT_FAMILY}`;
-            ctx.fillText(`${totalDeals.toLocaleString()} DEALS`, 435, 220);
-
-            ctx.fillStyle = '#18181C';
-            ctx.beginPath();
-            ctx.roundRect(40, 280, 350, 100, 15);
-            ctx.fill();
-
-            ctx.fillStyle = '#8E9297';
-            ctx.font = `13px ${FONT_FAMILY}`;
-            ctx.fillText('AVG TRANSACTION VALUE', 65, 310);
-
-            ctx.fillStyle = '#FFFFFF';
-            ctx.font = `22px ${FONT_FAMILY}`;
-            ctx.fillText(`₩${avgDeal.toLocaleString()}`, 65, 350);
-
-            ctx.fillStyle = '#18181C';
-            ctx.beginPath();
-            ctx.roundRect(410, 280, 350, 100, 15);
-            ctx.fill();
-
-            ctx.fillStyle = '#8E9297';
-            ctx.font = `13px ${FONT_FAMILY}`;
-            ctx.fillText('TOP SPENDER 👑', 435, 310);
-
-            ctx.fillStyle = '#E5A93C';
-            ctx.font = `20px ${FONT_FAMILY}`;
-            let topName = topUser.name;
-            if (topName.length > 10) topName = topName.substring(0, 9) + '..';
-            ctx.fillText(`${topName} (₩${topUser.amount.toLocaleString()})`, 435, 350);
-
-            const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'stats.png' });
-
-            await loadingMsg.delete().catch(() => {});
-            await message.reply({ files: [attachment] });
-
-        } catch (error) {
-            console.error('서버통계 이미지 생성 오류:', error);
-            await loadingMsg.delete().catch(() => {});
-            await message.reply('❌ 서버 통계 생성 중 오류가 발생했습니다.');
-        }
-    }
-
-    if (command === '구매랭크') {
-        const loadingMsg = await message.reply('🏆 구매 순위를 이미지로 생성하는 중이에요. . .');
-
-        try {
-            const allEntries = await db.all();
-            const userMap = new Map();
-
-            for (const entry of allEntries) {
-                const key = entry.id || entry.key || '';
-                if (typeof key === 'string' && key.startsWith('user_')) {
-                    const uid = key.split('.')[0].replace('user_', '');
-                    if (uid && !userMap.has(uid)) userMap.set(uid, true);
-                }
-            }
-
-            const fetchPromises = Array.from(userMap.keys()).map(async (uid) => {
-                const member = message.guild.members.cache.get(uid) || await message.guild.members.fetch(uid).catch(() => null);
-                if (!member || member.user.bot) return null;
-
-                const amount = (await db.get(`user_${uid}.totalAmount`)) || 0;
-                return {
-                    user: member.user,
-                    amount: Number(amount),
-                    joinedAt: member.joinedTimestamp || Date.now()
-                };
-            });
-
-            const rankResults = await Promise.all(fetchPromises);
-            const rankData = rankResults.filter(item => item !== null);
-
-            rankData.sort((a, b) => {
-                if (b.amount !== a.amount) return b.amount - a.amount;
-                return a.joinedAt - b.joinedAt;
-            });
-
-            const top20 = rankData.slice(0, 20);
-
-            const itemHeight = 65;
-            const rows = Math.min(top20.length, 10);
-            const canvasWidth = 900;
-            const canvasHeight = Math.max(220 + rows * itemHeight, 350);
-
-            const canvas = createCanvas(canvasWidth, canvasHeight);
-            const ctx = canvas.getContext('2d');
-
-            ctx.fillStyle = '#0F0F12';
-            ctx.beginPath();
-            ctx.roundRect(0, 0, canvasWidth, canvasHeight, 20);
-            ctx.fill();
-
-            ctx.fillStyle = '#FFFFFF';
-            ctx.font = `32px ${FONT_FAMILY}`;
-            ctx.fillText('🏆 TOP 20 PURCHASE RANKING', 40, 65);
-
-            ctx.fillStyle = '#72767D';
-            ctx.font = `14px ${FONT_FAMILY}`;
-            ctx.fillText('Data sorted by total purchase volume (Tier: Joined Date)', 40, 95);
-
-            ctx.strokeStyle = '#27272E';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(40, 115);
-            ctx.lineTo(canvasWidth - 40, 115);
-            ctx.stroke();
-
-            const avatarImages = await Promise.all(
-                top20.map(item => loadImage(item.user.displayAvatarURL({ extension: 'png', size: 64 })).catch(() => null))
-            );
-
-            for (let i = 0; i < top20.length; i++) {
-                const item = top20[i];
-                const isSecondCol = i >= 10;
-                const colIndex = isSecondCol ? 1 : 0;
-                const rowIndex = isSecondCol ? i - 10 : i;
-
-                const startX = colIndex === 0 ? 40 : 470;
-                const startY = 140 + rowIndex * itemHeight;
-
-                ctx.fillStyle = '#18181C';
-                ctx.beginPath();
-                ctx.roundRect(startX, startY, 390, 55, 12);
-                ctx.fill();
-
-                ctx.font = `20px ${FONT_FAMILY}`;
-                if (i === 0) ctx.fillStyle = '#FFD700';
-                else if (i === 1) ctx.fillStyle = '#C0C0C0';
-                else if (i === 2) ctx.fillStyle = '#CD7F32';
-                else ctx.fillStyle = '#8E9297';
-
-                ctx.fillText(`#${i + 1}`, startX + 15, startY + 34);
-
-                const avatarImg = avatarImages[i];
-                if (avatarImg) {
-                    ctx.save();
-                    ctx.beginPath();
-                    ctx.arc(startX + 80, startY + 27.5, 18, 0, Math.PI * 2, true);
-                    ctx.closePath();
-                    ctx.clip();
-                    ctx.drawImage(avatarImg, startX + 62, startY + 9.5, 36, 36);
-                    ctx.restore();
-                }
-
-                ctx.fillStyle = '#FFFFFF';
-                ctx.font = `16px ${FONT_FAMILY}`;
-                let username = item.user.username;
-                if (username.length > 9) username = username.substring(0, 8) + '..';
-                ctx.fillText(username, startX + 110, startY + 33);
-
-                ctx.fillStyle = '#2ECC71';
-                ctx.font = `16px ${FONT_FAMILY}`;
-                const amountText = `₩${item.amount.toLocaleString()}`;
-                const textWidth = ctx.measureText(amountText).width;
-                ctx.fillText(amountText, startX + 375 - textWidth, startY + 33);
-            }
-
-            const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'ranking.png' });
-
-            await loadingMsg.delete().catch(() => {});
-            await message.reply({ files: [attachment] });
-
-        } catch (error) {
-            console.error('구매랭크 이미지 생성 오류:', error);
-            await loadingMsg.delete().catch(() => {});
-            await message.reply('❌ 랭킹 이미지 생성 중 오류가 발생했습니다.');
-        }
-    }
-
-    if (command === '정보') {
-        const loadingMsg = await message.reply('유저 정보를 불러오는 중이에요. . .');
-
-        try {
-            const targetUser = (await fetchUserFromInput(client, args[0])) || message.author;
-            
-            const [targetMember, totalAmount, buyCount, biggestDeal, userRank, avatar] = await Promise.all([
-                message.guild.members.fetch(targetUser.id).catch(() => null),
-                db.get(`user_${targetUser.id}.totalAmount`),
-                db.get(`user_${targetUser.id}.buyCount`),
-                db.get(`user_${targetUser.id}.biggestDeal`),
-                getUserRank(message.guild, targetUser.id),
-                loadImage(targetUser.displayAvatarURL({ extension: 'png', size: 128 })).catch(() => null)
-            ]);
-
-            const joinedAt = targetMember?.joinedAt 
-                ? targetMember.joinedAt.toISOString().split('T')[0] 
-                : '기록 없음';
-
-            const canvas = createCanvas(800, 420);
-            const ctx = canvas.getContext('2d');
-
-            ctx.fillStyle = '#0F0F12';
-            ctx.beginPath();
-            ctx.roundRect(0, 0, 800, 420, 20);
-            ctx.fill();
-
-            if (avatar) {
-                ctx.save();
-                ctx.beginPath();
-                ctx.arc(90, 85, 45, 0, Math.PI * 2, true);
-                ctx.closePath();
-                ctx.clip();
-                ctx.drawImage(avatar, 45, 40, 90, 90);
-                ctx.restore();
-            }
-
-            ctx.fillStyle = '#FFFFFF';
-            ctx.font = `30px ${FONT_FAMILY}`;
-            ctx.fillText(`${targetUser.username}`, 160, 95);
-
-            ctx.fillStyle = '#72767D';
-            ctx.font = `14px ${FONT_FAMILY}`;
-            ctx.fillText(`JOINED: ${joinedAt}`, 600, 80);
-
-            ctx.fillStyle = '#18181C';
-            ctx.beginPath();
-            ctx.roundRect(40, 160, 350, 170, 15);
-            ctx.fill();
-
-            ctx.fillStyle = '#8E9297';
-            ctx.font = `14px ${FONT_FAMILY}`;
-            ctx.fillText('TOTAL VOLUME', 65, 195);
-
-            ctx.fillStyle = '#FFFFFF';
-            ctx.font = `32px ${FONT_FAMILY}`;
-            ctx.fillText(`₩${Number(totalAmount || 0).toLocaleString()}`, 65, 245);
-
-            ctx.fillStyle = '#8E9297';
-            ctx.font = `13px ${FONT_FAMILY}`;
-            ctx.fillText('BIGGEST DEAL', 65, 288);
-
-            ctx.fillStyle = '#FFFFFF';
-            ctx.font = `16px ${FONT_FAMILY}`;
-            ctx.fillText(`₩${Number(biggestDeal || 0).toLocaleString()}`, 65, 312);
-
-            ctx.fillStyle = '#18181C';
-            ctx.beginPath();
-            ctx.roundRect(410, 160, 350, 170, 15);
-            ctx.fill();
-
-            ctx.fillStyle = '#8E9297';
-            ctx.font = `14px ${FONT_FAMILY}`;
-            ctx.fillText('TOTAL DEALS', 435, 195);
-
-            ctx.fillStyle = '#2ECC71';
-            ctx.font = `32px ${FONT_FAMILY}`;
-            ctx.fillText(`${buyCount || 0}`, 435, 245);
-
-            ctx.fillStyle = '#8E9297';
-            ctx.font = `13px ${FONT_FAMILY}`;
-            ctx.fillText('RANK', 435, 288);
-
-            ctx.fillStyle = '#E5A93C';
-            ctx.font = `18px ${FONT_FAMILY}`;
-            ctx.fillText(`${userRank}`, 435, 312);
-
-            ctx.fillStyle = '#EE4B2B';
-            ctx.font = `12px ${FONT_FAMILY}`;
-            ctx.fillText('* Data recorded starting from 2026.09.06', 40, 370);
-
-            const attachment = new AttachmentBuilder(canvas.toBuffer('image/png'), { name: 'profile.png' });
-
-            await loadingMsg.delete().catch(() => {});
-            await message.reply({ files: [attachment] });
-
-        } catch (error) {
-            console.error('정보 이미지 생성 오류:', error);
-            await loadingMsg.delete().catch(() => {});
-            await message.reply('❌ 정보 조회 중 오류가 발생했습니다.');
-        }
+        // Card 4: 초대 횟수 & 서버 순위
+        const x_4 = start_x + (card_w + gap) * 3;
+        drawRoundedRect(ctx, x_4, card_y, card_w, card_h, 20);
+        ctx.fillStyle = card_bg;
+        ctx.fill();
+        drawCardIcon(ctx, x_4 + 18, card_y + 22, 'users');
+        ctx.fillStyle = "#A39EAB";
+        ctx.font = `16px ${FONT_FAMILY}`;
+        ctx.fillText("초대 횟수", x_4 + 58, card_y + 43);
+
+        ctx.fillStyle = "#FFFFFF";
+        ctx.font = `bold 40px ${FONT_FAMILY}`;
+        ctx.fillText("0", x_4 + 18, card_y + 115);
+
+        ctx.fillStyle = "#635E6C";
+        ctx.font = `15px ${FONT_FAMILY}`;
+        ctx.fillText("서버 순위", x_4 + 18, card_y + 180);
+
+        const purchase_rank_str = await get_user_rank(target.id);
+        ctx.fillStyle = roleInfo.color;
+        ctx.font = `bold 32px ${FONT_FAMILY}`;
+        ctx.fillText(purchase_rank_str, x_4 + 130, card_y + 180);
+
+        // 하단 서명 문구
+        ctx.fillStyle = "#484350";
+        ctx.font = `12px ${FONT_FAMILY}`;
+        ctx.fillText("ⓘ  2026.09.06 이후의 데이터만 기록됩니다.", 48, 468);
+        ctx.fillText("SODDU DISCORD SERVER", 810, 468);
+
+        const attachment = new AttachmentBuilder(canvas.toBuffer(), { name: 'profile.png' });
+        await message.reply({ files: [attachment] });
     }
 });
 
