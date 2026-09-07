@@ -1,15 +1,18 @@
 {
-  "name": "discord-bot",
+  "name": "discord-shop-bot",
   "version": "1.0.0",
+  "description": "Discord Shop Analytics & Log Bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "better-sqlite3": "^11.8.0",
-    "canvas": "^3.0.0",
+    "@napi-rs/canvas": "^0.1.65",
     "discord.js": "^14.18.0",
-    "dotenv": "^16.4.7",
-    "quick.db": "^9.1.7"
+    "quick.db": "^9.1.7",
+    "better-sqlite3": "^11.8.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
