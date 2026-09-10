@@ -1,121 +1,96 @@
-const { Client, GatewayIntentBits, EmbedBuilder, REST, Routes, SlashCommandBuilder, AttachmentBuilder, PermissionsBitField } = require('discord.js');
-const { createCanvas, loadImage, GlobalFonts } = require('@napi-rs/canvas');
-const { QuickDB } = require('quick.db');
-const https = require('https');
+const { Client, GatewayIntentBits, EmbedBuilder, SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 
-const db = new QuickDB({ filePath: './database.sqlite' });
-
-const client = new Client({ 
-    intents: [
-        GatewayIntentBits.Guilds, 
-        GatewayIntentBits.GuildMessages, 
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildMembers
-    ] 
+const client = new Client({
+    intents: [GatewayIntentBits.Guilds]
 });
 
-const TOKEN = process.env.TOKEN;
+// 구매 로그가 전송될 채널 ID
+const LOG_CHANNEL_ID = '1457384858065047663';
+// 이미지 URL
+const IMAGE_URL = 'https://i.imgur.com/jokl6LQ.gif';
 
-// ---------------- [ 설정 ] ----------------
-const GUILD_ID = '1456729030459134115'; 
-const PURCHASE_LOG_CHANNEL_ID = '1457384858065047663'; // 로그 채널 ID
-const REVIEW_CHANNEL_ID = '1457384179535712473';       // 구매후기 채널 ID
-// ------------------------------------------
+client.once('ready', () => {
+    console.log(`[릴리웨이] 봇이 성공적으로 실행되었습니다: ${client.user.tag}`);
 
-const FONT_FAMILY = 'CustomFont, sans-serif, "Noto Sans KR", Arial';
+    // /지급완료 명령어 등록
+    const logCommand = new SlashCommandBuilder()
+        .setName('지급완료')
+        .setDescription('구매 완료 로그를 전송합니다.')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .addUserOption(option =>
+            option.setName('구매자')
+                .setDescription('구매한 유저')
+                .setRequired(true))
+        .addStringOption(option =>
+            option.setName('상품')
+                .setDescription('구매한 상품명')
+                .setRequired(true))
+        .addStringOption(option =>
+            option.setName('금액')
+                .setDescription('사용된 금액')
+                .setRequired(true))
+        .addUserOption(option =>
+            option.setName('판매자')
+                .setDescription('해당 관리 판매자')
+                .setRequired(true));
 
-function loadOnlineFont() {
-    return new Promise((resolve) => {
-        const fontUrl = 'https://raw.githubusercontent.com/google/fonts/main/ofl/notosans/NotoSans%5Bwdth%2Cwght%5D.ttf';
-        https.get(fontUrl, (res) => {
-            const data = [];
-            res.on('data', (chunk) => data.push(chunk));
-            res.on('end', () => {
-                const buffer = Buffer.concat(data);
-                GlobalFonts.register(buffer, 'CustomFont');
-                resolve();
-            });
-        }).on('error', (err) => {
-            console.error('폰트 로드 실패:', err);
-            resolve();
-        });
-    });
-}
-
-// 봇 켜질 때 슬래시 명령어 자동 등록
-client.once('ready', async () => {
-    await loadOnlineFont();
-    console.log(`봇 접속 성공: ${client.user.tag}`);
-
-    const commands = [
-        new SlashCommandBuilder()
-            .setName('지급완료')
-            .setDescription('지급 완료 알림 및 구매 로그를 전송합니다.')
-            .addStringOption(opt => opt.setName('금액').setDescription('구매 금액').setRequired(true))
-            .addStringOption(opt => opt.setName('상품').setDescription('구매한 상품명').setRequired(true))
-            .addStringOption(opt => opt.setName('수량').setDescription('구매 수량').setRequired(true))
-            .addUserOption(opt => opt.setName('구매자').setDescription('구매한 유저').setRequired(true))
-            .addUserOption(opt => opt.setName('판매자').setDescription('담당 판매자').setRequired(false))
-    ];
-
-    const rest = new REST({ version: '10' }).setToken(TOKEN);
-    try {
-        await rest.put(
-            Routes.applicationGuildCommands(client.user.id, GUILD_ID),
-            { body: commands }
-        );
-        console.log('✅ [/지급완료] 슬래시 명령어 자동 동기화 완료!');
-    } catch (error) {
-        console.error('❌ 슬래시 명령어 등록 오류:', error);
-    }
+    client.application.commands.create(logCommand);
 });
 
-// /지급완료 명령어 처리
 client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
 
     if (interaction.commandName === '지급완료') {
-        const itemName = interaction.options.getString('상품');
-        const itemQty = interaction.options.getString('수량');
-        const amountStr = interaction.options.getString('금액');
-        const numericAmount = parseInt(amountStr.replace(/[^0-9]/g, '')) || 0;
-
         const buyer = interaction.options.getUser('구매자');
-        const seller = interaction.options.getUser('판매자') || interaction.user;
+        const item = interaction.options.getString('상품');
+        const price = interaction.options.getString('금액');
+        const seller = interaction.options.getUser('판매자');
 
-        // DB 금액 및 횟수 적립
-        const currentAmount = (await db.get(`user_${buyer.id}.totalAmount`)) || 0;
-        const currentCount = (await db.get(`user_${buyer.id}.buyCount`)) || 0;
-        await db.set(`user_${buyer.id}.totalAmount`, Number(currentAmount) + numericAmount);
-        await db.set(`user_${buyer.id}.buyCount`, Number(currentCount) + 1);
+        const logChannel = interaction.guild.channels.cache.get(LOG_CHANNEL_ID);
 
-        const currentBiggest = (await db.get(`user_${buyer.id}.biggestDeal`)) || 0;
-        if (numericAmount > currentBiggest) {
-            await db.set(`user_${buyer.id}.biggestDeal`, numericAmount);
+        if (!logChannel) {
+            return interaction.reply({ content: '로그 채널을 찾을 수 없습니다.', ephemeral: true });
         }
 
-        // 1. 구매 로그 채널 전송 (원본 텍스트 및 이모지 적용)
-        try {
-            const logChannel = await client.channels.fetch(PURCHASE_LOG_CHANNEL_ID);
-            if (logChannel) {
-                const logEmbed = new EmbedBuilder()
-                    .setColor(0xFFB6C1)
-                    .setDescription(`°.✩┈┈∘┈˃̶ ୨<a:Pinkheartgif:1545408138377695352> ୧˂̶┈∘┈┈✩.°\n\n${buyer}, ${itemName} (${itemQty}개) 구매 감사합니다 .ᐟ.ᐟ\n\n사용된 금액 : ${amountStr}\n\n해당 관리 판매자: ${seller}\n\n°.✩┈┈∘┈˃̶ ୨<a:Pinkheartgif:1545408138377695352> ୧˂̶┈∘┈┈✩.°\n࣪𓏲ּ ᥫ᭡ ₊ 𝑻𝒉𝒂نك 𝒚𝒐𝒖 ⊹ ˑ ִֶ 𓂃`)
-                    .setImage('https://i.imgur.com/jokl6LQ.gif');
-
-                await logChannel.send({ content: `${buyer}`, embeds: [logEmbed] });
-            }
-        } catch (error) {
-            console.error("로그 채널 오류:", error);
-        }
-
-        // 2. 현재 티켓 채널 전송 (원본 형태 적용)
-        const ticketEmbed = new EmbedBuilder()
+        // 1. 로그 채널용 임베드 메시지
+        const logEmbed = new EmbedBuilder()
             .setColor(0xFFB6C1)
-            .setDescription(`아이템이 정상적으로 지급되었어요. <a:veryheart:1479957265871143104>\n<#${REVIEW_CHANNEL_ID}> 작성은 필수입니다`);
+            .setDescription(
+                `°.✩┈┈∘┈˃̶ ୨ ୧˂̶┈∘┈┈✩.°\n` +
+                `${buyer}, ${item} 구매 감사합니다 .ᐟ.ᐟ\n\n` +
+                `사용된 금액 : ${price}\n\n` +
+                `해당 관리 판매자: ${seller}\n\n` +
+                `°.✩┈┈∘┈˃̶ ୨ ୧˂̶┈∘┈┈✩.°\n` +
+                `࣪𓏲ּ ᥫ᭡ ₊ 𝑻𝒉𝒂𝒏𝒌 𝒚𝒐𝒖 ⊹ ˑ ִֶ 𓂃`
+            )
+            .setImage(IMAGE_URL);
 
-        await interaction.reply({ content: `${buyer}`, embeds: [ticketEmbed] });
+        // 로그 채널에 구매자 멘션 + 임베드 전송
+        await logChannel.send({
+            content: `${buyer}`,
+            embeds: [logEmbed]
+        });
+
+        // 2. 명령어를 사용한 채널에 전송될 안내 임베드
+        const replyEmbed = new EmbedBuilder()
+            .setColor(0x87CEEB)
+            .setDescription(
+                `**아이템이 정상적으로 지급되었어요.**\n` +
+                `https://discord.com/channels/1456729030459134115/1457384179535712473 작성은 필수입니다.**`
+            );
+
+        // 명령어를 입력한 채널에 구매자 멘션 + 임베드로 응답
+        await interaction.reply({
+            content: `${buyer}`,
+            embeds: [replyEmbed]
+        });
     }
 });
 
-client.login(TOKEN);
+// 릴리웨이 Value(Variables)의 TOKEN 값을 읽어옵니다.
+if (!process.env.TOKEN) {
+    console.error("오류: 릴리웨이 Variables에 'TOKEN'이 설정되어 있지 않습니다!");
+    process.exit(1);
+}
+
+client.login(process.env.TOKEN);
