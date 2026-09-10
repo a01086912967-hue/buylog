@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, EmbedBuilder, SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, SlashCommandBuilder, PermissionFlagsBits, REST, Routes } = require('discord.js');
 
 const client = new Client({
     intents: [GatewayIntentBits.Guilds]
@@ -9,14 +9,24 @@ const LOG_CHANNEL_ID = '1457384858065047663';
 // 이미지 URL
 const IMAGE_URL = 'https://i.imgur.com/jokl6LQ.gif';
 
-client.once('ready', () => {
+client.once('ready', async () => {
     console.log(`[릴리웨이] 봇이 성공적으로 실행되었습니다: ${client.user.tag}`);
 
-    // /지급완료 명령어 등록
+    // 기존 슬래시 명령어 완전히 초기화 후 재등록
+    try {
+        const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
+        await rest.put(Routes.applicationCommands(client.user.id), { body: [] });
+        console.log('기존 슬래시 명령어를 모두 삭제했습니다.');
+    } catch (error) {
+        console.error('기존 명령어 삭제 중 오류 발생:', error);
+    }
+
+    // /지급완료 새로운 명령어 빌드
     const logCommand = new SlashCommandBuilder()
         .setName('지급완료')
         .setDescription('구매 완료 로그를 전송합니다.')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        // 필수 항목 (4개)
         .addUserOption(option =>
             option.setName('구매자')
                 .setDescription('구매한 유저')
@@ -26,15 +36,21 @@ client.once('ready', () => {
                 .setDescription('구매한 상품명')
                 .setRequired(true))
         .addStringOption(option =>
+            option.setName('수량')
+                .setDescription('구매한 수량')
+                .setRequired(true))
+        .addStringOption(option =>
             option.setName('금액')
                 .setDescription('사용된 금액')
                 .setRequired(true))
+        // 선택 항목 (1개)
         .addUserOption(option =>
             option.setName('판매자')
-                .setDescription('해당 관리 판매자')
-                .setRequired(true));
+                .setDescription('해당 관리 판매자 (미선택 시 명령어 사용자로 지정)')
+                .setRequired(false));
 
-    client.application.commands.create(logCommand);
+    await client.application.commands.create(logCommand);
+    console.log('새로운 /지급완료 명령어가 등록되었습니다.');
 });
 
 client.on('interactionCreate', async interaction => {
@@ -43,8 +59,11 @@ client.on('interactionCreate', async interaction => {
     if (interaction.commandName === '지급완료') {
         const buyer = interaction.options.getUser('구매자');
         const item = interaction.options.getString('상품');
+        const count = interaction.options.getString('수량');
         const price = interaction.options.getString('금액');
-        const seller = interaction.options.getUser('판매자');
+        
+        // 판매자 선택 안 하면 명령어 사용자로 설정
+        const seller = interaction.options.getUser('판매자') || interaction.user;
 
         const logChannel = interaction.guild.channels.cache.get(LOG_CHANNEL_ID);
 
@@ -57,7 +76,7 @@ client.on('interactionCreate', async interaction => {
             .setColor(0xFFB6C1)
             .setDescription(
                 `°.✩┈┈∘┈˃̶ ୨ ୧˂̶┈∘┈┈✩.°\n` +
-                `${buyer}, ${item} 구매 감사합니다 .ᐟ.ᐟ\n\n` +
+                `${buyer}, ${item} (${count}) 구매 감사합니다 .ᐟ.ᐟ\n\n` +
                 `사용된 금액 : ${price}\n\n` +
                 `해당 관리 판매자: ${seller}\n\n` +
                 `°.✩┈┈∘┈˃̶ ୨ ୧˂̶┈∘┈┈✩.°\n` +
@@ -65,7 +84,7 @@ client.on('interactionCreate', async interaction => {
             )
             .setImage(IMAGE_URL);
 
-        // 로그 채널에 구매자 멘션 + 임베드 전송
+        // 로그 채널에 구매자 멘션(텍스트) + 임베드 전송
         await logChannel.send({
             content: `${buyer}`,
             embeds: [logEmbed]
@@ -79,7 +98,7 @@ client.on('interactionCreate', async interaction => {
                 `https://discord.com/channels/1456729030459134115/1457384179535712473 작성은 필수입니다.**`
             );
 
-        // 명령어를 입력한 채널에 구매자 멘션 + 임베드로 응답
+        // 명령어를 입력한 채널에 구매자 멘션(텍스트) + 임베드로 답변 전송
         await interaction.reply({
             content: `${buyer}`,
             embeds: [replyEmbed]
@@ -87,7 +106,6 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-// 릴리웨이 Value(Variables)의 TOKEN 값을 읽어옵니다.
 if (!process.env.TOKEN) {
     console.error("오류: 릴리웨이 Variables에 'TOKEN'이 설정되어 있지 않습니다!");
     process.exit(1);
