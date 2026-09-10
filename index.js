@@ -103,7 +103,7 @@ client.on('interactionCreate', async interaction => {
             .setColor(LIGHT_PINK_COLOR)
             .setDescription(
                 `**아이템이 정상적으로 지급되었어요.**\n` +
-                `https://discord.com/channels/1456729030459134115/1457384179535712473 작성은 필수입니다.**`
+                `**https://discord.com/channels/1456729030459134115/1457384179535712473 작성은 필수입니다.**`
             );
 
         // 명령어가 실행된 채널에 공개 메시지로 전송
