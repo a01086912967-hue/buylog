@@ -1,14 +1,11 @@
 {
-  "name": "discord-bot",
+  "name": "discord-log-bot",
   "version": "1.0.0",
-  "description": "Discord Bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "@napi-rs/canvas": "^0.1.65",
-    "discord.js": "^14.18.0",
-    "quick.db": "^9.1.7"
+    "discord.js": "^14.14.1"
   }
 }
