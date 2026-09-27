@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, EmbedBuilder, SlashCommandBuilder, PermissionFlagsBits, REST, Routes } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, SlashCommandBuilder, PermissionFlagsBits, REST, Routes, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
 const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers]
@@ -58,6 +58,17 @@ client.once('ready', async () => {
 });
 
 client.on('interactionCreate', async interaction => {
+    // 버튼 클릭 이벤트를 처리합니다.
+    if (interaction.isButton()) {
+        if (interaction.customId === 'notice_btn') {
+            await interaction.reply({
+                content: `###  <#1457384179535712473>  미작성 시 주의사항 \n-# - 2일 내 작성하지 않으면 <@&1550129139086794852>  지급돼요.\n-# - 해당 역할 보유 시 다음 번 구매가 어려울 수 있어요.`,
+                ephemeral: true
+            });
+        }
+        return;
+    }
+
     if (!interaction.isChatInputCommand()) return;
 
     if (interaction.commandName === '지급완료') {
@@ -118,10 +129,24 @@ client.on('interactionCreate', async interaction => {
                 `**https://discord.com/channels/1456729030459134115/1457384179535712473 작성은 필수입니다.**`
             );
 
-        // 명령어가 실행된 채널에 공개 메시지로 전송
+        // 버튼 컴포넌트 생성
+        const row = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId('notice_btn')
+                    .setLabel('주의사항')
+                    .setStyle(ButtonStyle.Secondary),
+                new ButtonBuilder()
+                    .setLabel('후기작성')
+                    .setStyle(ButtonStyle.Link)
+                    .setURL(`https://discord.com/channels/${interaction.guildId}/1457384179535712473`)
+            );
+
+        // 명령어가 실행된 채널에 공개 메시지로 전송 (임베드 + 버튼)
         await interaction.channel.send({
             content: `${buyer}`,
-            embeds: [replyEmbed]
+            embeds: [replyEmbed],
+            components: [row]
         });
     }
 });
