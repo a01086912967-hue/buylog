@@ -156,73 +156,74 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-// $가격 및 $로벅스 일반 메시지 명령어 처리 로직
+// $가격 및 $로벅스 일반 메시지 명령어 처리 로직 (switch 문을 활용해 깨짐 완벽 방지)
 client.on('messageCreate', async message => {
     if (message.author.bot) return;
 
     const args = message.content.trim().split(/\s+/);
     const command = args[0];
 
-    // OR 연산자(||) 기호
-    if (command === '$가격' \vert{}\vert{} command === '$로벅스') {
-        // 역할 권한 체크 (1456747541348749342 역할 보유 여부)
-        if (!message.member || !message.member.roles.cache.has(CALCULATOR_ROLE_ID)) {
-            return message.reply('해당 명령어를 사용할 권한이 없습니다.');
-        }
-
-        // 먼저 "계산을 진행 중입니다 . ." 메시지 전송
-        const tempMsg = await message.reply('계산을 진행 중입니다 . .');
-
-        // 1. $가격 (만 원당 로벅스량) (구매할 로벅스 수)
-        if (command === '$가격') {
-            const rate = parseFloat(args[1]);
-            const robux = parseFloat(args[2]);
-
-            if (isNaN(rate) || isNaN(robux) || rate <= 0 || robux <= 0) {
-                return tempMsg.edit('올바른 사용법: `$가격 (만 원당 로벅스량) (구매할 로벅스 수)`\n예시: `$가격 1300 240`');
+    switch (command) {
+        case '$가격':
+        case '$로벅스': {
+            // 역할 권한 체크 (1456747541348749342 역할 보유 여부)
+            if (!message.member || !message.member.roles.cache.has(CALCULATOR_ROLE_ID)) {
+                return message.reply('해당 명령어를 사용할 권한이 없습니다.');
             }
 
-            // 백원 단위(0.1만 원) 올림 처리
-            const rawWan = robux / rate;
-            const roundedWan = Math.ceil(rawWan * 10) / 10;
-            const finalPrice = Math.round(roundedWan * 10000);
+            // "계산을 진행 중입니다 . ." 메시지 전송
+            const tempMsg = await message.reply('계산을 진행 중입니다 . .');
 
-            const embed = new EmbedBuilder()
-                .setColor(LIGHT_PINK_COLOR)
-                .setDescription(
-                    `## [ ! ] 로벅스 가격 결과 <:robux:1554139067913080882>\n` +
-                    `**만 원당 로벅스 가격 : \`${rate.toLocaleString()}\`\n` +
-                    `구매할 로벅스 수량 : \`${robux.toLocaleString()}\`**\n\n` +
-                    `**계산된 로벅스 가격 = \`${finalPrice.toLocaleString()}\`원**`
-                );
+            // 1. $가격 (만 원당 로벅스량) (구매할 로벅스 수)
+            if (command === '$가격') {
+                const rate = parseFloat(args[1]);
+                const robux = parseFloat(args[2]);
 
-            // 기존 "계산을 진행 중입니다 . ." 메시지를 결과 임베드로 수정
-            return tempMsg.edit({ content: null, embeds: [embed] });
-        }
+                if (isNaN(rate) || isNaN(robux) || rate <= 0 || robux <= 0) {
+                    return tempMsg.edit('올바른 사용법: `$가격 (만 원당 로벅스량) (구매할 로벅스 수)`\n예시: `$가격 1300 240`');
+                }
 
-        // 2. $로벅스 (만원 당 로벅스량) (보낼 돈)
-        if (command === '$로벅스') {
-            const rate = parseFloat(args[1]);
-            const money = parseFloat(args[2]);
+                // 백원 단위(0.1만 원) 올림 처리
+                const rawWan = robux / rate;
+                const roundedWan = Math.ceil(rawWan * 10) / 10;
+                const finalPrice = Math.round(roundedWan * 10000);
 
-            if (isNaN(rate) || isNaN(money) || rate <= 0 || money <= 0) {
-                return tempMsg.edit('올바른 사용법: `$로벅스 (만 원당 로벅스량) (보낼 돈)`\n예시: `$로벅스 1300 1900`');
+                const embed = new EmbedBuilder()
+                    .setColor(LIGHT_PINK_COLOR)
+                    .setDescription(
+                        `## [ ! ] 로벅스 가격 결과 <:robux:1554139067913080882>\n` +
+                        `**만 원당 로벅스 가격 : \`${rate.toLocaleString()}\`\n` +
+                        `구매할 로벅스 수량 : \`${robux.toLocaleString()}\`**\n\n` +
+                        `**계산된 로벅스 가격 = \`${finalPrice.toLocaleString()}\`원**`
+                    );
+
+                return tempMsg.edit({ content: null, embeds: [embed] });
             }
 
-            // 받을 로벅스 수량 계산 (소수점 버림 처리)
-            const totalRobux = Math.floor((money / 10000) * rate);
+            // 2. $로벅스 (만원 당 로벅스량) (보낼 돈)
+            if (command === '$로벅스') {
+                const rate = parseFloat(args[1]);
+                const money = parseFloat(args[2]);
 
-            const embed = new EmbedBuilder()
-                .setColor(LIGHT_PINK_COLOR)
-                .setDescription(
-                    `## [ ! ] 지급 로벅스 결과 <:robux:1554139067913080882>\n` +
-                    `**만 원당 로벅스 가격 : \`${rate.toLocaleString()}\`\n` +
-                    `보낼 금액 : \`${money.toLocaleString()}\`원**\n\n` +
-                    `**계산된 로벅스 수량 = \`${totalRobux.toLocaleString()}\` R$**`
-                );
+                if (isNaN(rate) || isNaN(money) || rate <= 0 || money <= 0) {
+                    return tempMsg.edit('올바른 사용법: `$로벅스 (만 원당 로벅스량) (보낼 돈)`\n예시: `$로벅스 1300 1900`');
+                }
 
-            // 기존 "계산을 진행 중입니다 . ." 메시지를 결과 임베드로 수정
-            return tempMsg.edit({ content: null, embeds: [embed] });
+                // 받을 로벅스 수량 계산 (소수점 버림 처리)
+                const totalRobux = Math.floor((money / 10000) * rate);
+
+                const embed = new EmbedBuilder()
+                    .setColor(LIGHT_PINK_COLOR)
+                    .setDescription(
+                        `## [ ! ] 지급 로벅스 결과 <:robux:1554139067913080882>\n` +
+                        `**만 원당 로벅스 가격 : \`${rate.toLocaleString()}\`\n` +
+                        `보낼 금액 : \`${money.toLocaleString()}\`원**\n\n` +
+                        `**계산된 로벅스 수량 = \`${totalRobux.toLocaleString()}\` R$**`
+                    );
+
+                return tempMsg.edit({ content: null, embeds: [embed] });
+            }
+            break;
         }
     }
 });
