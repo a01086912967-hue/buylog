@@ -3,7 +3,9 @@ const { Client, GatewayIntentBits, EmbedBuilder, SlashCommandBuilder, Permission
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds, 
-        GatewayIntentBits.GuildMembers
+        GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent
     ]
 });
 
@@ -21,7 +23,7 @@ const LIGHT_PINK_COLOR = 0xFFB6C1;
 client.once('ready', async () => {
     console.log(`[릴리웨이] 봇이 성공적으로 실행되었습니다: ${client.user.tag}`);
 
-    // 기존 슬래시 명령어 완전히 초기화 후 재등록
+    // 기존 슬래시 명령어 완전히 초기화 후 재등록 (/지급완료만 등록)
     try {
         const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
         await rest.put(Routes.applicationCommands(client.user.id), { body: [] });
@@ -30,40 +32,38 @@ client.once('ready', async () => {
         console.error('기존 명령어 삭제 중 오류 발생:', error);
     }
 
-    // 1. /지급완료 명령어 빌드
+    // /지급완료 명령어 빌드
     const logCommand = new SlashCommandBuilder()
         .setName('지급완료')
         .setDescription('구매 완료 로그를 전송합니다.')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-        .addUserOption(option => option.setName('구매자').setDescription('구매한 유저').setRequired(true))
-        .addStringOption(option => option.setName('상품').setDescription('구매한 상품명').setRequired(true))
-        .addStringOption(option => option.setName('수량').setDescription('구매한 수량').setRequired(true))
-        .addStringOption(option => option.setName('금액').setDescription('사용된 금액').setRequired(true))
-        .addUserOption(option => option.setName('판매자').setDescription('해당 관리 판매자 (미선택 시 명령어 사용자로 지정)').setRequired(false));
+        .addUserOption(option =>
+            option.setName('구매자')
+                .setDescription('구매한 유저')
+                .setRequired(true))
+        .addStringOption(option =>
+            option.setName('상품')
+                .setDescription('구매한 상품명')
+                .setRequired(true))
+        .addStringOption(option =>
+            option.setName('수량')
+                .setDescription('구매한 수량')
+                .setRequired(true))
+        .addStringOption(option =>
+            option.setName('금액')
+                .setDescription('사용된 금액')
+                .setRequired(true))
+        .addUserOption(option =>
+            option.setName('판매자')
+                .setDescription('해당 관리 판매자 (미선택 시 명령어 사용자로 지정)')
+                .setRequired(false));
 
-    // 2. /가격 명령어 빌드
-    const priceCommand = new SlashCommandBuilder()
-        .setName('가격')
-        .setDescription('구매할 로벅스 가격을 계산합니다.')
-        .addNumberOption(option => option.setName('만원당로벅스').setDescription('만 원당 로벅스량 (예: 1300)').setRequired(true))
-        .addNumberOption(option => option.setName('구매할로벅스').setDescription('구매할 로벅스 수량 (예: 240)').setRequired(true));
-
-    // 3. /로벅스 명령어 빌드
-    const robuxCommand = new SlashCommandBuilder()
-        .setName('로벅스')
-        .setDescription('보낼 금액에 따른 로벅스 수량을 계산합니다.')
-        .addNumberOption(option => option.setName('만원당로벅스').setDescription('만 원당 로벅스량 (예: 1300)').setRequired(true))
-        .addNumberOption(option => option.setName('보낼돈').setDescription('보낼 돈 (예: 1900)').setRequired(true));
-
-    // 명령어 일괄 등록
     await client.application.commands.create(logCommand);
-    await client.application.commands.create(priceCommand);
-    await client.application.commands.create(robuxCommand);
-    console.log('새로운 슬래시 명령어들이 등록되었습니다.');
+    console.log('새로운 /지급완료 명령어가 등록되었습니다.');
 });
 
 client.on('interactionCreate', async interaction => {
-    // 버튼 클릭 이벤트 처리
+    // 버튼 클릭 이벤트를 처리합니다.
     if (interaction.isButton()) {
         if (interaction.customId === 'notice_btn') {
             await interaction.reply({
@@ -76,8 +76,8 @@ client.on('interactionCreate', async interaction => {
 
     if (!interaction.isChatInputCommand()) return;
 
-    // --- /지급완료 ---
     if (interaction.commandName === '지급완료') {
+        // 1. 명령어 입력자 본인에게만 보이는 처리 중 메시지
         await interaction.reply({ 
             content: '지급완료를 처리 중입니다. . .', 
             ephemeral: true 
@@ -87,8 +87,11 @@ client.on('interactionCreate', async interaction => {
         const item = interaction.options.getString('상품');
         const count = interaction.options.getString('수량');
         const price = interaction.options.getString('금액');
+        
+        // 판매자 미선택 시 명령어 사용자로 설정
         const seller = interaction.options.getUser('판매자') || interaction.user;
 
+        // 2. 역할 부여 로직 (이미 보유 중이면 냅둠)
         try {
             const member = await interaction.guild.members.fetch(buyer.id);
             if (member && !member.roles.cache.has(ROLE_ID)) {
@@ -104,6 +107,7 @@ client.on('interactionCreate', async interaction => {
             return interaction.followUp({ content: '로그 채널을 찾을 수 없습니다.', ephemeral: true });
         }
 
+        // 3. 지정된 로그 채널용 연핑크 임베드 메시지
         const logEmbed = new EmbedBuilder()
             .setColor(LIGHT_PINK_COLOR)
             .setDescription(
@@ -116,11 +120,13 @@ client.on('interactionCreate', async interaction => {
             )
             .setImage(IMAGE_URL);
 
+        // 로그 채널에 구매자 멘션 + 연핑크 임베드 전송
         await logChannel.send({
             content: `${buyer}`,
             embeds: [logEmbed]
         });
 
+        // 4. 명령어를 사용한 채널에 전송할 안내 연핑크 임베드
         const replyEmbed = new EmbedBuilder()
             .setColor(LIGHT_PINK_COLOR)
             .setDescription(
@@ -128,6 +134,7 @@ client.on('interactionCreate', async interaction => {
                 `**https://discord.com/channels/1456729030459134115/1457384179535712473 작성은 필수입니다.**`
             );
 
+        // 버튼 컴포넌트 생성
         const row = new ActionRowBuilder()
             .addComponents(
                 new ButtonBuilder()
@@ -140,34 +147,39 @@ client.on('interactionCreate', async interaction => {
                     .setURL(`https://discord.com/channels/${interaction.guildId}/1457384179535712473`)
             );
 
+        // 명령어가 실행된 채널에 공개 메시지로 전송 (임베드 + 버튼)
         await interaction.channel.send({
             content: `${buyer}`,
             embeds: [replyEmbed],
             components: [row]
         });
     }
+});
 
-    // --- /가격 & /로벅스 계산 명령어 처리 ---
-    if (interaction.commandName === '가격' || interaction.commandName === '로벅스') {
+// $가격 및 $로벅스 일반 메시지 명령어 처리 로직
+client.on('messageCreate', async message => {
+    if (message.author.bot) return;
+
+    const args = message.content.trim().split(/\s+/);
+    const command = args[0];
+
+    // 문법 오류 방지를 위해 각각 비교
+    if (command === '$가격' \vert{}\vert{} command === '$로벅스') {
         // 역할 권한 체크 (1456747541348749342 역할 보유 여부)
-        const member = interaction.member;
-        if (!member || !member.roles.cache.has(CALCULATOR_ROLE_ID)) {
-            return interaction.reply({ content: '해당 명령어를 사용할 권한이 없습니다.', ephemeral: true });
+        if (!message.member || !message.member.roles.cache.has(CALCULATOR_ROLE_ID)) {
+            return message.reply('해당 명령어를 사용할 권한이 없습니다.');
         }
 
-        // 1. 나만 보이는 메시지로 "계산을 진행 중입니다 . ." 전송
-        await interaction.reply({
-            content: '계산을 진행 중입니다 . .',
-            ephemeral: true
-        });
+        // 먼저 "계산을 진행 중입니다 . ." 메시지를 답장으로 전송
+        const tempMsg = await message.reply('계산을 진행 중입니다 . .');
 
-        // 2. /가격
-        if (interaction.commandName === '가격') {
-            const rate = interaction.options.getNumber('만원당로벅스');
-            const robux = interaction.options.getNumber('구매할로벅스');
+        // 1. $가격 (만 원당 로벅스량) (구매할 로벅스 수)
+        if (command === '$가격') {
+            const rate = parseFloat(args[1]);
+            const robux = parseFloat(args[2]);
 
-            if (rate <= 0 || robux <= 0) {
-                return interaction.editReply({ content: '0보다 큰 숫자를 입력해 주세요.' });
+            if (isNaN(rate) || isNaN(robux) || rate <= 0 || robux <= 0) {
+                return tempMsg.edit('올바른 사용법: `$가격 (만 원당 로벅스량) (구매할 로벅스 수)`\n예시: `$가격 1300 240`');
             }
 
             // 백원 단위(0.1만 원) 올림 처리
@@ -184,17 +196,17 @@ client.on('interactionCreate', async interaction => {
                     `**계산된 로벅스 가격 = \`${finalPrice.toLocaleString()}\`원**`
                 );
 
-            // 기존 "계산을 진행 중입니다 . ." 메시지를 결과 임베드로 수정
-            return interaction.editReply({ content: null, embeds: [embed] });
+            // 전송했던 "계산을 진행 중입니다 . ." 메시지를 결과 임베드로 수정
+            return tempMsg.edit({ content: null, embeds: [embed] });
         }
 
-        // 3. /로벅스
-        if (interaction.commandName === '로벅스') {
-            const rate = interaction.options.getNumber('만원당로벅스');
-            const money = interaction.options.getNumber('보낼돈');
+        // 2. $로벅스 (만원 당 로벅스량) (보낼 돈)
+        if (command === '$로벅스') {
+            const rate = parseFloat(args[1]);
+            const money = parseFloat(args[2]);
 
-            if (rate <= 0 || money <= 0) {
-                return interaction.editReply({ content: '0보다 큰 숫자를 입력해 주세요.' });
+            if (isNaN(rate) || isNaN(money) || rate <= 0 || money <= 0) {
+                return tempMsg.edit('올바른 사용법: `$로벅스 (만 원당 로벅스량) (보낼 돈)`\n예시: `$로벅스 1300 1900`');
             }
 
             // 받을 로벅스 수량 계산 (소수점 버림 처리)
@@ -209,8 +221,8 @@ client.on('interactionCreate', async interaction => {
                     `**계산된 로벅스 수량 = \`${totalRobux.toLocaleString()}\` R$**`
                 );
 
-            // 기존 "계산을 진행 중입니다 . ." 메시지를 결과 임베드로 수정
-            return interaction.editReply({ content: null, embeds: [embed] });
+            // 전송했던 "계산을 진행 중입니다 . ." 메시지를 결과 임베드로 수정
+            return tempMsg.edit({ content: null, embeds: [embed] });
         }
     }
 });
