@@ -23,7 +23,7 @@ const LIGHT_PINK_COLOR = 0xFFB6C1;
 client.once('ready', async () => {
     console.log(`[릴리웨이] 봇이 성공적으로 실행되었습니다: ${client.user.tag}`);
 
-    // 기존 슬래시 명령어 완전히 초기화 후 재등록 (/지급완료만 등록)
+    // 기존 슬래시 명령어 완전히 초기화 후 /지급완료만 재등록
     try {
         const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
         await rest.put(Routes.applicationCommands(client.user.id), { body: [] });
@@ -163,14 +163,14 @@ client.on('messageCreate', async message => {
     const args = message.content.trim().split(/\s+/);
     const command = args[0];
 
-    // 문법 오류 방지를 위해 각각 비교
+    // OR 연산자(||) 기호
     if (command === '$가격' \vert{}\vert{} command === '$로벅스') {
         // 역할 권한 체크 (1456747541348749342 역할 보유 여부)
         if (!message.member || !message.member.roles.cache.has(CALCULATOR_ROLE_ID)) {
             return message.reply('해당 명령어를 사용할 권한이 없습니다.');
         }
 
-        // 먼저 "계산을 진행 중입니다 . ." 메시지를 답장으로 전송
+        // 먼저 "계산을 진행 중입니다 . ." 메시지 전송
         const tempMsg = await message.reply('계산을 진행 중입니다 . .');
 
         // 1. $가격 (만 원당 로벅스량) (구매할 로벅스 수)
@@ -196,7 +196,7 @@ client.on('messageCreate', async message => {
                     `**계산된 로벅스 가격 = \`${finalPrice.toLocaleString()}\`원**`
                 );
 
-            // 전송했던 "계산을 진행 중입니다 . ." 메시지를 결과 임베드로 수정
+            // 기존 "계산을 진행 중입니다 . ." 메시지를 결과 임베드로 수정
             return tempMsg.edit({ content: null, embeds: [embed] });
         }
 
@@ -221,7 +221,7 @@ client.on('messageCreate', async message => {
                     `**계산된 로벅스 수량 = \`${totalRobux.toLocaleString()}\` R$**`
                 );
 
-            // 전송했던 "계산을 진행 중입니다 . ." 메시지를 결과 임베드로 수정
+            // 기존 "계산을 진행 중입니다 . ." 메시지를 결과 임베드로 수정
             return tempMsg.edit({ content: null, embeds: [embed] });
         }
     }
