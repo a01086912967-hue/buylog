@@ -174,10 +174,10 @@ client.on('messageCreate', async message => {
                 return message.reply('해당 명령어를 사용할 권한이 없습니다.');
             }
 
-            // 1. "계산을 진행 중입니다 . ." 메시지 전송
+            // 1. 유저 메시지에 "답장 형식"으로 안내 메시지 전송
             const tempMsg = await message.reply('계산을 진행 중입니다 . .');
 
-            // 2. 유저가 적은 원래 명령어 메시지 삭제
+            // 2. 유저가 작성한 원래 명령어 메시지 삭제
             try {
                 if (message.deletable) {
                     await message.delete();
@@ -186,16 +186,25 @@ client.on('messageCreate', async message => {
                 console.error('유저 메시지 삭제 권한 오류:', err);
             }
 
-            // 3. 2초(2000ms) 대기
+            // 3. 2초 대기
             await sleep(2000);
 
-            // 4. $가격 (만 원당 로벅스량) (구매할 로벅스 수)
+            // 4. "계산을 진행 중입니다 . ." 메시지도 깔끔하게 삭제
+            try {
+                if (tempMsg.deletable) {
+                    await tempMsg.delete();
+                }
+            } catch (err) {
+                console.error('안내 메시지 삭제 오류:', err);
+            }
+
+            // 5. $가격 계산 및 결과 전송 (답장 형식이 아닌 일반 채널 메시지로 전송)
             if (command === '$가격') {
                 const rate = parseFloat(args[1]);
                 const robux = parseFloat(args[2]);
 
                 if (isNaN(rate) || isNaN(robux) || rate <= 0 || robux <= 0) {
-                    return tempMsg.edit('올바른 사용법: `$가격 (만 원당 로벅스량) (구매할 로벅스 수)`\n예시: `$가격 1300 240`');
+                    return message.channel.send('올바른 사용법: `$가격 (만 원당 로벅스량) (구매할 로벅스 수)`\n예시: `$가격 1300 240`');
                 }
 
                 // 백원 단위(0.1만 원) 올림 처리
@@ -212,16 +221,16 @@ client.on('messageCreate', async message => {
                         `**계산된 로벅스 가격 = \`${finalPrice.toLocaleString()}\`원**`
                     );
 
-                return tempMsg.edit({ content: null, embeds: [embed] });
+                return message.channel.send({ embeds: [embed] });
             }
 
-            // 5. $로벅스 (만원 당 로벅스량) (보낼 돈)
+            // 6. $로벅스 계산 및 결과 전송 (답장 형식이 아닌 일반 채널 메시지로 전송)
             if (command === '$로벅스') {
                 const rate = parseFloat(args[1]);
                 const money = parseFloat(args[2]);
 
                 if (isNaN(rate) || isNaN(money) || rate <= 0 || money <= 0) {
-                    return tempMsg.edit('올바른 사용법: `$로벅스 (만 원당 로벅스량) (보낼 돈)`\n예시: `$로벅스 1300 1900`');
+                    return message.channel.send('올바른 사용법: `$로벅스 (만 원당 로벅스량) (보낼 돈)`\n예시: `$로벅스 1300 1900`');
                 }
 
                 // 받을 로벅스 수량 계산 (소수점 버림 처리)
@@ -236,7 +245,7 @@ client.on('messageCreate', async message => {
                         `**계산된 로벅스 수량 = \`${totalRobux.toLocaleString()}\` R$**`
                     );
 
-                return tempMsg.edit({ content: null, embeds: [embed] });
+                return message.channel.send({ embeds: [embed] });
             }
             break;
         }
