@@ -20,6 +20,9 @@ const IMAGE_URL = 'https://i.imgur.com/jokl6LQ.gif';
 // 연핑크 색상 공통 정의
 const LIGHT_PINK_COLOR = 0xFFB6C1;
 
+// 일정 시간(ms) 동안 대기하는 함수
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
 client.once('ready', async () => {
     console.log(`[릴리웨이] 봇이 성공적으로 실행되었습니다: ${client.user.tag}`);
 
@@ -156,7 +159,7 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-// $가격 및 $로벅스 일반 메시지 명령어 처리 로직 (switch 문을 활용해 깨짐 완벽 방지)
+// $가격 및 $로벅스 일반 메시지 명령어 처리 로직
 client.on('messageCreate', async message => {
     if (message.author.bot) return;
 
@@ -171,10 +174,22 @@ client.on('messageCreate', async message => {
                 return message.reply('해당 명령어를 사용할 권한이 없습니다.');
             }
 
-            // "계산을 진행 중입니다 . ." 메시지 전송
+            // 1. "계산을 진행 중입니다 . ." 메시지 전송
             const tempMsg = await message.reply('계산을 진행 중입니다 . .');
 
-            // 1. $가격 (만 원당 로벅스량) (구매할 로벅스 수)
+            // 2. 유저가 적은 원래 명령어 메시지 삭제
+            try {
+                if (message.deletable) {
+                    await message.delete();
+                }
+            } catch (err) {
+                console.error('유저 메시지 삭제 권한 오류:', err);
+            }
+
+            // 3. 2초(2000ms) 대기
+            await sleep(2000);
+
+            // 4. $가격 (만 원당 로벅스량) (구매할 로벅스 수)
             if (command === '$가격') {
                 const rate = parseFloat(args[1]);
                 const robux = parseFloat(args[2]);
@@ -200,7 +215,7 @@ client.on('messageCreate', async message => {
                 return tempMsg.edit({ content: null, embeds: [embed] });
             }
 
-            // 2. $로벅스 (만원 당 로벅스량) (보낼 돈)
+            // 5. $로벅스 (만원 당 로벅스량) (보낼 돈)
             if (command === '$로벅스') {
                 const rate = parseFloat(args[1]);
                 const money = parseFloat(args[2]);
