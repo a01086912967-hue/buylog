@@ -20,6 +20,10 @@ const client = new Client({
     ]
 });
 
+// ================================
+// 설정
+// ================================
+
 // 구매 로그가 전송될 채널 ID
 const LOG_CHANNEL_ID = '1457384858065047663';
 
@@ -35,7 +39,7 @@ const IMAGE_URL = 'https://i.imgur.com/jokl6LQ.gif';
 // 연핑크 색상
 const LIGHT_PINK_COLOR = 0xFFB6C1;
 
-// 일정 시간(ms) 동안 대기하는 함수
+// 일정 시간 대기
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 
@@ -44,12 +48,17 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 // ================================
 
 client.once('ready', async () => {
-    console.log(`[릴리웨이] 봇이 성공적으로 실행되었습니다: ${client.user.tag}`);
+
+    console.log(
+        `[릴리웨이] 봇이 성공적으로 실행되었습니다: ${client.user.tag}`
+    );
 
     try {
-        const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
 
-        // 기존 슬래시 명령어 모두 삭제
+        const rest = new REST({ version: '10' })
+            .setToken(process.env.TOKEN);
+
+        // 기존 슬래시 명령어 삭제
         await rest.put(
             Routes.applicationCommands(client.user.id),
             { body: [] }
@@ -58,7 +67,12 @@ client.once('ready', async () => {
         console.log('기존 슬래시 명령어를 모두 삭제했습니다.');
 
     } catch (error) {
-        console.error('기존 명령어 삭제 중 오류 발생:', error);
+
+        console.error(
+            '기존 명령어 삭제 중 오류 발생:',
+            error
+        );
+
     }
 
 
@@ -69,7 +83,9 @@ client.once('ready', async () => {
     const logCommand = new SlashCommandBuilder()
         .setName('지급완료')
         .setDescription('구매 완료 로그를 전송합니다.')
-        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .setDefaultMemberPermissions(
+            PermissionFlagsBits.Administrator
+        )
 
         .addUserOption(option =>
             option
@@ -102,7 +118,9 @@ client.once('ready', async () => {
         .addUserOption(option =>
             option
                 .setName('판매자')
-                .setDescription('해당 관리 판매자 (미선택 시 명령어 사용자로 지정)')
+                .setDescription(
+                    '해당 관리 판매자 (미선택 시 명령어 사용자로 지정)'
+                )
                 .setRequired(false)
         );
 
@@ -113,31 +131,40 @@ client.once('ready', async () => {
 
     const panelCommand = new SlashCommandBuilder()
         .setName('패널')
-        .setDescription('이용 안내 패널을 생성합니다.')
-        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
+        .setDescription('상단배너 관리 패널을 생성합니다.')
+        .setDefaultMemberPermissions(
+            PermissionFlagsBits.Administrator
+        );
 
 
+    // 명령어 등록
     await client.application.commands.create(logCommand);
-    console.log('새로운 /지급완료 명령어가 등록되었습니다.');
+    console.log('/지급완료 명령어가 등록되었습니다.');
 
     await client.application.commands.create(panelCommand);
-    console.log('새로운 /패널 명령어가 등록되었습니다.');
+    console.log('/패널 명령어가 등록되었습니다.');
+
 });
 
 
 // ================================
-// 슬래시 명령어 / 버튼
+// 인터랙션 처리
 // ================================
 
 client.on('interactionCreate', async interaction => {
 
+
     // ================================
-    // 버튼 클릭 처리
+    // 버튼 처리
     // ================================
 
     if (interaction.isButton()) {
 
-        // 주의사항 버튼
+
+        // ----------------
+        // 기존 주의사항
+        // ----------------
+
         if (interaction.customId === 'notice_btn') {
 
             await interaction.reply({
@@ -148,6 +175,77 @@ client.on('interactionCreate', async interaction => {
                 ephemeral: true
             });
 
+            return;
+        }
+
+
+        // ----------------
+        // 상단배너 등록
+        // ----------------
+
+        if (interaction.customId === 'banner_register') {
+
+            await interaction.reply({
+                content:
+                    `### <:robux:1554139067913080882> 상단배너 등록\n\n` +
+                    `상단배너 등록을 진행하려면 관리자에게 문의해주세요.`,
+                ephemeral: true
+            });
+
+            return;
+        }
+
+
+        // ----------------
+        // 상단배너 정보
+        // ----------------
+
+        if (interaction.customId === 'banner_info') {
+
+            await interaction.reply({
+                content:
+                    `### <:robux:1554139067913080882> 상단배너 정보\n\n` +
+                    `현재 등록된 상단배너의 정보를 확인할 수 있습니다.`,
+                ephemeral: true
+            });
+
+            return;
+        }
+
+
+        // ----------------
+        // 상단배너 연장
+        // ----------------
+
+        if (interaction.customId === 'banner_extend') {
+
+            await interaction.reply({
+                content:
+                    `### <:robux:1554139067913080882> 상단배너 연장\n\n` +
+                    `상단배너 연장을 원하시면 관리자에게 문의해주세요.`,
+                ephemeral: true
+            });
+
+            return;
+        }
+
+
+        // ----------------
+        // 상단배너 가이드
+        // ----------------
+
+        if (interaction.customId === 'banner_guide') {
+
+            await interaction.reply({
+                content:
+                    `### <:robux:1554139067913080882> 상단배너 가이드\n\n` +
+                    `• 상단배너 등록 전 가이드를 확인해주세요.\n` +
+                    `• 등록 후 수정 및 연장이 가능합니다.\n` +
+                    `• 자세한 사항은 관리자에게 문의해주세요.`,
+                ephemeral: true
+            });
+
+            return;
         }
 
         return;
@@ -164,38 +262,43 @@ client.on('interactionCreate', async interaction => {
 
     if (interaction.commandName === '패널') {
 
+
         const panelEmbed = new EmbedBuilder()
-            .setColor(LIGHT_PINK_COLOR)
+            .setColor(0x57F287)
+            .setTitle('상단배너 시작 / 관리하기')
             .setDescription(
-                `## 𐙚 이용 안내\n\n` +
-                `아래 버튼을 눌러 원하는 메뉴를 확인해주세요 .ᐟ\n\n` +
-                `> <:robux:1554139067913080882> **구매 관련 안내**\n` +
-                `> 구매 및 지급에 관한 안내를 확인할 수 있어요.\n\n` +
-                `> ♡ **후기 작성**\n` +
-                `> 구매 후 후기를 작성해주세요 .ᐟ`
-            )
-            .setImage(IMAGE_URL);
+                '• 가이드를 참고하여 상단배너를 등록하고 관리해보세요.'
+            );
 
 
+        // 버튼 4개
         const panelRow = new ActionRowBuilder()
             .addComponents(
 
                 new ButtonBuilder()
-                    .setCustomId('notice_btn')
-                    .setLabel('주의사항')
+                    .setCustomId('banner_register')
+                    .setLabel('등록')
+                    .setStyle(ButtonStyle.Success),
+
+                new ButtonBuilder()
+                    .setCustomId('banner_info')
+                    .setLabel('정보')
+                    .setStyle(ButtonStyle.Primary),
+
+                new ButtonBuilder()
+                    .setCustomId('banner_extend')
+                    .setLabel('연장')
                     .setStyle(ButtonStyle.Secondary),
 
                 new ButtonBuilder()
-                    .setLabel('후기작성')
-                    .setStyle(ButtonStyle.Link)
-                    .setURL(
-                        `https://discord.com/channels/${interaction.guildId}/1457384179535712473`
-                    )
+                    .setCustomId('banner_guide')
+                    .setLabel('가이드')
+                    .setStyle(ButtonStyle.Secondary)
 
             );
 
 
-        // 패널 전송
+        // Embed + 버튼 패널 전송
         await interaction.channel.send({
             embeds: [panelEmbed],
             components: [panelRow]
@@ -204,7 +307,7 @@ client.on('interactionCreate', async interaction => {
 
         // 명령어 사용자에게만 보이는 메시지
         await interaction.reply({
-            content: '패널을 생성했습니다.',
+            content: '상단배너 관리 패널을 생성했습니다.',
             ephemeral: true
         });
 
@@ -218,19 +321,26 @@ client.on('interactionCreate', async interaction => {
 
     if (interaction.commandName === '지급완료') {
 
-        // 처리 중 메시지
+
+        // 처리 중
         await interaction.reply({
             content: '지급완료를 처리 중입니다. . .',
             ephemeral: true
         });
 
 
-        const buyer = interaction.options.getUser('구매자');
-        const item = interaction.options.getString('상품');
-        const count = interaction.options.getString('수량');
-        const price = interaction.options.getString('금액');
+        const buyer =
+            interaction.options.getUser('구매자');
 
-        // 판매자 미선택 시 명령어 사용자
+        const item =
+            interaction.options.getString('상품');
+
+        const count =
+            interaction.options.getString('수량');
+
+        const price =
+            interaction.options.getString('금액');
+
         const seller =
             interaction.options.getUser('판매자') ||
             interaction.user;
@@ -243,13 +353,17 @@ client.on('interactionCreate', async interaction => {
         try {
 
             const member =
-                await interaction.guild.members.fetch(buyer.id);
+                await interaction.guild.members.fetch(
+                    buyer.id
+                );
 
             if (
                 member &&
                 !member.roles.cache.has(ROLE_ID)
             ) {
+
                 await member.roles.add(ROLE_ID);
+
             }
 
         } catch (error) {
@@ -263,11 +377,13 @@ client.on('interactionCreate', async interaction => {
 
 
         // ================================
-        // 로그 채널 확인
+        // 로그 채널
         // ================================
 
         const logChannel =
-            interaction.guild.channels.cache.get(LOG_CHANNEL_ID);
+            interaction.guild.channels.cache.get(
+                LOG_CHANNEL_ID
+            );
 
 
         if (!logChannel) {
@@ -281,7 +397,7 @@ client.on('interactionCreate', async interaction => {
 
 
         // ================================
-        // 구매 로그 임베드
+        // 구매 로그 Embed
         // ================================
 
         const logEmbed = new EmbedBuilder()
@@ -297,7 +413,7 @@ client.on('interactionCreate', async interaction => {
             .setImage(IMAGE_URL);
 
 
-        // 로그 채널에 전송
+        // 로그 채널 전송
         await logChannel.send({
             content: `${buyer}`,
             embeds: [logEmbed]
@@ -305,7 +421,7 @@ client.on('interactionCreate', async interaction => {
 
 
         // ================================
-        // 지급 완료 안내 임베드
+        // 지급 완료 안내 Embed
         // ================================
 
         const replyEmbed = new EmbedBuilder()
@@ -316,10 +432,7 @@ client.on('interactionCreate', async interaction => {
             );
 
 
-        // ================================
         // 버튼
-        // ================================
-
         const row = new ActionRowBuilder()
             .addComponents(
 
@@ -338,12 +451,14 @@ client.on('interactionCreate', async interaction => {
             );
 
 
-        // 현재 채널에 공개 전송
+        // 현재 채널에 전송
         await interaction.channel.send({
             content: `${buyer}`,
             embeds: [replyEmbed],
             components: [row]
         });
+
+        return;
     }
 
 });
@@ -369,7 +484,8 @@ client.on('messageCreate', async message => {
         case '$가격':
         case '$로벅스': {
 
-            // 역할 권한 체크
+
+            // 권한 확인
             if (
                 !message.member ||
                 !message.member.roles.cache.has(
@@ -384,14 +500,14 @@ client.on('messageCreate', async message => {
             }
 
 
-            // 계산 중 메시지
+            // 계산 중
             const tempMsg =
                 await message.reply(
                     '계산을 진행 중입니다 . .'
                 );
 
 
-            // 원래 명령어 삭제
+            // 원래 메시지 삭제
             try {
 
                 if (message.deletable) {
@@ -510,7 +626,7 @@ client.on('messageCreate', async message => {
                 }
 
 
-                // 받을 로벅스 수량
+                // 지급 로벅스 계산
                 const totalRobux =
                     Math.floor(
                         (money / 10000) * rate
@@ -536,6 +652,7 @@ client.on('messageCreate', async message => {
             break;
         }
     }
+
 });
 
 
