@@ -8,7 +8,10 @@ const {
     Routes,
     ActionRowBuilder,
     ButtonBuilder,
-    ButtonStyle
+    ButtonStyle,
+    ContainerBuilder,
+    TextDisplayBuilder,
+    MessageFlags
 } = require('discord.js');
 
 const client = new Client({
@@ -19,10 +22,6 @@ const client = new Client({
         GatewayIntentBits.MessageContent
     ]
 });
-
-// ================================
-// 설정
-// ================================
 
 // 구매 로그가 전송될 채널 ID
 const LOG_CHANNEL_ID = '1457384858065047663';
@@ -39,13 +38,13 @@ const IMAGE_URL = 'https://i.imgur.com/jokl6LQ.gif';
 // 연핑크 색상
 const LIGHT_PINK_COLOR = 0xFFB6C1;
 
-// 일정 시간 대기
+// 일정 시간(ms) 동안 대기
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 
-// ================================
+// ========================================
 // 봇 준비
-// ================================
+// ========================================
 
 client.once('ready', async () => {
 
@@ -58,7 +57,7 @@ client.once('ready', async () => {
         const rest = new REST({ version: '10' })
             .setToken(process.env.TOKEN);
 
-        // 기존 슬래시 명령어 삭제
+        // 기존 슬래시 명령어 모두 삭제
         await rest.put(
             Routes.applicationCommands(client.user.id),
             { body: [] }
@@ -76,9 +75,9 @@ client.once('ready', async () => {
     }
 
 
-    // ================================
+    // ========================================
     // /지급완료
-    // ================================
+    // ========================================
 
     const logCommand = new SlashCommandBuilder()
         .setName('지급완료')
@@ -125,19 +124,18 @@ client.once('ready', async () => {
         );
 
 
-    // ================================
+    // ========================================
     // /패널
-    // ================================
+    // ========================================
 
     const panelCommand = new SlashCommandBuilder()
         .setName('패널')
-        .setDescription('상단배너 관리 패널을 생성합니다.')
+        .setDescription('안내 패널을 생성합니다.')
         .setDefaultMemberPermissions(
             PermissionFlagsBits.Administrator
         );
 
 
-    // 명령어 등록
     await client.application.commands.create(logCommand);
     console.log('/지급완료 명령어가 등록되었습니다.');
 
@@ -147,24 +145,21 @@ client.once('ready', async () => {
 });
 
 
-// ================================
-// 인터랙션 처리
-// ================================
+// ========================================
+// 버튼 / 인터랙션
+// ========================================
 
 client.on('interactionCreate', async interaction => {
 
 
-    // ================================
-    // 버튼 처리
-    // ================================
+    // ========================================
+    // 버튼 클릭
+    // ========================================
 
     if (interaction.isButton()) {
 
 
-        // ----------------
-        // 기존 주의사항
-        // ----------------
-
+        // 기존 주의사항 버튼
         if (interaction.customId === 'notice_btn') {
 
             await interaction.reply({
@@ -179,16 +174,15 @@ client.on('interactionCreate', async interaction => {
         }
 
 
-        // ----------------
-        // 상단배너 등록
-        // ----------------
+        // ========================================
+        // 패널 - 문의
+        // ========================================
 
-        if (interaction.customId === 'banner_register') {
+        if (interaction.customId === 'panel_inquiry') {
 
             await interaction.reply({
                 content:
-                    `### <:robux:1554139067913080882> 상단배너 등록\n\n` +
-                    `상단배너 등록을 진행하려면 관리자에게 문의해주세요.`,
+                    '문의사항이 있다면 관리자에게 문의해주세요.',
                 ephemeral: true
             });
 
@@ -196,16 +190,15 @@ client.on('interactionCreate', async interaction => {
         }
 
 
-        // ----------------
-        // 상단배너 정보
-        // ----------------
+        // ========================================
+        // 패널 - 신청
+        // ========================================
 
-        if (interaction.customId === 'banner_info') {
+        if (interaction.customId === 'panel_apply') {
 
             await interaction.reply({
                 content:
-                    `### <:robux:1554139067913080882> 상단배너 정보\n\n` +
-                    `현재 등록된 상단배너의 정보를 확인할 수 있습니다.`,
+                    '신청을 진행하려면 안내사항을 먼저 확인해주세요.',
                 ephemeral: true
             });
 
@@ -213,16 +206,15 @@ client.on('interactionCreate', async interaction => {
         }
 
 
-        // ----------------
-        // 상단배너 연장
-        // ----------------
+        // ========================================
+        // 패널 - 규정
+        // ========================================
 
-        if (interaction.customId === 'banner_extend') {
+        if (interaction.customId === 'panel_rules') {
 
             await interaction.reply({
                 content:
-                    `### <:robux:1554139067913080882> 상단배너 연장\n\n` +
-                    `상단배너 연장을 원하시면 관리자에게 문의해주세요.`,
+                    '서버 이용 규정을 확인해주세요.',
                 ephemeral: true
             });
 
@@ -230,23 +222,21 @@ client.on('interactionCreate', async interaction => {
         }
 
 
-        // ----------------
-        // 상단배너 가이드
-        // ----------------
+        // ========================================
+        // 패널 - 도움말
+        // ========================================
 
-        if (interaction.customId === 'banner_guide') {
+        if (interaction.customId === 'panel_help') {
 
             await interaction.reply({
                 content:
-                    `### <:robux:1554139067913080882> 상단배너 가이드\n\n` +
-                    `• 상단배너 등록 전 가이드를 확인해주세요.\n` +
-                    `• 등록 후 수정 및 연장이 가능합니다.\n` +
-                    `• 자세한 사항은 관리자에게 문의해주세요.`,
+                    '도움이 필요한 경우 관리자에게 문의해주세요.',
                 ephemeral: true
             });
 
             return;
         }
+
 
         return;
     }
@@ -256,58 +246,87 @@ client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
 
 
-    // ================================
+    // ========================================
     // /패널
-    // ================================
+    // ========================================
 
     if (interaction.commandName === '패널') {
 
 
-        const panelEmbed = new EmbedBuilder()
-            .setColor(0x57F287)
-            .setTitle('상단배너 시작 / 관리하기')
-            .setDescription(
-                '• 가이드를 참고하여 상단배너를 등록하고 관리해보세요.'
+        // -------------------------------
+        // 패널 안쪽 텍스트
+        // -------------------------------
+
+        const title = new TextDisplayBuilder()
+            .setContent(
+                '## ✦ 서버 이용 안내'
             );
 
 
-        // 버튼 4개
-        const panelRow = new ActionRowBuilder()
+        const description = new TextDisplayBuilder()
+            .setContent(
+                '필요한 메뉴를 아래에서 선택해주세요.\n' +
+                '각 버튼을 눌러 관련 안내를 확인할 수 있습니다.'
+            );
+
+
+        // -------------------------------
+        // 버튼
+        // -------------------------------
+
+        const panelButtons = new ActionRowBuilder()
             .addComponents(
 
                 new ButtonBuilder()
-                    .setCustomId('banner_register')
-                    .setLabel('등록')
+                    .setCustomId('panel_inquiry')
+                    .setLabel('문의')
                     .setStyle(ButtonStyle.Success),
 
                 new ButtonBuilder()
-                    .setCustomId('banner_info')
-                    .setLabel('정보')
+                    .setCustomId('panel_apply')
+                    .setLabel('신청')
                     .setStyle(ButtonStyle.Primary),
 
                 new ButtonBuilder()
-                    .setCustomId('banner_extend')
-                    .setLabel('연장')
+                    .setCustomId('panel_rules')
+                    .setLabel('규정')
                     .setStyle(ButtonStyle.Secondary),
 
                 new ButtonBuilder()
-                    .setCustomId('banner_guide')
-                    .setLabel('가이드')
+                    .setCustomId('panel_help')
+                    .setLabel('도움말')
                     .setStyle(ButtonStyle.Secondary)
 
             );
 
 
-        // Embed + 버튼 패널 전송
+        // -------------------------------
+        // Components V2 Container
+        // -------------------------------
+
+        const panel = new ContainerBuilder()
+            .setAccentColor(LIGHT_PINK_COLOR)
+
+            .addTextDisplayComponents(title)
+
+            .addTextDisplayComponents(description)
+
+            .addActionRowComponents(panelButtons);
+
+
+        // -------------------------------
+        // 패널 전송
+        // -------------------------------
+
         await interaction.channel.send({
-            embeds: [panelEmbed],
-            components: [panelRow]
+            components: [panel],
+            flags: MessageFlags.IsComponentsV2
         });
 
 
-        // 명령어 사용자에게만 보이는 메시지
+        // 명령어 사용자는 이 메시지만 봄
         await interaction.reply({
-            content: '상단배너 관리 패널을 생성했습니다.',
+            content: '패널을 생성했습니다.',
             ephemeral: true
         });
 
@@ -315,9 +334,9 @@ client.on('interactionCreate', async interaction => {
     }
 
 
-    // ================================
+    // ========================================
     // /지급완료
-    // ================================
+    // ========================================
 
     if (interaction.commandName === '지급완료') {
 
@@ -346,9 +365,9 @@ client.on('interactionCreate', async interaction => {
             interaction.user;
 
 
-        // ================================
+        // ========================================
         // 역할 부여
-        // ================================
+        // ========================================
 
         try {
 
@@ -376,9 +395,9 @@ client.on('interactionCreate', async interaction => {
         }
 
 
-        // ================================
+        // ========================================
         // 로그 채널
-        // ================================
+        // ========================================
 
         const logChannel =
             interaction.guild.channels.cache.get(
@@ -396,9 +415,9 @@ client.on('interactionCreate', async interaction => {
         }
 
 
-        // ================================
+        // ========================================
         // 구매 로그 Embed
-        // ================================
+        // ========================================
 
         const logEmbed = new EmbedBuilder()
             .setColor(LIGHT_PINK_COLOR)
@@ -413,16 +432,15 @@ client.on('interactionCreate', async interaction => {
             .setImage(IMAGE_URL);
 
 
-        // 로그 채널 전송
         await logChannel.send({
             content: `${buyer}`,
             embeds: [logEmbed]
         });
 
 
-        // ================================
-        // 지급 완료 안내 Embed
-        // ================================
+        // ========================================
+        // 지급 완료 안내
+        // ========================================
 
         const replyEmbed = new EmbedBuilder()
             .setColor(LIGHT_PINK_COLOR)
@@ -432,7 +450,6 @@ client.on('interactionCreate', async interaction => {
             );
 
 
-        // 버튼
         const row = new ActionRowBuilder()
             .addComponents(
 
@@ -451,7 +468,6 @@ client.on('interactionCreate', async interaction => {
             );
 
 
-        // 현재 채널에 전송
         await interaction.channel.send({
             content: `${buyer}`,
             embeds: [replyEmbed],
@@ -464,9 +480,9 @@ client.on('interactionCreate', async interaction => {
 });
 
 
-// ================================
+// ========================================
 // $가격 / $로벅스
-// ================================
+// ========================================
 
 client.on('messageCreate', async message => {
 
@@ -507,7 +523,7 @@ client.on('messageCreate', async message => {
                 );
 
 
-            // 원래 메시지 삭제
+            // 명령어 삭제
             try {
 
                 if (message.deletable) {
@@ -545,9 +561,9 @@ client.on('messageCreate', async message => {
             }
 
 
-            // ================================
+            // ========================================
             // $가격
-            // ================================
+            // ========================================
 
             if (command === '$가격') {
 
@@ -573,7 +589,6 @@ client.on('messageCreate', async message => {
                 }
 
 
-                // 100원 단위 올림
                 const rawPrice =
                     (robux / rate) * 10000;
 
@@ -598,9 +613,9 @@ client.on('messageCreate', async message => {
             }
 
 
-            // ================================
+            // ========================================
             // $로벅스
-            // ================================
+            // ========================================
 
             if (command === '$로벅스') {
 
@@ -626,7 +641,6 @@ client.on('messageCreate', async message => {
                 }
 
 
-                // 지급 로벅스 계산
                 const totalRobux =
                     Math.floor(
                         (money / 10000) * rate
@@ -656,9 +670,9 @@ client.on('messageCreate', async message => {
 });
 
 
-// ================================
+// ========================================
 // TOKEN 확인
-// ================================
+// ========================================
 
 if (!process.env.TOKEN) {
 
@@ -670,8 +684,8 @@ if (!process.env.TOKEN) {
 }
 
 
-// ================================
+// ========================================
 // 로그인
-// ================================
+// ========================================
 
 client.login(process.env.TOKEN);
