@@ -207,10 +207,9 @@ client.on('messageCreate', async message => {
                     return message.channel.send('올바른 사용법: `$가격 (만 원당 로벅스량) (구매할 로벅스 수)`\n예시: `$가격 1300 240`');
                 }
 
-                // 백원 단위(0.1만 원) 올림 처리
-                const rawWan = robux / rate;
-                const roundedWan = Math.ceil(rawWan * 10) / 10;
-                const finalPrice = Math.round(roundedWan * 10000);
+                // 100원 단위 올림 처리
+                const rawPrice = (robux / rate) * 10000;
+                const finalPrice = Math.ceil(rawPrice / 100) * 100;
 
                 const embed = new EmbedBuilder()
                     .setColor(LIGHT_PINK_COLOR)
