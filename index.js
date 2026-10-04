@@ -14,7 +14,8 @@ const {
     SeparatorBuilder,
     MediaGalleryBuilder,
     MediaGalleryItemBuilder,
-    MessageFlags
+    MessageFlags,
+    ChannelType
 } = require('discord.js');
 
 const client = new Client({
@@ -26,24 +27,26 @@ const client = new Client({
     ]
 });
 
-// 기존 설정
+// 기존 기본 설정
 const LOG_CHANNEL_ID = '1457384858065047663';
 const ROLE_ID = '1457383788236505299';
 const CALCULATOR_ROLE_ID = '1456747541348749342';
 const IMAGE_URL = 'https://i.imgur.com/jokl6LQ.gif';
 const LIGHT_PINK_COLOR = 0xFFB6C1;
 
-// 선택 저장소: Map<MessageID, Map<UserID, { choice: 'cooperate'|'betray', user: User }>>
-const eventChoices = new Map();
-// 진행 중인 타이머 저장소: Map<MessageID, setTimeout>
+// 1) 이벤트 정보 저장소 (MessageID -> { logChannelId, choices: Map<UserID, {choice, user}>, title })
+const eventDataMap = new Map();
+// 2) 진행 중인 타이머 (MessageID -> setTimeout)
 const activeTimers = new Map();
-// 마감 처리된 이벤트 저장소: Set<MessageID>
+// 3) 마감 처리된 이벤트 (MessageID)
 const closedEvents = new Set();
+// 4) 기브어웨이 참가자 저장소 (GiveawayMessageID -> Set<UserID>)
+const giveawayParticipants = new Map();
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // ========================================
-// ⏱️ 시간 파싱 함수 (1d, 1h, 1m, 30s -> ms 변환)
+// ⏱️ 시간 파싱 함수
 // ========================================
 function parseDuration(str) {
     if (!str) return null;
@@ -73,6 +76,73 @@ function createProgressBar(percent, length = 10) {
 }
 
 // ========================================
+// 🎉 기브어웨이 마감 및 추첨 함수 (2명 추첨)
+// ========================================
+async function endGiveaway(channel, giveawayMessageId, eventTitle) {
+    try {
+        const message = await channel.messages.fetch(giveawayMessageId);
+        if (!message) return;
+
+        const participants = giveawayParticipants.get(giveawayMessageId) || new Set();
+        const winnerCount = 2; // 당첨자 2명
+        const participantArray = Array.from(participants);
+
+        let winnerText = '';
+
+        if (participantArray.length === 0) {
+            winnerText = '❌ 참기자가 없어 당첨자를 선발하지 못했습니다.';
+        } else {
+            // 랜덤 셔플
+            const shuffled = participantArray.sort(() => 0.5 - Math.random());
+            const winners = shuffled.slice(0, Math.min(winnerCount, participantArray.length));
+            winnerText = winners.map(id => `<@${id}>`).join(', ');
+        }
+
+        const disabledButton = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId('giveaway_enter')
+                .setLabel('🎉 기브어웨이 마감됨')
+                .setStyle(ButtonStyle.Secondary)
+                .setDisabled(true)
+        );
+
+        const endTitle = new TextDisplayBuilder()
+            .setContent(`## 🎉 [기브어웨이 종료] - ${eventTitle}`);
+
+        const endDesc = new TextDisplayBuilder()
+            .setContent(
+                `🎁 **이벤트 기브어웨이가 종료되었습니다!**\n\n` +
+                `👥 **총 응모자 수**: \`${participantArray.length}명\`\n` +
+                `🏆 **당첨자 (2명)**: ${winnerText}`
+            );
+
+        const closedContainer = new ContainerBuilder()
+            .setAccentColor(0xFFD700) // 골드 색상
+            .addTextDisplayComponents(endTitle)
+            .addSeparatorComponents(new SeparatorBuilder())
+            .addTextDisplayComponents(endDesc)
+            .addSeparatorComponents(new SeparatorBuilder())
+            .addActionRowComponents(disabledButton);
+
+        await message.edit({
+            components: [closedContainer],
+            flags: MessageFlags.IsComponentsV2
+        });
+
+        // 당첨 축하 메시지 전송
+        if (participantArray.length > 0) {
+            await channel.send({
+                content: `🎉 축하합니다! **[ ${eventTitle} ]** 기브어웨이 당첨자: ${winnerText} .ᐟ.ᐟ 🎁`
+            });
+        }
+
+        giveawayParticipants.delete(giveawayMessageId);
+    } catch (err) {
+        console.error('기브어웨이 마감 처리 실패:', err);
+    }
+}
+
+// ========================================
 // 🔒 패널 종료 함수 (자동 마감 & 수동 종료 공통)
 // ========================================
 async function closeEventPanel(channelId, messageId) {
@@ -87,21 +157,22 @@ async function closeEventPanel(channelId, messageId) {
         const message = await channel.messages.fetch(messageId);
         if (!message) return 'not_found';
 
-        // 해당 이벤트의 데이터 계산
-        const choicesMap = eventChoices.get(messageId) || new Map();
+        const data = eventDataMap.get(messageId) || { choices: new Map(), title: '이벤트' };
+        const choicesMap = data.choices;
         const totalUsers = choicesMap.size;
 
         let coopCount = 0;
         let betrayCount = 0;
 
-        for (const data of choicesMap.values()) {
-            if (data.choice === 'cooperate') coopCount++;
-            if (data.choice === 'betray') betrayCount++;
+        for (const userVal of choicesMap.values()) {
+            if (userVal.choice === 'cooperate') coopCount++;
+            if (userVal.choice === 'betray') betrayCount++;
         }
 
         const coopPercent = totalUsers > 0 ? ((coopCount / totalUsers) * 100).toFixed(1) : 0;
         const betrayPercent = totalUsers > 0 ? ((betrayCount / totalUsers) * 100).toFixed(1) : 0;
 
+        // 마감 후 생성할 버튼 row (결과 보기 버튼 활성화)
         const disabledRow = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
                 .setCustomId('game_cooperate')
@@ -114,7 +185,11 @@ async function closeEventPanel(channelId, messageId) {
                 .setLabel('배신 (마감)')
                 .setEmoji('🗡️')
                 .setStyle(ButtonStyle.Danger)
-                .setDisabled(true)
+                .setDisabled(true),
+            new ButtonBuilder()
+                .setCustomId(`view_event_logs_${messageId}_0`) // 메시지ID와 0페이지 전달
+                .setLabel('📜 참여자 목록 보기')
+                .setStyle(ButtonStyle.Primary)
         );
 
         const closedTitle = new TextDisplayBuilder()
@@ -126,11 +201,12 @@ async function closeEventPanel(channelId, messageId) {
                 `🤝 **협력**: \`${coopCount}명\` (\`${coopPercent}%\`)\n` +
                 `${createProgressBar(coopPercent)}\n\n` +
                 `🗡️ **배신**: \`${betrayCount}명\` (\`${betrayPercent}%\`)\n` +
-                `${createProgressBar(betrayPercent)}`
+                `${createProgressBar(betrayPercent)}\n\n` +
+                `-# 아래 [📜 참여자 목록 보기] 버튼을 눌러 개별 선택 결과를 확인할 수 있습니다.`
             );
 
         const closedContainer = new ContainerBuilder()
-            .setAccentColor(0x808080) // 회색
+            .setAccentColor(0x808080)
             .addTextDisplayComponents(closedTitle)
             .addSeparatorComponents(new SeparatorBuilder())
             .addTextDisplayComponents(statsDescription)
@@ -142,7 +218,6 @@ async function closeEventPanel(channelId, messageId) {
             flags: MessageFlags.IsComponentsV2
         });
 
-        // 상태 업데이트
         closedEvents.add(messageId);
 
         if (activeTimers.has(messageId)) {
@@ -150,11 +225,119 @@ async function closeEventPanel(channelId, messageId) {
             activeTimers.delete(messageId);
         }
 
+        // ========================================
+        // 🎁 3시간 뒤 종료되는 기브어웨이 패널 생성 (당첨자 2명)
+        // ========================================
+        const giveawayDurationMs = 3 * 60 * 60 * 1000; // 3시간
+        const giveawayEndTime = Math.floor((Date.now() + giveawayDurationMs) / 1000);
+
+        const giveawayTitle = new TextDisplayBuilder()
+            .setContent(`## 🎉 [이벤트 기브어웨이] - ${data.title}`);
+
+        const giveawayDesc = new TextDisplayBuilder()
+            .setContent(
+                `이벤트가 성공적으로 마감되었습니다!\n` +
+                `아래 🎉 버튼을 눌러 **3시간 후 추첨되는 기브어웨이**에 응모하세요!\n\n` +
+                `🏆 **당첨 인원**: \`2명\`\n` +
+                `⏳ **마감 시간**: <t:${giveawayEndTime}:R> (<t:${giveawayEndTime}:f> 까지)`
+            );
+
+        const giveawayButtonRow = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId('giveaway_enter')
+                .setLabel('🎉 응모하기')
+                .setStyle(ButtonStyle.Success)
+        );
+
+        const giveawayContainer = new ContainerBuilder()
+            .setAccentColor(LIGHT_PINK_COLOR)
+            .addTextDisplayComponents(giveawayTitle)
+            .addSeparatorComponents(new SeparatorBuilder())
+            .addTextDisplayComponents(giveawayDesc)
+            .addSeparatorComponents(new SeparatorBuilder())
+            .addActionRowComponents(giveawayButtonRow);
+
+        const giveawayMessage = await channel.send({
+            components: [giveawayContainer],
+            flags: MessageFlags.IsComponentsV2
+        });
+
+        giveawayParticipants.set(giveawayMessage.id, new Set());
+
+        // 3시간 후 기브어웨이 추첨 타이머
+        setTimeout(() => {
+            endGiveaway(channel, giveawayMessage.id, data.title);
+        }, giveawayDurationMs);
+
         return 'success';
     } catch (err) {
         console.error('패널 마감 처리 중 오류 발생:', err);
         return 'error';
     }
+}
+
+
+// ========================================
+// 📄 페이지네이션 로그 임베드 생성 함수
+// ========================================
+function buildLogPageEmbeds(targetMessageId, page = 0) {
+    const data = eventDataMap.get(targetMessageId);
+    if (!data || data.choices.size === 0) {
+        return { embeds: [], components: [], error: '기록된 참여 데이터가 없습니다.' };
+    }
+
+    const items = Array.from(data.choices.values());
+    const itemsPerPage = 5;
+    const totalPages = Math.ceil(items.length / itemsPerPage);
+
+    if (page < 0) page = 0;
+    if (page >= totalPages) page = totalPages - 1;
+
+    const start = page * itemsPerPage;
+    const pageItems = items.slice(start, start + itemsPerPage);
+
+    const embeds = [];
+
+    const overviewEmbed = new EmbedBuilder()
+        .setColor(LIGHT_PINK_COLOR)
+        .setTitle(`📜 [참여자 목록 로그] (${page + 1} /${totalPages} 페이지)`)
+        .setDescription(`**이벤트 제목**: ${data.title}\n**총 참여자 수**: \`${items.length}명\``)
+        .setTimestamp();
+
+    embeds.push(overviewEmbed);
+
+    for (const item of pageItems) {
+        const choiceText = item.choice === 'cooperate' ? '🤝 협력' : '🗡️ 배신';
+        const userEmbed = new EmbedBuilder()
+            .setColor(item.choice === 'cooperate' ? 0x57F287 : 0xED4245)
+            .setAuthor({ name: `${item.user.tag}`, iconURL: item.user.displayAvatarURL() })
+            .setThumbnail(item.user.displayAvatarURL({ dynamic: true }))
+            .addFields(
+                { name: '👤 유저', value: `${item.user}`, inline: true },
+                { name: '🎯 선택한 항목', value: `**${choiceText}**`, inline: true }
+            );
+        embeds.push(userEmbed);
+    }
+
+    const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId(`view_event_logs_${targetMessageId}_${page - 1}`)
+            .setLabel('◀ 이전')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(page === 0),
+        new ButtonBuilder()
+            .setCustomId(`page_indicator`)
+            .setLabel(`${page + 1} / ${totalPages}`)
+            .setStyle(ButtonStyle.Primary)
+            .setDisabled(true),
+        new ButtonBuilder()
+            .setCustomId(`view_event_logs_${targetMessageId}_${page + 1}`)
+            .setLabel('다음 ▶')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(page >= totalPages - 1)
+    );
+
+    return { embeds, components: [row] };
 }
 
 
@@ -194,11 +377,17 @@ client.once('ready', async () => {
         .setDescription('안내 패널을 생성합니다.')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
 
-    // 3) /협력배신패널
+    // 3) /협력배신패널 (로그채널 필수 항목 지정)
     const coopBetrayCommand = new SlashCommandBuilder()
         .setName('협력배신패널')
         .setDescription('협력/배신 이벤트 패널을 생성합니다.')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .addChannelOption(option =>
+            option.setName('로그채널')
+                .setDescription('선택 로그를 전송할 채널을 지정해 주세요.')
+                .addChannelTypes(ChannelType.GuildText)
+                .setRequired(true)
+        )
         .addStringOption(option =>
             option.setName('시간')
                 .setDescription('진행 시간 입력 (예: 10m, 1h, 1d)')
@@ -231,10 +420,10 @@ client.once('ready', async () => {
                 .setRequired(true)
         );
 
-    // 5) /이벤트로그 (신규 추가)
+    // 5) /이벤트로그
     const eventLogCommand = new SlashCommandBuilder()
         .setName('이벤트로그')
-        .setDescription('해당 이벤트에 참여한 유저들의 상세 선택 목록과 프로필을 확인합니다.')
+        .setDescription('해당 이벤트 참여자 목록을 페이지로 조회합니다.')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         .addStringOption(option =>
             option.setName('메시지_아이디')
@@ -294,6 +483,46 @@ client.on('interactionCreate', async interaction => {
             return;
         }
 
+        // 🎉 기브어웨이 응모 버튼 클릭
+        if (interaction.customId === 'giveaway_enter') {
+            const giveawayMsgId = interaction.message.id;
+            const participants = giveawayParticipants.get(giveawayMsgId);
+
+            if (!participants) {
+                return interaction.reply({ content: '❌ 이미 마감되었거나 존재하지 않는 기브어웨이입니다.', ephemeral: true });
+            }
+
+            if (participants.has(interaction.user.id)) {
+                return interaction.reply({ content: '❌ 이미 기브어웨이에 응모하셨습니다!', ephemeral: true });
+            }
+
+            participants.add(interaction.user.id);
+            return interaction.reply({
+                content: '🎉 기브어웨이 응모가 성공적으로 완료되었습니다! 3시간 뒤 추첨 결과를 확인하세요.',
+                ephemeral: true
+            });
+        }
+
+
+        // 📜 참여자 목록 및 페이지 이동 버튼 클릭 (view_event_logs_메시지ID_페이지)
+        if (interaction.customId.startsWith('view_event_logs_')) {
+            const parts = interaction.customId.split('_');
+            const targetMsgId = parts[3];
+            const page = parseInt(parts[4], 10) || 0;
+
+            const result = buildLogPageEmbeds(targetMsgId, page);
+            if (result.error) {
+                return interaction.reply({ content: `❌ ${result.error}`, ephemeral: true });
+            }
+
+            if (interaction.replied || interaction.deferred) {
+                await interaction.editReply({ embeds: result.embeds, components: result.components });
+            } else {
+                await interaction.reply({ embeds: result.embeds, components: result.components, ephemeral: true });
+            }
+            return;
+        }
+
 
         // 🤝 협력 / 🗡️ 배신 버튼 클릭
         if (interaction.customId === 'game_cooperate' || interaction.customId === 'game_betray') {
@@ -308,17 +537,17 @@ client.on('interactionCreate', async interaction => {
                 return;
             }
 
-            if (!eventChoices.has(messageId)) {
-                eventChoices.set(messageId, new Map());
+            const data = eventDataMap.get(messageId);
+            if (!data) {
+                return interaction.reply({ content: '❌ 이벤트 정보 데이터를 찾을 수 없습니다.', ephemeral: true });
             }
 
-            const choicesMap = eventChoices.get(messageId);
+            const choicesMap = data.choices;
             const userId = interaction.user.id;
 
-            // 중복 선택 검하게
+            // 중복 선택 체크
             if (choicesMap.has(userId)) {
-                const existingData = choicesMap.get(userId);
-                const existingChoice = existingData.choice === 'cooperate' ? '🤝 협력' : '🗡️ 배신';
+                const existingChoice = choicesMap.get(userId).choice === 'cooperate' ? '🤝 협력' : '🗡️ 배신';
                 await interaction.reply({
                     content: `❌ 이미 선택을 완료하셨습니다! (선택한 항목: **${existingChoice}**)\n선택은 변경할 수 없습니다.`,
                     ephemeral: true
@@ -329,7 +558,6 @@ client.on('interactionCreate', async interaction => {
             const choiceType = interaction.customId === 'game_cooperate' ? 'cooperate' : 'betray';
             const choiceLabel = choiceType === 'cooperate' ? '🤝 협력' : '🗡️ 배신';
 
-            // 저장소에 유저 선택 데이터 저장 (유저 객체 포함)
             choicesMap.set(userId, {
                 choice: choiceType,
                 user: interaction.user
@@ -340,21 +568,25 @@ client.on('interactionCreate', async interaction => {
                 ephemeral: true
             });
 
-            // 📜 로그 채널 전송
-            const logChannel = interaction.guild.channels.cache.get(LOG_CHANNEL_ID);
-            if (logChannel) {
-                const choiceLogEmbed = new EmbedBuilder()
-                    .setColor(choiceType === 'cooperate' ? 0x57F287 : 0xED4245)
-                    .setTitle('🎲 [이벤트] 플레이어 선택 로그')
-                    .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
-                    .addFields(
-                        { name: '👤 유저', value: `${interaction.user} (\`${interaction.user.tag}\`)`, inline: true },
-                        { name: '🎯 선택한 항목', value: `**${choiceLabel}**`, inline: true },
-                        { name: '📌 채널', value: `${interaction.channel}`, inline: true }
-                    )
-                    .setTimestamp();
+            // 📜 지정된 로그 채널로 전송
+            try {
+                const targetLogChannel = await interaction.guild.channels.fetch(data.logChannelId);
+                if (targetLogChannel) {
+                    const choiceLogEmbed = new EmbedBuilder()
+                        .setColor(choiceType === 'cooperate' ? 0x57F287 : 0xED4245)
+                        .setTitle('🎲 [이벤트] 플레이어 선택 로그')
+                        .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
+                        .addFields(
+                            { name: '👤 유저', value: `${interaction.user} (\`${interaction.user.tag}\`)`, inline: true },
+                            { name: '🎯 선택한 항목', value: `**${choiceLabel}**`, inline: true },
+                            { name: '📌 채널', value: `${interaction.channel}`, inline: true }
+                        )
+                        .setTimestamp();
 
-                await logChannel.send({ embeds: [choiceLogEmbed] });
+                    await targetLogChannel.send({ embeds: [choiceLogEmbed] });
+                }
+            } catch (err) {
+                console.error('지정 로그 채널 전송 실패:', err);
             }
 
             return;
@@ -372,6 +604,7 @@ client.on('interactionCreate', async interaction => {
     // ========================================
     if (interaction.commandName === '협력배신패널') {
 
+        const logChannel = interaction.options.getChannel('로그채널');
         const timeInput = interaction.options.getString('시간');
         const customTitle = interaction.options.getString('제목');
         const customDescription = interaction.options.getString('문구');
@@ -431,11 +664,15 @@ client.on('interactionCreate', async interaction => {
             flags: MessageFlags.IsComponentsV2
         });
 
-        // 맵 초기화
-        eventChoices.set(panelMessage.id, new Map());
+        // 지정 로그 채널 및 이벤트 정보 저장
+        eventDataMap.set(panelMessage.id, {
+            logChannelId: logChannel.id,
+            title: customTitle,
+            choices: new Map()
+        });
 
         await interaction.reply({
-            content: `패널이 생성되었습니다. (메시지 ID: \`${panelMessage.id}\`)`,
+            content: `패널이 생성되었습니다. (메시지 ID: \`${panelMessage.id}\` / 지정 로그채널: ${logChannel})`,
             ephemeral: true
         });
 
@@ -466,7 +703,7 @@ client.on('interactionCreate', async interaction => {
             });
         } else if (result === 'success') {
             await interaction.reply({
-                content: `✅ 메시지 ID (\`${targetMessageId}\`) 이벤트가 성공적으로 종료 처리되었습니다.`,
+                content: `✅ 메시지 ID (\`${targetMessageId}\`) 이벤트가 성공적으로 종료되었습니다.\n🎁 **3시간 후 추첨되는 기브어웨이 패널이 생성되었습니다.**`,
                 ephemeral: true
             });
         } else {
@@ -481,66 +718,21 @@ client.on('interactionCreate', async interaction => {
 
 
     // ========================================
-    // /이벤트로그 (선택 인원 전체 및 프로필 사진 조회)
+    // /이벤트로그 (명령어로도 조회 가능)
     // ========================================
     if (interaction.commandName === '이벤트로그') {
 
         const targetMessageId = interaction.options.getString('메시지_아이디');
-        const choicesMap = eventChoices.get(targetMessageId);
+        const result = buildLogPageEmbeds(targetMessageId, 0);
 
-        if (!choicesMap || choicesMap.size === 0) {
-            return interaction.reply({
-                content: `❌ 해당 메시지 ID (\`${targetMessageId}\`)에 기록된 참여 데이터가 없습니다.`,
-                ephemeral: true
-            });
+        if (result.error) {
+            return interaction.reply({ content: `❌ ${result.error}`, ephemeral: true });
         }
 
-        await interaction.deferReply({ ephemeral: true });
-
-        const embeds = [];
-        let coopText = '';
-        let betrayText = '';
-
-        for (const [userId, data] of choicesMap.entries()) {
-            const userTag = `${data.user} (\`${data.user.tag}\`)`;
-            if (data.choice === 'cooperate') {
-                coopText += `• ${userTag}\n`;
-            } else {
-                betrayText += `• ${userTag}\n`;
-            }
-        }
-
-        const overviewEmbed = new EmbedBuilder()
-            .setColor(LIGHT_PINK_COLOR)
-            .setTitle(`📜 [이벤트 로그 목록] - 메시지 ID: ${targetMessageId}`)
-            .setDescription(`**총 참여자**: \`${choicesMap.size}명\``)
-            .addFields(
-                { name: '🤝 협력 선택자', value: coopText || '없음', inline: false },
-                { name: '🗡️️ 배신 선택자', value: betrayText || '없음', inline: false }
-            )
-            .setTimestamp();
-
-        embeds.push(overviewEmbed);
-
-        // 상위 5명 유저 개별 프로필 카드 추가 예시
-        let count = 0;
-        for (const data of choicesMap.values()) {
-            if (count >= 5) break; // 에페메럴 임베드 최대 10개 제한을 위해 최대 5명 표시
-            const profileEmbed = new EmbedBuilder()
-                .setColor(data.choice === 'cooperate' ? 0x57F287 : 0xED4245)
-                .setAuthor({ name: `${data.user.tag} 님의 선택 정보`, iconURL: data.user.displayAvatarURL() })
-                .setThumbnail(data.user.displayAvatarURL({ dynamic: true, size: 256 }))
-                .addFields(
-                    { name: '유저', value: `${data.user}`, inline: true },
-                    { name: '선택', value: data.choice === 'cooperate' ? '🤝 협력' : '🗡️ 배신', inline: true }
-                );
-            embeds.push(profileEmbed);
-            count++;
-        }
-
-        await interaction.followUp({
-            content: `🔍 **이벤트 참여자 로그 조회 결과입니다.** (개인정보 보호를 위해 본인에게만 표시됨)`,
-            embeds: embeds,
+        await interaction.reply({
+            content: `🔍 **이벤트 참여자 목록 조회 결과입니다.**`,
+            embeds: result.embeds,
+            components: result.components,
             ephemeral: true
         });
 
