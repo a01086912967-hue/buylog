@@ -35,7 +35,7 @@ const IMAGE_URL = 'https://i.imgur.com/jokl6LQ.gif';
 const LIGHT_PINK_COLOR = 0xFFB6C1;
 
 // 저장소
-const eventDataMap = new Map(); // MessageID -> { logChannelId, coopRoleId, betrayRoleId, choices: Map<UserID, {choice, user, timestamp}>, title }
+const eventDataMap = new Map(); // MessageID -> { logChannelId, coopRoleId, betrayRoleId, title, giveawayDurationMs, choices: Map }
 const activeTimers = new Map();
 const closedEvents = new Set();
 const giveawayParticipants = new Map(); // GiveawayMessageID -> Set<UserID>
@@ -146,7 +146,7 @@ async function closeEventPanel(channelId, messageId) {
         const message = await channel.messages.fetch(messageId);
         if (!message) return 'not_found';
 
-        const data = eventDataMap.get(messageId) || { choices: new Map(), title: '이벤트' };
+        const data = eventDataMap.get(messageId) || { choices: new Map(), title: '이벤트', giveawayDurationMs: 3 * 60 * 60 * 1000 };
         const choicesMap = data.choices;
         const totalUsers = choicesMap.size;
 
@@ -238,9 +238,9 @@ async function closeEventPanel(channelId, messageId) {
             ruleNoticeText = `**[모두 배신 결과]** 모든 유저가 배신을 선택하여 **아무도 기브어웨이에 응모할 수 없습니다.**`;
         }
 
-        // 응모 대상자가 있는 경우에만 기브어웨이 패널 생성
+        // 응모 대상자가 있는 경우 설정한 시간으로 기브어웨이 패널 생성
         if (allowedUserSet.size > 0) {
-            const giveawayDurationMs = 3 * 60 * 60 * 1000;
+            const giveawayDurationMs = data.giveawayDurationMs || (3 * 60 * 60 * 1000);
             const giveawayEndTime = Math.floor((Date.now() + giveawayDurationMs) / 1000);
 
             const giveawayTitle = new TextDisplayBuilder()
@@ -282,7 +282,6 @@ async function closeEventPanel(channelId, messageId) {
                 endGiveaway(channel, giveawayMessage.id, data.title);
             }, giveawayDurationMs);
         } else {
-            // 응모 가능 유저가 없는 경우 알림 안내 전송
             await channel.send({
                 content: `📢 **[ ${data.title} ]** 이벤트 결과: ${ruleNoticeText}`
             });
@@ -406,7 +405,12 @@ client.once('ready', async () => {
         )
         .addStringOption(option =>
             option.setName('시간')
-                .setDescription('진행 시간 입력 (예: 10m, 1h, 1d)')
+                .setDescription('이벤트 진행 시간 (예: 10m, 1h, 1d)')
+                .setRequired(true)
+        )
+        .addStringOption(option =>
+            option.setName('기브어웨이시간')
+                .setDescription('마감 후 기브어웨이 진행 시간 (예: 10m, 3h, 1d)')
                 .setRequired(true)
         )
         .addStringOption(option =>
@@ -508,14 +512,14 @@ client.on('interactionCreate', async interaction => {
                 return interaction.reply({ content: '이미 기브어웨이에 응모하셨습니다.', ephemeral: true });
             }
 
-            // 선착순 인원 제한 검증 (모두 협력 결과 시)
+            // 선착순 인원 제한 검증
             if (maxParticipants !== null && maxParticipants !== undefined && participants.size >= maxParticipants) {
                 return interaction.reply({ content: `선착순 응모 인원(\`${maxParticipants}명\`)이 마감되어 더 이상 응모할 수 없습니다.`, ephemeral: true });
             }
 
             participants.add(interaction.user.id);
             return interaction.reply({
-                content: '기브어웨이 응모가 완료되었습니다! 3시간 뒤 추첨 결과를 확인하세요.',
+                content: '기브어웨이 응모가 완료되었습니다!',
                 ephemeral: true
             });
         }
@@ -627,6 +631,7 @@ client.on('interactionCreate', async interaction => {
         const coopRole = interaction.options.getRole('협력역할');
         const betrayRole = interaction.options.getRole('배신역할');
         const timeInput = interaction.options.getString('시간');
+        const giveawayTimeInput = interaction.options.getString('기브어웨이시간');
         const customTitle = interaction.options.getString('제목');
         const customDescription = interaction.options.getString('문구');
         const imageUrl = interaction.options.getString('이미지_url');
@@ -634,7 +639,15 @@ client.on('interactionCreate', async interaction => {
         const durationMs = parseDuration(timeInput);
         if (!durationMs) {
             return interaction.reply({
-                content: '올바른 시간 형식이 아닙니다. 예시: `10m`, `1h`, `1d`',
+                content: '이벤트 시간 형식이 올바르지 않습니다. 예시: `10m`, `1h`, `1d`',
+                ephemeral: true
+            });
+        }
+
+        const giveawayDurationMs = parseDuration(giveawayTimeInput);
+        if (!giveawayDurationMs) {
+            return interaction.reply({
+                content: '기브어웨이 시간 형식이 올바르지 않습니다. 예시: `10m`, `3h`, `1d`',
                 ephemeral: true
             });
         }
@@ -688,6 +701,7 @@ client.on('interactionCreate', async interaction => {
             coopRoleId: coopRole.id,
             betrayRoleId: betrayRole.id,
             title: customTitle,
+            giveawayDurationMs: giveawayDurationMs,
             choices: new Map()
         });
 
