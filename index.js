@@ -38,13 +38,13 @@ const LIGHT_PINK_COLOR = 0xFFB6C1;
 const MIN_ACCOUNT_AGE_DAYS = 7;
 
 // 저장소
-const eventDataMap = new Map(); // MessageID -> { logChannelId, coopRoleId, betrayRoleId, title, giveawayDurationMs, choices: Map }
+const eventDataMap = new Map(); // MessageID -> { logChannelId, coopRoleId, betrayRoleId, title, giveawayDurationMs, giveawayChannelId, giveawayWinnerCount, choices: Map }
 const activeTimers = new Map();
 const closedEvents = new Set();
 const giveawayParticipants = new Map(); // GiveawayMessageID -> Set<UserID>
-const giveawayAllowedUsers = new Map(); // GiveawayMessageID -> Set<UserID> (응모 자격 보유 유저)
+const giveawayAllowedUsers = new Map(); // GiveawayMessageID -> Set<UserID>
 const giveawayMaxParticipants = new Map(); // GiveawayMessageID -> maxAllowedCount
-const giveawayParentEventMap = new Map(); // GiveawayMessageID -> EventMessageID (선택한 역할 조회를 위함)
+const giveawayParentEventMap = new Map(); // GiveawayMessageID -> EventMessageID
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -72,14 +72,13 @@ function createProgressBar(percent, length = 10) {
     return '🟩'.repeat(filled) + '⬜'.repeat(empty);
 }
 
-// 기브어웨이 마감 및 추첨 (2명)
-async function endGiveaway(channel, giveawayMessageId, eventTitle) {
+// 기브어웨이 마감 및 추첨
+async function endGiveaway(channel, giveawayMessageId, eventTitle, winnerCount = 1) {
     try {
         const message = await channel.messages.fetch(giveawayMessageId);
         if (!message) return;
 
         const participants = giveawayParticipants.get(giveawayMessageId) || new Set();
-        const winnerCount = 2;
         const participantArray = Array.from(participants);
 
         const parentEventId = giveawayParentEventMap.get(giveawayMessageId);
@@ -89,15 +88,11 @@ async function endGiveaway(channel, giveawayMessageId, eventTitle) {
         let winnerTextWithChoice = '';
 
         if (participantArray.length === 0) {
-            winnerText = '참여자가 없어 당첨자를 선발하지 못했습니다.';
             winnerTextWithChoice = '참여자가 없어 당첨자를 선발하지 못했습니다.';
         } else {
             const shuffled = participantArray.sort(() => 0.5 - Math.random());
             const winners = shuffled.slice(0, Math.min(winnerCount, participantArray.length));
 
-            winnerText = winners.map(id => `<@${id}>`).join(', ');
-
-            // 당첨자의 선택 정보(협력/배신) 같이 표시
             winnerTextWithChoice = winners.map(id => {
                 let choiceStr = '미확인';
                 if (parentEvent && parentEvent.choices.has(id)) {
@@ -123,7 +118,7 @@ async function endGiveaway(channel, giveawayMessageId, eventTitle) {
             .setContent(
                 `이벤트 기브어웨이가 종료되었습니다.\n\n` +
                 `총 응모자 수: \`${participantArray.length}명\`\n` +
-                `당첨자 (2명): ${winnerTextWithChoice}`
+                `당첨자 (${winnerCount}명): ${winnerTextWithChoice}`
             );
 
         const closedContainer = new ContainerBuilder()
@@ -140,7 +135,6 @@ async function endGiveaway(channel, giveawayMessageId, eventTitle) {
         });
 
         if (participantArray.length > 0) {
-            // 해당 기브어웨이 메시지에 답장으로 알림
             await message.reply({
                 content: `축하합니다! **${eventTitle}** 기브어웨이 당첨자: ${winnerTextWithChoice}`,
                 allowedMentions: { parse: ['users'] }
@@ -169,7 +163,7 @@ async function closeEventPanel(channelId, messageId) {
         const message = await channel.messages.fetch(messageId);
         if (!message) return 'not_found';
 
-        const data = eventDataMap.get(messageId) || { choices: new Map(), title: '이벤트', giveawayDurationMs: 3 * 60 * 60 * 1000 };
+        const data = eventDataMap.get(messageId) || { choices: new Map(), title: '이벤트', giveawayDurationMs: 3 * 60 * 60 * 1000, giveawayWinnerCount: 1 };
         const choicesMap = data.choices;
         const totalUsers = choicesMap.size;
 
@@ -259,17 +253,28 @@ async function closeEventPanel(channelId, messageId) {
         }
 
         if (allowedUserSet.size > 0) {
+            // 기브어웨이 전송 채널 결정 (지정 채널이 없으면 현재 채널 사용)
+            let targetGiveawayChannel = channel;
+            if (data.giveawayChannelId) {
+                try {
+                    const fetchedChan = await client.channels.fetch(data.giveawayChannelId);
+                    if (fetchedChan) targetGiveawayChannel = fetchedChan;
+                } catch (e) {
+                    console.error('기브어웨이 채널 조회 실패, 기본 채널로 진행:', e);
+                }
+            }
+
             const giveawayDurationMs = data.giveawayDurationMs || (3 * 60 * 60 * 1000);
             const giveawayEndTime = Math.floor((Date.now() + giveawayDurationMs) / 1000);
 
             const giveawayTitle = new TextDisplayBuilder()
                 .setContent(`## [이벤트 기브어웨이] - ${data.title}`);
 
+            // 당첨자 수 언급 제거된 문구
             const giveawayDesc = new TextDisplayBuilder()
                 .setContent(
                     `이벤트가 성공적으로 마감되었습니다.\n` +
                     `${ruleNoticeText}\n\n` +
-                    `당첨 인원: \`2명\`\n` +
                     `마감 시간: <t:${giveawayEndTime}:R> (<t:${giveawayEndTime}:f> 까지)`
                 );
 
@@ -288,7 +293,7 @@ async function closeEventPanel(channelId, messageId) {
                 .addSeparatorComponents(new SeparatorBuilder())
                 .addActionRowComponents(giveawayButtonRow);
 
-            const giveawayMessage = await channel.send({
+            const giveawayMessage = await targetGiveawayChannel.send({
                 components: [giveawayContainer],
                 flags: MessageFlags.IsComponentsV2
             });
@@ -299,7 +304,7 @@ async function closeEventPanel(channelId, messageId) {
             giveawayParentEventMap.set(giveawayMessage.id, messageId);
 
             setTimeout(() => {
-                endGiveaway(channel, giveawayMessage.id, data.title);
+                endGiveaway(targetGiveawayChannel, giveawayMessage.id, data.title, data.giveawayWinnerCount);
             }, giveawayDurationMs);
         } else {
             await channel.send({
@@ -442,6 +447,18 @@ client.once('ready', async () => {
             option.setName('문구')
                 .setDescription('패널 본문 메시지')
                 .setRequired(true)
+        )
+        .addChannelOption(option =>
+            option.setName('기브어웨이채널')
+                .setDescription('기브어웨이 패널이 생성될 채널 (미설정 시 현재 채널)')
+                .addChannelTypes(ChannelType.GuildText)
+                .setRequired(false)
+        )
+        .addIntegerOption(option =>
+            option.setName('기브어웨이당첨자수')
+                .setDescription('기브어웨이 당첨 인원 수 (기본값: 1명)')
+                .setMinValue(1)
+                .setRequired(false)
         )
         .addStringOption(option =>
             option.setName('이미지_url')
@@ -691,6 +708,8 @@ client.on('interactionCreate', async interaction => {
         const giveawayTimeInput = interaction.options.getString('기브어웨이시간');
         const customTitle = interaction.options.getString('제목');
         const customDescription = interaction.options.getString('문구');
+        const giveawayChannel = interaction.options.getChannel('기브어웨이채널');
+        const giveawayWinners = interaction.options.getInteger('기브어웨이당첨자수') || 1;
         const imageUrl = interaction.options.getString('이미지_url');
 
         const durationMs = parseDuration(timeInput);
@@ -759,6 +778,8 @@ client.on('interactionCreate', async interaction => {
             betrayRoleId: betrayRole.id,
             title: customTitle,
             giveawayDurationMs: giveawayDurationMs,
+            giveawayChannelId: giveawayChannel ? giveawayChannel.id : null,
+            giveawayWinnerCount: giveawayWinners,
             choices: new Map()
         });
 
