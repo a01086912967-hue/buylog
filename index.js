@@ -268,7 +268,6 @@ async function closeEventPanel(channelId, messageId) {
 
             const maxTextNotice = maxAllowedCount ? ` (선착순 최대 ${maxAllowedCount}명)` : '';
 
-            // 멘션 문구를 컨테이너 내 텍스트 디스플레이에 포함
             let giveawayDescContent = '';
             if (data.pingRoleId) {
                 giveawayDescContent += `<@&${data.pingRoleId}>\n\n`;
@@ -283,7 +282,7 @@ async function closeEventPanel(channelId, messageId) {
             const giveawayButtonRow = new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
                     .setCustomId('giveaway_enter')
-                    .setLabel(`응모하기 (현재 0명${maxTextNotice})`)
+                    .setLabel(`응모하기${maxTextNotice}`)
                     .setStyle(ButtonStyle.Success)
             );
 
@@ -574,7 +573,7 @@ client.on('interactionCreate', async interaction => {
                 return interaction.reply({ content: '이미 기브어웨이에 응모하셨습니다.', ephemeral: true });
             }
 
-            // 선착순 인원이 이미 꽉 찬 경우 경고 메시지 출력
+            // 선착순 인원이 이미 꽉 찬 경우 안내 메시지만 출력 (패널 메시지는 수정하지 않음)
             if (maxParticipants !== null && maxParticipants !== undefined && participants.size >= maxParticipants) {
                 return interaction.reply({
                     content: `❌ 선착순 응모 인원(\`${maxParticipants}명\`)이 이미 꽉 차서 더 이상 응모할 수 없습니다!`,
@@ -584,37 +583,6 @@ client.on('interactionCreate', async interaction => {
 
             // 참여자 등록
             participants.add(interaction.user.id);
-
-            const isNowFull = maxParticipants !== null && maxParticipants !== undefined && participants.size >= maxParticipants;
-            const maxText = maxParticipants ? ` / 제한 ${maxParticipants}명` : '';
-
-            // 버튼 업데이트
-            const updatedButton = new ButtonBuilder()
-                .setCustomId('giveaway_enter')
-                .setLabel(isNowFull ? `응모 마감 (선착순 ${participants.size}명 꽉 참)` : `응모하기 (현재 ${participants.size}명${maxText})`)
-                .setStyle(isNowFull ? ButtonStyle.Secondary : ButtonStyle.Success)
-                .setDisabled(isNowFull);
-
-            const updatedRow = new ActionRowBuilder().addComponents(updatedButton);
-
-            try {
-                const container = interaction.message.components[0];
-                if (container && container.type === 17) {
-                    await interaction.message.edit({
-                        components: [
-                            new ContainerBuilder(container.data)
-                                .addActionRowComponents(updatedRow)
-                        ],
-                        flags: MessageFlags.IsComponentsV2
-                    });
-                } else {
-                    await interaction.message.edit({
-                        components: [updatedRow]
-                    });
-                }
-            } catch (err) {
-                console.error('버튼 수량 및 상태 업데이트 실패:', err);
-            }
 
             return interaction.reply({
                 content: `🎉 기브어웨이 응모가 완료되었습니다! (현재 선착순 ${participants.size}번째 응모자)`,
@@ -756,7 +724,6 @@ client.on('interactionCreate', async interaction => {
         const titleDisplay = new TextDisplayBuilder()
             .setContent(`## ${customTitle}`);
 
-        // 멘션 역할이 있으면 컨테이너 상단에 멘션 추가
         let fullDescription = '';
         if (pingRole) {
             fullDescription += `<@&${pingRole.id}>\n\n`;
