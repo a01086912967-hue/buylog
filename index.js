@@ -27,27 +27,22 @@ const client = new Client({
     ]
 });
 
-// 기존 기본 설정
+// 기본 설정
 const LOG_CHANNEL_ID = '1457384858065047663';
 const ROLE_ID = '1457383788236505299';
 const CALCULATOR_ROLE_ID = '1456747541348749342';
 const IMAGE_URL = 'https://i.imgur.com/jokl6LQ.gif';
 const LIGHT_PINK_COLOR = 0xFFB6C1;
 
-// 1) 이벤트 정보 저장소 (MessageID -> { logChannelId, choices: Map<UserID, {choice, user}>, title })
-const eventDataMap = new Map();
-// 2) 진행 중인 타이머 (MessageID -> setTimeout)
+// 저장소
+const eventDataMap = new Map(); // MessageID -> { logChannelId, coopRoleId, betrayRoleId, choices: Map<UserID, {choice, user}>, title }
 const activeTimers = new Map();
-// 3) 마감 처리된 이벤트 (MessageID)
 const closedEvents = new Set();
-// 4) 기브어웨이 참가자 저장소 (GiveawayMessageID -> Set<UserID>)
-const giveawayParticipants = new Map();
+const giveawayParticipants = new Map(); // GiveawayMessageID -> Set<UserID>
+const giveawayAllowedUsers = new Map(); // GiveawayMessageID -> Set<UserID> (이벤트 참여자 목록)
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// ========================================
-// ⏱️ 시간 파싱 함수
-// ========================================
 function parseDuration(str) {
     if (!str) return null;
     const regex = /^(\d+)\s*([smhd])$/i;
@@ -66,33 +61,27 @@ function parseDuration(str) {
     }
 }
 
-// ========================================
-// 📊 게이지 바 생성 함수
-// ========================================
 function createProgressBar(percent, length = 10) {
     const filled = Math.round((percent / 100) * length);
     const empty = length - filled;
     return '🟩'.repeat(filled) + '⬜'.repeat(empty);
 }
 
-// ========================================
-// 🎉 기브어웨이 마감 및 추첨 함수 (2명 추첨)
-// ========================================
+// 기브어웨이 마감 및 추첨 (2명)
 async function endGiveaway(channel, giveawayMessageId, eventTitle) {
     try {
         const message = await channel.messages.fetch(giveawayMessageId);
         if (!message) return;
 
         const participants = giveawayParticipants.get(giveawayMessageId) || new Set();
-        const winnerCount = 2; // 당첨자 2명
+        const winnerCount = 2;
         const participantArray = Array.from(participants);
 
         let winnerText = '';
 
         if (participantArray.length === 0) {
-            winnerText = '❌ 참기자가 없어 당첨자를 선발하지 못했습니다.';
+            winnerText = '참여자가 없어 당첨자를 선발하지 못했습니다.';
         } else {
-            // 랜덤 셔플
             const shuffled = participantArray.sort(() => 0.5 - Math.random());
             const winners = shuffled.slice(0, Math.min(winnerCount, participantArray.length));
             winnerText = winners.map(id => `<@${id}>`).join(', ');
@@ -101,23 +90,23 @@ async function endGiveaway(channel, giveawayMessageId, eventTitle) {
         const disabledButton = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
                 .setCustomId('giveaway_enter')
-                .setLabel('🎉 기브어웨이 마감됨')
+                .setLabel('기브어웨이 마감됨')
                 .setStyle(ButtonStyle.Secondary)
                 .setDisabled(true)
         );
 
         const endTitle = new TextDisplayBuilder()
-            .setContent(`## 🎉 [기브어웨이 종료] - ${eventTitle}`);
+            .setContent(`## [기브어웨이 종료] - ${eventTitle}`);
 
         const endDesc = new TextDisplayBuilder()
             .setContent(
-                `🎁 **이벤트 기브어웨이가 종료되었습니다!**\n\n` +
-                `👥 **총 응모자 수**: \`${participantArray.length}명\`\n` +
-                `🏆 **당첨자 (2명)**: ${winnerText}`
+                `이벤트 기브어웨이가 종료되었습니다.\n\n` +
+                `총 응모자 수: \`${participantArray.length}명\`\n` +
+                `당첨자 (2명): ${winnerText}`
             );
 
         const closedContainer = new ContainerBuilder()
-            .setAccentColor(0xFFD700) // 골드 색상
+            .setAccentColor(0xFFD700)
             .addTextDisplayComponents(endTitle)
             .addSeparatorComponents(new SeparatorBuilder())
             .addTextDisplayComponents(endDesc)
@@ -129,22 +118,20 @@ async function endGiveaway(channel, giveawayMessageId, eventTitle) {
             flags: MessageFlags.IsComponentsV2
         });
 
-        // 당첨 축하 메시지 전송
         if (participantArray.length > 0) {
             await channel.send({
-                content: `🎉 축하합니다! **[ ${eventTitle} ]** 기브어웨이 당첨자: ${winnerText} .ᐟ.ᐟ 🎁`
+                content: `축하합니다! **[ ${eventTitle} ]** 기브어웨이 당첨자: ${winnerText}`
             });
         }
 
         giveawayParticipants.delete(giveawayMessageId);
+        giveawayAllowedUsers.delete(giveawayMessageId);
     } catch (err) {
         console.error('기브어웨이 마감 처리 실패:', err);
     }
 }
 
-// ========================================
-// 🔒 패널 종료 함수 (자동 마감 & 수동 종료 공통)
-// ========================================
+// 이벤트 패널 종료 처리
 async function closeEventPanel(channelId, messageId) {
     if (closedEvents.has(messageId)) {
         return 'already_closed';
@@ -172,37 +159,34 @@ async function closeEventPanel(channelId, messageId) {
         const coopPercent = totalUsers > 0 ? ((coopCount / totalUsers) * 100).toFixed(1) : 0;
         const betrayPercent = totalUsers > 0 ? ((betrayCount / totalUsers) * 100).toFixed(1) : 0;
 
-        // 마감 후 생성할 버튼 row (결과 보기 버튼 활성화)
         const disabledRow = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
                 .setCustomId('game_cooperate')
                 .setLabel('협력 (마감)')
-                .setEmoji('🤝')
                 .setStyle(ButtonStyle.Success)
                 .setDisabled(true),
             new ButtonBuilder()
                 .setCustomId('game_betray')
                 .setLabel('배신 (마감)')
-                .setEmoji('🗡️')
                 .setStyle(ButtonStyle.Danger)
                 .setDisabled(true),
             new ButtonBuilder()
-                .setCustomId(`view_event_logs_${messageId}_0`) // 메시지ID와 0페이지 전달
-                .setLabel('📜 참여자 목록 보기')
+                .setCustomId(`view_event_logs_${messageId}_0`)
+                .setLabel('참여자 목록 보기')
                 .setStyle(ButtonStyle.Primary)
         );
 
         const closedTitle = new TextDisplayBuilder()
-            .setContent(`## 🔒 [이벤트 마감] 통계 결과`);
+            .setContent(`## [이벤트 마감] 통계 결과`);
 
         const statsDescription = new TextDisplayBuilder()
             .setContent(
-                `👥 **총 참여 인원**: \`${totalUsers}명\`\n\n` +
-                `🤝 **협력**: \`${coopCount}명\` (\`${coopPercent}%\`)\n` +
+                `총 참여 인원: \`${totalUsers}명\`\n\n` +
+                `협력: \`${coopCount}명\` (\`${coopPercent}%\`)\n` +
                 `${createProgressBar(coopPercent)}\n\n` +
-                `🗡️ **배신**: \`${betrayCount}명\` (\`${betrayPercent}%\`)\n` +
+                `배신: \`${betrayCount}명\` (\`${betrayPercent}%\`)\n` +
                 `${createProgressBar(betrayPercent)}\n\n` +
-                `-# 아래 [📜 참여자 목록 보기] 버튼을 눌러 개별 선택 결과를 확인할 수 있습니다.`
+                `-# 아래 [참여자 목록 보기] 버튼을 눌러 개별 선택 결과를 확인할 수 있습니다.`
             );
 
         const closedContainer = new ContainerBuilder()
@@ -225,27 +209,25 @@ async function closeEventPanel(channelId, messageId) {
             activeTimers.delete(messageId);
         }
 
-        // ========================================
-        // 🎁 3시간 뒤 종료되는 기브어웨이 패널 생성 (당첨자 2명)
-        // ========================================
-        const giveawayDurationMs = 3 * 60 * 60 * 1000; // 3시간
+        // 3시간 뒤 마감되는 기브어웨이 패널 생성
+        const giveawayDurationMs = 3 * 60 * 60 * 1000;
         const giveawayEndTime = Math.floor((Date.now() + giveawayDurationMs) / 1000);
 
         const giveawayTitle = new TextDisplayBuilder()
-            .setContent(`## 🎉 [이벤트 기브어웨이] - ${data.title}`);
+            .setContent(`## [이벤트 기브어웨이] - ${data.title}`);
 
         const giveawayDesc = new TextDisplayBuilder()
             .setContent(
-                `이벤트가 성공적으로 마감되었습니다!\n` +
-                `아래 🎉 버튼을 눌러 **3시간 후 추첨되는 기브어웨이**에 응모하세요!\n\n` +
-                `🏆 **당첨 인원**: \`2명\`\n` +
-                `⏳ **마감 시간**: <t:${giveawayEndTime}:R> (<t:${giveawayEndTime}:f> 까지)`
+                `이벤트가 성공적으로 마감되었습니다.\n` +
+                `이벤트에서 역할(협력/배신)을 부여받은 참여자만 아래 버튼을 통해 기브어웨이에 응모할 수 있습니다.\n\n` +
+                `당첨 인원: \`2명\`\n` +
+                `마감 시간: <t:${giveawayEndTime}:R> (<t:${giveawayEndTime}:f> 까지)`
             );
 
         const giveawayButtonRow = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
                 .setCustomId('giveaway_enter')
-                .setLabel('🎉 응모하기')
+                .setLabel('응모하기')
                 .setStyle(ButtonStyle.Success)
         );
 
@@ -262,9 +244,11 @@ async function closeEventPanel(channelId, messageId) {
             flags: MessageFlags.IsComponentsV2
         });
 
+        // 기브어웨이 응모 자격 유저 목록 (게임 선택을 완료한 유저들만 저장)
+        const allowedUserSet = new Set(choicesMap.keys());
+        giveawayAllowedUsers.set(giveawayMessage.id, allowedUserSet);
         giveawayParticipants.set(giveawayMessage.id, new Set());
 
-        // 3시간 후 기브어웨이 추첨 타이머
         setTimeout(() => {
             endGiveaway(channel, giveawayMessage.id, data.title);
         }, giveawayDurationMs);
@@ -276,10 +260,7 @@ async function closeEventPanel(channelId, messageId) {
     }
 }
 
-
-// ========================================
-// 📄 페이지네이션 로그 임베드 생성 함수
-// ========================================
+// 참여자 목록 임베드
 function buildLogPageEmbeds(targetMessageId, page = 0) {
     const data = eventDataMap.get(targetMessageId);
     if (!data || data.choices.size === 0) {
@@ -300,21 +281,21 @@ function buildLogPageEmbeds(targetMessageId, page = 0) {
 
     const overviewEmbed = new EmbedBuilder()
         .setColor(LIGHT_PINK_COLOR)
-        .setTitle(`📜 [참여자 목록 로그] (${page + 1} /${totalPages} 페이지)`)
+        .setTitle(`[참여자 목록 로그] (${page + 1} /${totalPages} 페이지)`)
         .setDescription(`**이벤트 제목**: ${data.title}\n**총 참여자 수**: \`${items.length}명\``)
         .setTimestamp();
 
     embeds.push(overviewEmbed);
 
     for (const item of pageItems) {
-        const choiceText = item.choice === 'cooperate' ? '🤝 협력' : '🗡️ 배신';
+        const choiceText = item.choice === 'cooperate' ? '협력' : '배신';
         const userEmbed = new EmbedBuilder()
             .setColor(item.choice === 'cooperate' ? 0x57F287 : 0xED4245)
             .setAuthor({ name: `${item.user.tag}`, iconURL: item.user.displayAvatarURL() })
             .setThumbnail(item.user.displayAvatarURL({ dynamic: true }))
             .addFields(
-                { name: '👤 유저', value: `${item.user}`, inline: true },
-                { name: '🎯 선택한 항목', value: `**${choiceText}**`, inline: true }
+                { name: '유저', value: `${item.user}`, inline: true },
+                { name: '선택한 항목', value: `**${choiceText}**`, inline: true }
             );
         embeds.push(userEmbed);
     }
@@ -322,7 +303,7 @@ function buildLogPageEmbeds(targetMessageId, page = 0) {
     const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
             .setCustomId(`view_event_logs_${targetMessageId}_${page - 1}`)
-            .setLabel('◀ 이전')
+            .setLabel('이전')
             .setStyle(ButtonStyle.Secondary)
             .setDisabled(page === 0),
         new ButtonBuilder()
@@ -332,7 +313,7 @@ function buildLogPageEmbeds(targetMessageId, page = 0) {
             .setDisabled(true),
         new ButtonBuilder()
             .setCustomId(`view_event_logs_${targetMessageId}_${page + 1}`)
-            .setLabel('다음 ▶')
+            .setLabel('다음')
             .setStyle(ButtonStyle.Secondary)
             .setDisabled(page >= totalPages - 1)
     );
@@ -340,13 +321,7 @@ function buildLogPageEmbeds(targetMessageId, page = 0) {
     return { embeds, components: [row] };
 }
 
-
-// ========================================
-// 봇 준비 & 슬래시 명령어 등록
-// ========================================
-
 client.once('ready', async () => {
-
     console.log(`[릴리웨이] 봇이 성공적으로 실행되었습니다: ${client.user.tag}`);
 
     try {
@@ -355,12 +330,10 @@ client.once('ready', async () => {
             Routes.applicationCommands(client.user.id),
             { body: [] }
         );
-        console.log('기존 슬래시 명령어를 모두 삭제했습니다.');
     } catch (error) {
         console.error('기존 명령어 삭제 중 오류 발생:', error);
     }
 
-    // 1) /지급완료
     const logCommand = new SlashCommandBuilder()
         .setName('지급완료')
         .setDescription('구매 완료 로그를 전송합니다.')
@@ -371,21 +344,29 @@ client.once('ready', async () => {
         .addStringOption(option => option.setName('금액').setDescription('사용된 금액').setRequired(true))
         .addUserOption(option => option.setName('판매자').setDescription('해당 관리 판매자').setRequired(false));
 
-    // 2) /패널
     const panelCommand = new SlashCommandBuilder()
         .setName('패널')
         .setDescription('안내 패널을 생성합니다.')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
 
-    // 3) /협력배신패널 (로그채널 필수 항목 지정)
     const coopBetrayCommand = new SlashCommandBuilder()
         .setName('협력배신패널')
         .setDescription('협력/배신 이벤트 패널을 생성합니다.')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         .addChannelOption(option =>
             option.setName('로그채널')
-                .setDescription('선택 로그를 전송할 채널을 지정해 주세요.')
+                .setDescription('선택 로그를 전송할 채널')
                 .addChannelTypes(ChannelType.GuildText)
+                .setRequired(true)
+        )
+        .addRoleOption(option =>
+            option.setName('협력역할')
+                .setDescription('협력 선택 시 지급할 역할')
+                .setRequired(true)
+        )
+        .addRoleOption(option =>
+            option.setName('배신역할')
+                .setDescription('배신 선택 시 지급할 역할')
                 .setRequired(true)
         )
         .addStringOption(option =>
@@ -395,39 +376,37 @@ client.once('ready', async () => {
         )
         .addStringOption(option =>
             option.setName('제목')
-                .setDescription('패널 제목을 입력하세요.')
+                .setDescription('패널 제목')
                 .setRequired(true)
         )
         .addStringOption(option =>
             option.setName('문구')
-                .setDescription('패널에 들어갈 본문 메시지를 입력하세요.')
+                .setDescription('패널 본문 메시지')
                 .setRequired(true)
         )
         .addStringOption(option =>
             option.setName('이미지_url')
-                .setDescription('패널에 첨부할 이미지/GIF 링크를 입력하세요. (선택사항)')
+                .setDescription('패널 이미지/GIF 링크 (선택)')
                 .setRequired(false)
         );
 
-    // 4) /이벤트종료
     const endEventCommand = new SlashCommandBuilder()
         .setName('이벤트종료')
         .setDescription('지정한 메시지 ID의 이벤트를 즉시 종료합니다.')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         .addStringOption(option =>
             option.setName('메시지_아이디')
-                .setDescription('종료할 이벤트 패널의 메시지 ID를 입력하세요.')
+                .setDescription('종료할 이벤트 패널 메시지 ID')
                 .setRequired(true)
         );
 
-    // 5) /이벤트로그
     const eventLogCommand = new SlashCommandBuilder()
         .setName('이벤트로그')
         .setDescription('해당 이벤트 참여자 목록을 페이지로 조회합니다.')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         .addStringOption(option =>
             option.setName('메시지_아이디')
-                .setDescription('조회할 이벤트 패널의 메시지 ID를 입력하세요.')
+                .setDescription('조회할 이벤트 패널 메시지 ID')
                 .setRequired(true)
         );
 
@@ -436,20 +415,11 @@ client.once('ready', async () => {
     await client.application.commands.create(coopBetrayCommand);
     await client.application.commands.create(endEventCommand);
     await client.application.commands.create(eventLogCommand);
-    console.log('슬래시 명령어들이 성공적으로 등록되었습니다.');
-
+    console.log('슬래시 명령어 등록 완료');
 });
-
-
-// ========================================
-// 인터랙션 (버튼 & 슬래시 명령어)
-// ========================================
 
 client.on('interactionCreate', async interaction => {
 
-    // ========================================
-    // 버튼 클릭 이벤트
-    // ========================================
     if (interaction.isButton()) {
 
         if (interaction.customId === 'notice_btn') {
@@ -483,28 +453,33 @@ client.on('interactionCreate', async interaction => {
             return;
         }
 
-        // 🎉 기브어웨이 응모 버튼 클릭
+        // 기브어웨이 응모 버튼 클릭
         if (interaction.customId === 'giveaway_enter') {
             const giveawayMsgId = interaction.message.id;
+            const allowedUsers = giveawayAllowedUsers.get(giveawayMsgId);
             const participants = giveawayParticipants.get(giveawayMsgId);
 
-            if (!participants) {
-                return interaction.reply({ content: '❌ 이미 마감되었거나 존재하지 않는 기브어웨이입니다.', ephemeral: true });
+            if (!participants || !allowedUsers) {
+                return interaction.reply({ content: '이미 마감되었거나 존재하지 않는 기브어웨이입니다.', ephemeral: true });
+            }
+
+            // 이벤트 참여 유저 검증
+            if (!allowedUsers.has(interaction.user.id)) {
+                return interaction.reply({ content: '이 기브어웨이는 이벤트 참가자(협력/배신 역할 부여 유저)만 응모할 수 있습니다.', ephemeral: true });
             }
 
             if (participants.has(interaction.user.id)) {
-                return interaction.reply({ content: '❌ 이미 기브어웨이에 응모하셨습니다!', ephemeral: true });
+                return interaction.reply({ content: '이미 기브어웨이에 응모하셨습니다.', ephemeral: true });
             }
 
             participants.add(interaction.user.id);
             return interaction.reply({
-                content: '🎉 기브어웨이 응모가 성공적으로 완료되었습니다! 3시간 뒤 추첨 결과를 확인하세요.',
+                content: '기브어웨이 응모가 완료되었습니다! 3시간 뒤 추첨 결과를 확인하세요.',
                 ephemeral: true
             });
         }
 
-
-        // 📜 참여자 목록 및 페이지 이동 버튼 클릭 (view_event_logs_메시지ID_페이지)
+        // 로그 페이지 이동 버튼
         if (interaction.customId.startsWith('view_event_logs_')) {
             const parts = interaction.customId.split('_');
             const targetMsgId = parts[3];
@@ -512,7 +487,7 @@ client.on('interactionCreate', async interaction => {
 
             const result = buildLogPageEmbeds(targetMsgId, page);
             if (result.error) {
-                return interaction.reply({ content: `❌ ${result.error}`, ephemeral: true });
+                return interaction.reply({ content: `${result.error}`, ephemeral: true });
             }
 
             if (interaction.replied || interaction.deferred) {
@@ -523,40 +498,46 @@ client.on('interactionCreate', async interaction => {
             return;
         }
 
-
-        // 🤝 협력 / 🗡️ 배신 버튼 클릭
+        // 협력 / 배신 버튼 클릭 및 역할 자동 지급
         if (interaction.customId === 'game_cooperate' || interaction.customId === 'game_betray') {
 
             const messageId = interaction.message.id;
 
             if (closedEvents.has(messageId)) {
-                await interaction.reply({
-                    content: '❌ 이미 종료된 이벤트입니다.',
-                    ephemeral: true
-                });
+                await interaction.reply({ content: '이미 종료된 이벤트입니다.', ephemeral: true });
                 return;
             }
 
             const data = eventDataMap.get(messageId);
             if (!data) {
-                return interaction.reply({ content: '❌ 이벤트 정보 데이터를 찾을 수 없습니다.', ephemeral: true });
+                return interaction.reply({ content: '이벤트 정보를 찾을 수 없습니다.', ephemeral: true });
             }
 
             const choicesMap = data.choices;
             const userId = interaction.user.id;
 
-            // 중복 선택 체크
             if (choicesMap.has(userId)) {
-                const existingChoice = choicesMap.get(userId).choice === 'cooperate' ? '🤝 협력' : '🗡️ 배신';
+                const existingChoice = choicesMap.get(userId).choice === 'cooperate' ? '협력' : '배신';
                 await interaction.reply({
-                    content: `❌ 이미 선택을 완료하셨습니다! (선택한 항목: **${existingChoice}**)\n선택은 변경할 수 없습니다.`,
+                    content: `이미 선택을 완료하셨습니다. (선택 항목: **${existingChoice}**)`,
                     ephemeral: true
                 });
                 return;
             }
 
             const choiceType = interaction.customId === 'game_cooperate' ? 'cooperate' : 'betray';
-            const choiceLabel = choiceType === 'cooperate' ? '🤝 협력' : '🗡️ 배신';
+            const choiceLabel = choiceType === 'cooperate' ? '협력' : '배신';
+            const targetRoleId = choiceType === 'cooperate' ? data.coopRoleId : data.betrayRoleId;
+
+            // 역할 지급
+            try {
+                const member = await interaction.guild.members.fetch(userId);
+                if (targetRoleId && member) {
+                    await member.roles.add(targetRoleId);
+                }
+            } catch (err) {
+                console.error('역할 부여 실패:', err);
+            }
 
             choicesMap.set(userId, {
                 choice: choiceType,
@@ -564,29 +545,29 @@ client.on('interactionCreate', async interaction => {
             });
 
             await interaction.reply({
-                content: `🔮 **${choiceLabel}**을(를) 선택하셨습니다.\n선택은 변경할 수 없습니다. 결과를 운명에 맡기세요 . . . 🎲`,
+                content: `**${choiceLabel}** 항목을 선택하였으며, 관련 역할이 지급되었습니다.`,
                 ephemeral: true
             });
 
-            // 📜 지정된 로그 채널로 전송
+            // 지정 로그 채널 전송
             try {
                 const targetLogChannel = await interaction.guild.channels.fetch(data.logChannelId);
                 if (targetLogChannel) {
                     const choiceLogEmbed = new EmbedBuilder()
                         .setColor(choiceType === 'cooperate' ? 0x57F287 : 0xED4245)
-                        .setTitle('🎲 [이벤트] 플레이어 선택 로그')
+                        .setTitle('[이벤트] 플레이어 선택 로그')
                         .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
                         .addFields(
-                            { name: '👤 유저', value: `${interaction.user} (\`${interaction.user.tag}\`)`, inline: true },
-                            { name: '🎯 선택한 항목', value: `**${choiceLabel}**`, inline: true },
-                            { name: '📌 채널', value: `${interaction.channel}`, inline: true }
+                            { name: '유저', value: `${interaction.user} (\`${interaction.user.tag}\`)`, inline: true },
+                            { name: '선택 항목', value: `**${choiceLabel}**`, inline: true },
+                            { name: '지급 역할', value: `<@&${targetRoleId}>`, inline: true }
                         )
                         .setTimestamp();
 
                     await targetLogChannel.send({ embeds: [choiceLogEmbed] });
                 }
             } catch (err) {
-                console.error('지정 로그 채널 전송 실패:', err);
+                console.error('로그 채널 전송 실패:', err);
             }
 
             return;
@@ -595,16 +576,14 @@ client.on('interactionCreate', async interaction => {
         return;
     }
 
-
     if (!interaction.isChatInputCommand()) return;
 
-
-    // ========================================
     // /협력배신패널
-    // ========================================
     if (interaction.commandName === '협력배신패널') {
 
         const logChannel = interaction.options.getChannel('로그채널');
+        const coopRole = interaction.options.getRole('협력역할');
+        const betrayRole = interaction.options.getRole('배신역할');
         const timeInput = interaction.options.getString('시간');
         const customTitle = interaction.options.getString('제목');
         const customDescription = interaction.options.getString('문구');
@@ -613,7 +592,7 @@ client.on('interactionCreate', async interaction => {
         const durationMs = parseDuration(timeInput);
         if (!durationMs) {
             return interaction.reply({
-                content: '❌ 올바른 시간 형식이 아닙니다! 예시: `10m` (10분), `1h` (1시간), `1d` (1일)',
+                content: '올바른 시간 형식이 아닙니다. 예시: `10m`, `1h`, `1d`',
                 ephemeral: true
             });
         }
@@ -624,18 +603,16 @@ client.on('interactionCreate', async interaction => {
             .setContent(`## ${customTitle}`);
 
         const descriptionDisplay = new TextDisplayBuilder()
-            .setContent(`${customDescription}\n\n⏳ **마감 시간**: <t:${endTime}:R> (<t:${endTime}:f> 까지)`);
+            .setContent(`${customDescription}\n\n마감 시간: <t:${endTime}:R> (<t:${endTime}:f> 까지)`);
 
         const actionRow = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
                 .setCustomId('game_cooperate')
                 .setLabel('협력')
-                .setEmoji('🤝')
                 .setStyle(ButtonStyle.Success),
             new ButtonBuilder()
                 .setCustomId('game_betray')
                 .setLabel('배신')
-                .setEmoji('🗡️')
                 .setStyle(ButtonStyle.Danger)
         );
 
@@ -664,19 +641,19 @@ client.on('interactionCreate', async interaction => {
             flags: MessageFlags.IsComponentsV2
         });
 
-        // 지정 로그 채널 및 이벤트 정보 저장
         eventDataMap.set(panelMessage.id, {
             logChannelId: logChannel.id,
+            coopRoleId: coopRole.id,
+            betrayRoleId: betrayRole.id,
             title: customTitle,
             choices: new Map()
         });
 
         await interaction.reply({
-            content: `패널이 생성되었습니다. (메시지 ID: \`${panelMessage.id}\` / 지정 로그채널: ${logChannel})`,
+            content: `패널이 생성되었습니다. (메시지 ID: \`${panelMessage.id}\`)`,
             ephemeral: true
         });
 
-        // ⏱️ 타이머 자동 마감 설정
         const timer = setTimeout(() => {
             closeEventPanel(interaction.channel.id, panelMessage.id);
         }, durationMs);
@@ -686,51 +663,38 @@ client.on('interactionCreate', async interaction => {
         return;
     }
 
-
-    // ========================================
     // /이벤트종료
-    // ========================================
     if (interaction.commandName === '이벤트종료') {
 
         const targetMessageId = interaction.options.getString('메시지_아이디');
-
         const result = await closeEventPanel(interaction.channel.id, targetMessageId);
 
         if (result === 'already_closed') {
-            await interaction.reply({
-                content: `❌ 해당 이벤트는 이미 종료되었거나 마감된 상태입니다.`,
-                ephemeral: true
-            });
+            await interaction.reply({ content: '해당 이벤트는 이미 종료되었거나 마감된 상태입니다.', ephemeral: true });
         } else if (result === 'success') {
             await interaction.reply({
-                content: `✅ 메시지 ID (\`${targetMessageId}\`) 이벤트가 성공적으로 종료되었습니다.\n🎁 **3시간 후 추첨되는 기브어웨이 패널이 생성되었습니다.**`,
+                content: `메시지 ID (\`${targetMessageId}\`) 이벤트가 종료되었습니다.\n3시간 후 추첨되는 기브어웨이 패널이 생성되었습니다.`,
                 ephemeral: true
             });
         } else {
-            await interaction.reply({
-                content: `❌ 해당 메시지를 찾을 수 없습니다. (현재 채널의 메시지 ID가 맞는지 확인해 주세요)`,
-                ephemeral: true
-            });
+            await interaction.reply({ content: '해당 메시지를 찾을 수 없습니다.', ephemeral: true });
         }
 
         return;
     }
 
-
-    // ========================================
-    // /이벤트로그 (명령어로도 조회 가능)
-    // ========================================
+    // /이벤트로그
     if (interaction.commandName === '이벤트로그') {
 
         const targetMessageId = interaction.options.getString('메시지_아이디');
         const result = buildLogPageEmbeds(targetMessageId, 0);
 
         if (result.error) {
-            return interaction.reply({ content: `❌ ${result.error}`, ephemeral: true });
+            return interaction.reply({ content: `${result.error}`, ephemeral: true });
         }
 
         await interaction.reply({
-            content: `🔍 **이벤트 참여자 목록 조회 결과입니다.**`,
+            content: `이벤트 참여자 목록 조회 결과입니다.`,
             embeds: result.embeds,
             components: result.components,
             ephemeral: true
@@ -739,13 +703,10 @@ client.on('interactionCreate', async interaction => {
         return;
     }
 
-
-    // ========================================
     // /패널
-    // ========================================
     if (interaction.commandName === '패널') {
 
-        const title = new TextDisplayBuilder().setContent('## ✦ 서버 이용 안내');
+        const title = new TextDisplayBuilder().setContent('## 서버 이용 안내');
         const description = new TextDisplayBuilder().setContent(
             '필요한 메뉴를 아래에서 선택해주세요.\n' +
             '각 버튼을 눌러 관련 안내를 확인할 수 있습니다.'
@@ -769,21 +730,15 @@ client.on('interactionCreate', async interaction => {
             flags: MessageFlags.IsComponentsV2
         });
 
-        await interaction.reply({
-            content: '패널을 생성했습니다.',
-            ephemeral: true
-        });
+        await interaction.reply({ content: '패널을 생성했습니다.', ephemeral: true });
 
         return;
     }
 
-
-    // ========================================
     // /지급완료
-    // ========================================
     if (interaction.commandName === '지급완료') {
 
-        await interaction.reply({ content: '지급완료를 처리 중입니다. . .', ephemeral: true });
+        await interaction.reply({ content: '지급완료를 처리 중입니다.', ephemeral: true });
 
         const buyer = interaction.options.getUser('구매자');
         const item = interaction.options.getString('상품');
@@ -808,12 +763,9 @@ client.on('interactionCreate', async interaction => {
         const logEmbed = new EmbedBuilder()
             .setColor(LIGHT_PINK_COLOR)
             .setDescription(
-                `°.✩┈┈∘┈˃̶ ୨ ୧˂̶┈∘┈┈✩.°\n` +
-                `${buyer}, ${item} (${count}) 구매 감사합니다 .ᐟ.ᐟ\n\n` +
+                `${buyer}, ${item} (${count}) 구매 감사합니다.\n\n` +
                 `사용된 금액 : ${price}\n\n` +
-                `해당 관리 판매자: ${seller}\n\n` +
-                `°.✩┈┈∘┈˃̶ ୨ ୧˂̶┈∘┈┈✩.°\n` +
-                `࣪𓏲ּ ᥫ᭡ ₊ 𝑻𝒉𝒂𝒏𝒌 𝒚𝒐𝒖 ⊹ ˑ ִֶ 𓂃`
+                `해당 관리 판매자: ${seller}`
             )
             .setImage(IMAGE_URL);
 
@@ -822,8 +774,8 @@ client.on('interactionCreate', async interaction => {
         const replyEmbed = new EmbedBuilder()
             .setColor(LIGHT_PINK_COLOR)
             .setDescription(
-                `**아이템이 정상적으로 지급되었어요.**\n` +
-                `**https://discord.com/channels/1456729030459134115/1457384179535712473 작성은 필수입니다.**`
+                `아이템이 정상적으로 지급되었습니다.\n` +
+                `https://discord.com/channels/1456729030459134115/1457384179535712473 작성은 필수입니다.`
             );
 
         const row = new ActionRowBuilder().addComponents(
@@ -842,11 +794,7 @@ client.on('interactionCreate', async interaction => {
 
 });
 
-
-// ========================================
 // $가격 / $로벅스
-// ========================================
-
 client.on('messageCreate', async message => {
 
     if (message.author.bot) return;
@@ -863,12 +811,12 @@ client.on('messageCreate', async message => {
                 return message.reply('해당 명령어를 사용할 권한이 없습니다.');
             }
 
-            const tempMsg = await message.reply('계산을 진행 중입니다 . .');
+            const tempMsg = await message.reply('계산을 진행 중입니다.');
 
             try {
                 if (message.deletable) await message.delete();
             } catch (err) {
-                console.error('유저 메시지 삭제 권한 오류:', err);
+                console.error('유저 메시지 삭제 오류:', err);
             }
 
             await sleep(2000);
@@ -885,7 +833,7 @@ client.on('messageCreate', async message => {
 
                 if (isNaN(rate) || isNaN(robux) || rate <= 0 || robux <= 0) {
                     return message.channel.send(
-                        '올바른 사용법: `$가격 (만 원당 로벅스량) (구매할 로벅스 수)`\n' +
+                        '사용법: `$가격 (만 원당 로벅스량) (구매할 로벅스 수)`\n' +
                         '예시: `$가격 1300 240`'
                     );
                 }
@@ -896,7 +844,7 @@ client.on('messageCreate', async message => {
                 const embed = new EmbedBuilder()
                     .setColor(LIGHT_PINK_COLOR)
                     .setDescription(
-                        `## [ ! ] 로벅스 가격 결과 <:robux:1554139067913080882>\n` +
+                        `## 로벅스 가격 결과\n` +
                         `**만 원당 로벅스 가격 : \`${rate.toLocaleString()}\`\n` +
                         `구매할 로벅스 수량 : \`${robux.toLocaleString()}\`**\n\n` +
                         `**계산된 로벅스 가격 = \`${finalPrice.toLocaleString()}\`원**`
@@ -911,7 +859,7 @@ client.on('messageCreate', async message => {
 
                 if (isNaN(rate) || isNaN(money) || rate <= 0 || money <= 0) {
                     return message.channel.send(
-                        '올바른 사용법: `$로벅스 (만 원당 로벅스량) (보낼 돈)`\n' +
+                        '사용법: `$로벅스 (만 원당 로벅스량) (보낼 돈)`\n' +
                         '예시: `$로벅스 1300 1900`'
                     );
                 }
@@ -921,7 +869,7 @@ client.on('messageCreate', async message => {
                 const embed = new EmbedBuilder()
                     .setColor(LIGHT_PINK_COLOR)
                     .setDescription(
-                        `## [ ! ] 지급 로벅스 결과 <:robux:1554139067913080882>\n` +
+                        `## 지급 로벅스 결과\n` +
                         `**만 원당 로벅스 가격 : \`${rate.toLocaleString()}\`\n` +
                         `보낼 금액 : \`${money.toLocaleString()}\`원**\n\n` +
                         `**계산된 로벅스 수량 = \`${totalRobux.toLocaleString()}\` R$**`
@@ -936,13 +884,8 @@ client.on('messageCreate', async message => {
 
 });
 
-
-// ========================================
-// TOKEN 로그인
-// ========================================
-
 if (!process.env.TOKEN) {
-    console.error("오류: Variables에 'TOKEN'이 설정되어 있지 않습니다!");
+    console.error("오류: TOKEN이 설정되어 있지 않습니다.");
     process.exit(1);
 }
 
