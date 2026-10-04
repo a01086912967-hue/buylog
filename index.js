@@ -34,13 +34,17 @@ const CALCULATOR_ROLE_ID = '1456747541348749342';
 const IMAGE_URL = 'https://i.imgur.com/jokl6LQ.gif';
 const LIGHT_PINK_COLOR = 0xFFB6C1;
 
+// 부계정 방지 설정 (계정 생성 후 최소 일수 - 예: 7일 미만 계정 차단)
+const MIN_ACCOUNT_AGE_DAYS = 7;
+
 // 저장소
 const eventDataMap = new Map(); // MessageID -> { logChannelId, coopRoleId, betrayRoleId, title, giveawayDurationMs, choices: Map }
 const activeTimers = new Map();
 const closedEvents = new Set();
 const giveawayParticipants = new Map(); // GiveawayMessageID -> Set<UserID>
 const giveawayAllowedUsers = new Map(); // GiveawayMessageID -> Set<UserID> (응모 자격 보유 유저)
-const giveawayMaxParticipants = new Map(); // GiveawayMessageID -> maxAllowedCount (null이면 제한 없음)
+const giveawayMaxParticipants = new Map(); // GiveawayMessageID -> maxAllowedCount
+const giveawayParentEventMap = new Map(); // GiveawayMessageID -> EventMessageID (선택한 역할 조회를 위함)
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -78,20 +82,36 @@ async function endGiveaway(channel, giveawayMessageId, eventTitle) {
         const winnerCount = 2;
         const participantArray = Array.from(participants);
 
+        const parentEventId = giveawayParentEventMap.get(giveawayMessageId);
+        const parentEvent = parentEventId ? eventDataMap.get(parentEventId) : null;
+
         let winnerText = '';
+        let winnerTextWithChoice = '';
 
         if (participantArray.length === 0) {
             winnerText = '참여자가 없어 당첨자를 선발하지 못했습니다.';
+            winnerTextWithChoice = '참여자가 없어 당첨자를 선발하지 못했습니다.';
         } else {
             const shuffled = participantArray.sort(() => 0.5 - Math.random());
             const winners = shuffled.slice(0, Math.min(winnerCount, participantArray.length));
+
             winnerText = winners.map(id => `<@${id}>`).join(', ');
+
+            // 당첨자의 선택 정보(협력/배신) 같이 표시
+            winnerTextWithChoice = winners.map(id => {
+                let choiceStr = '미확인';
+                if (parentEvent && parentEvent.choices.has(id)) {
+                    const userChoice = parentEvent.choices.get(id).choice;
+                    choiceStr = userChoice === 'cooperate' ? '협력' : '배신';
+                }
+                return `<@${id}> (${choiceStr})`;
+            }).join(', ');
         }
 
         const disabledButton = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
                 .setCustomId('giveaway_enter')
-                .setLabel('기브어웨이 마감됨')
+                .setLabel(`기브어웨이 마감됨 (총 ${participantArray.length}명)`)
                 .setStyle(ButtonStyle.Secondary)
                 .setDisabled(true)
         );
@@ -103,7 +123,7 @@ async function endGiveaway(channel, giveawayMessageId, eventTitle) {
             .setContent(
                 `이벤트 기브어웨이가 종료되었습니다.\n\n` +
                 `총 응모자 수: \`${participantArray.length}명\`\n` +
-                `당첨자 (2명): ${winnerText}`
+                `당첨자 (2명): ${winnerTextWithChoice}`
             );
 
         const closedContainer = new ContainerBuilder()
@@ -120,14 +140,17 @@ async function endGiveaway(channel, giveawayMessageId, eventTitle) {
         });
 
         if (participantArray.length > 0) {
-            await channel.send({
-                content: `축하합니다! **[ ${eventTitle} ]** 기브어웨이 당첨자: ${winnerText}`
+            // 해당 기브어웨이 메시지에 답장으로 알림
+            await message.reply({
+                content: `축하합니다! **${eventTitle}** 기브어웨이 당첨자: ${winnerTextWithChoice}`,
+                allowedMentions: { parse: ['users'] }
             });
         }
 
         giveawayParticipants.delete(giveawayMessageId);
         giveawayAllowedUsers.delete(giveawayMessageId);
         giveawayMaxParticipants.delete(giveawayMessageId);
+        giveawayParentEventMap.delete(giveawayMessageId);
     } catch (err) {
         console.error('기브어웨이 마감 처리 실패:', err);
     }
@@ -222,7 +245,6 @@ async function closeEventPanel(channelId, messageId) {
         if (totalUsers === 0) {
             ruleNoticeText = '이벤트 참여자가 없어 기브어웨이가 진행되지 않습니다.';
         } else if (betrayCount === 0) {
-            // 1. 협력 + 협력 = 선착순 (참가자의 반절만 응모 가능)
             coopUsers.sort((a, b) => a.timestamp - b.timestamp);
             const limit = Math.floor(totalUsers / 2);
             const qualifiedCoop = coopUsers.slice(0, limit);
@@ -230,15 +252,12 @@ async function closeEventPanel(channelId, messageId) {
             maxAllowedCount = limit;
             ruleNoticeText = `**[모두 협력 결과]** 참가자의 절반(\`${limit}명\`)까지 **선착순**으로 응모 가능합니다.`;
         } else if (coopCount > 0 && betrayCount > 0) {
-            // 2. 협력 + 배신 = 배신만 응모 가능
             allowedUserSet = new Set(betrayUsers.map(u => u.id));
             ruleNoticeText = `**[협력 + 배신 결과]** **배신**을 선택한 유저만 응모할 수 있습니다.`;
         } else if (coopCount === 0 && betrayCount > 0) {
-            // 3. 배신 + 배신 = 아무도 응모 불가
             ruleNoticeText = `**[모두 배신 결과]** 모든 유저가 배신을 선택하여 **아무도 기브어웨이에 응모할 수 없습니다.**`;
         }
 
-        // 응모 대상자가 있는 경우 설정한 시간으로 기브어웨이 패널 생성
         if (allowedUserSet.size > 0) {
             const giveawayDurationMs = data.giveawayDurationMs || (3 * 60 * 60 * 1000);
             const giveawayEndTime = Math.floor((Date.now() + giveawayDurationMs) / 1000);
@@ -257,7 +276,7 @@ async function closeEventPanel(channelId, messageId) {
             const giveawayButtonRow = new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
                     .setCustomId('giveaway_enter')
-                    .setLabel('응모하기')
+                    .setLabel('응모하기 (현재 0명)')
                     .setStyle(ButtonStyle.Success)
             );
 
@@ -277,6 +296,7 @@ async function closeEventPanel(channelId, messageId) {
             giveawayAllowedUsers.set(giveawayMessage.id, allowedUserSet);
             giveawayMaxParticipants.set(giveawayMessage.id, maxAllowedCount);
             giveawayParticipants.set(giveawayMessage.id, new Set());
+            giveawayParentEventMap.set(giveawayMessage.id, messageId);
 
             setTimeout(() => {
                 endGiveaway(channel, giveawayMessage.id, data.title);
@@ -503,6 +523,18 @@ client.on('interactionCreate', async interaction => {
                 return interaction.reply({ content: '이미 마감되었거나 존재하지 않는 기브어웨이입니다.', ephemeral: true });
             }
 
+            // 부계정 감지 (관리자 권한 없는 경우 계정 생성일 기준 필터링)
+            const isAdmin = interaction.memberPermissions?.has(PermissionFlagsBits.Administrator);
+            if (!isAdmin) {
+                const accountAgeDays = (Date.now() - interaction.user.createdTimestamp) / (1000 * 60 * 60 * 24);
+                if (accountAgeDays < MIN_ACCOUNT_AGE_DAYS) {
+                    return interaction.reply({
+                        content: `부계정 방지 시스템: 계정 생성 후 최소 ${MIN_ACCOUNT_AGE_DAYS}일이 지나야 응모할 수 있습니다.`,
+                        ephemeral: true
+                    });
+                }
+            }
+
             // 응모 자격 확인
             if (!allowedUsers.has(interaction.user.id)) {
                 return interaction.reply({ content: '이벤트 결과에 따라 귀하는 이번 기브어웨이 응모 자격이 없습니다.', ephemeral: true });
@@ -518,6 +550,31 @@ client.on('interactionCreate', async interaction => {
             }
 
             participants.add(interaction.user.id);
+
+            // 실시간 응모자 수 업데이트
+            try {
+                const updatedRow = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder()
+                        .setCustomId('giveaway_enter')
+                        .setLabel(`응모하기 (현재 ${participants.size}명)`)
+                        .setStyle(ButtonStyle.Success)
+                );
+
+                const currentComponents = interaction.message.components.map(row => {
+                    const rowJson = row.toJSON();
+                    if (rowJson.components[0].custom_id === 'giveaway_enter') {
+                        return updatedRow;
+                    }
+                    return row;
+                });
+
+                await interaction.message.edit({
+                    components: currentComponents
+                });
+            } catch (err) {
+                console.error('버튼 수량 업데이트 실패:', err);
+            }
+
             return interaction.reply({
                 content: '기브어웨이 응모가 완료되었습니다!',
                 ephemeral: true
