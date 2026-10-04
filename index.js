@@ -12,8 +12,6 @@ const {
     ContainerBuilder,
     TextDisplayBuilder,
     SeparatorBuilder,
-    MediaGalleryBuilder,
-    MediaGalleryItemBuilder,
     MessageFlags,
     ChannelType
 } = require('discord.js');
@@ -45,8 +43,6 @@ const giveawayParticipants = new Map(); // GiveawayMessageID -> Set<UserID>
 const giveawayAllowedUsers = new Map(); // GiveawayMessageID -> Set<UserID>
 const giveawayMaxParticipants = new Map(); // GiveawayMessageID -> maxAllowedCount
 const giveawayParentEventMap = new Map(); // GiveawayMessageID -> EventMessageID
-
-const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 function parseDuration(str) {
     if (!str) return null;
@@ -135,7 +131,7 @@ async function endGiveaway(channel, giveawayMessageId, eventTitle, winnerCount =
 
         if (participantArray.length > 0) {
             await message.reply({
-                content: `축하합니다! **${eventTitle}** 기브어웨이 당첨자: ${winnerTextWithChoice}`,
+                content: `🎉 축하합니다! **${eventTitle}** 기브어웨이 당첨자: ${winnerTextWithChoice}`,
                 allowedMentions: { parse: ['users'] }
             });
         }
@@ -241,9 +237,7 @@ async function closeEventPanel(channelId, messageId) {
             // 모두 협력: 먼저 선택(클릭)한 선착순 절반만 자격 부여
             coopUsers.sort((a, b) => a.timestamp - b.timestamp);
             const limit = Math.max(1, Math.floor(totalUsers / 2));
-            const qualifiedCoop = coopUsers.slice(0, limit);
             
-            // 모든 협력자 자격 부여 (응모 시점에 선착순 계산)
             allowedUserSet = new Set(coopUsers.map(u => u.id));
             maxAllowedCount = limit;
             ruleNoticeText = `**[모두 협력 결과]** 선착순 **${limit}명**만 응모할 수 있습니다. (응모 기준: 먼저 응모 버튼을 누르는 사람)`;
@@ -300,6 +294,7 @@ async function closeEventPanel(channelId, messageId) {
                 flags: MessageFlags.IsComponentsV2
             };
 
+            // 멘션 핑 정상 작동 처리
             if (data.pingRoleId) {
                 sendOptions.content = `<@&${data.pingRoleId}>`;
                 sendOptions.allowedMentions = { roles: [data.pingRoleId] };
@@ -328,67 +323,6 @@ async function closeEventPanel(channelId, messageId) {
     }
 }
 
-// 참여자 목록 임베드
-function buildLogPageEmbeds(targetMessageId, page = 0) {
-    const data = eventDataMap.get(targetMessageId);
-    if (!data || data.choices.size === 0) {
-        return { embeds: [], components: [], error: '기록된 참여 데이터가 없습니다.' };
-    }
-
-    const items = Array.from(data.choices.values());
-    const itemsPerPage = 5;
-    const totalPages = Math.ceil(items.length / itemsPerPage);
-
-    if (page < 0) page = 0;
-    if (page >= totalPages) page = totalPages - 1;
-
-    const start = page * itemsPerPage;
-    const pageItems = items.slice(start, start + itemsPerPage);
-
-    const embeds = [];
-
-    const overviewEmbed = new EmbedBuilder()
-        .setColor(LIGHT_PINK_COLOR)
-        .setTitle(`[참여자 목록 로그] (${page + 1} /${totalPages} 페이지)`)
-        .setDescription(`**이벤트 제목**: ${data.title}\n**총 참여자 수**: \`${items.length}명\``)
-        .setTimestamp();
-
-    embeds.push(overviewEmbed);
-
-    for (const item of pageItems) {
-        const choiceText = item.choice === 'cooperate' ? '협력' : '배신';
-        const userEmbed = new EmbedBuilder()
-            .setColor(item.choice === 'cooperate' ? 0x57F287 : 0xED4245)
-            .setAuthor({ name: `${item.user.tag}`, iconURL: item.user.displayAvatarURL() })
-            .setThumbnail(item.user.displayAvatarURL({ dynamic: true }))
-            .addFields(
-                { name: '유저', value: `${item.user}`, inline: true },
-                { name: '선택한 항목', value: `**${choiceText}**`, inline: true }
-            );
-        embeds.push(userEmbed);
-    }
-
-    const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-            .setCustomId(`view_event_logs_${targetMessageId}_${page - 1}`)
-            .setLabel('이전')
-            .setStyle(ButtonStyle.Secondary)
-            .setDisabled(page === 0),
-        new ButtonBuilder()
-            .setCustomId(`page_indicator`)
-            .setLabel(`${page + 1} / ${totalPages}`)
-            .setStyle(ButtonStyle.Primary)
-            .setDisabled(true),
-        new ButtonBuilder()
-            .setCustomId(`view_event_logs_${targetMessageId}_${page + 1}`)
-            .setLabel('다음')
-            .setStyle(ButtonStyle.Secondary)
-            .setDisabled(page >= totalPages - 1)
-    );
-
-    return { embeds, components: [row] };
-}
-
 client.once('ready', async () => {
     console.log(`[릴리웨이] 봇이 성공적으로 실행되었습니다: ${client.user.tag}`);
 
@@ -401,21 +335,6 @@ client.once('ready', async () => {
     } catch (error) {
         console.error('기존 명령어 삭제 중 오류 발생:', error);
     }
-
-    const logCommand = new SlashCommandBuilder()
-        .setName('지급완료')
-        .setDescription('구매 완료 로그를 전송합니다.')
-        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-        .addUserOption(option => option.setName('구매자').setDescription('구매한 유저').setRequired(true))
-        .addStringOption(option => option.setName('상품').setDescription('구매한 상품명').setRequired(true))
-        .addStringOption(option => option.setName('수량').setDescription('구매한 수량').setRequired(true))
-        .addStringOption(option => option.setName('금액').setDescription('사용된 금액').setRequired(true))
-        .addUserOption(option => option.setName('판매자').setDescription('해당 관리 판매자').setRequired(false));
-
-    const panelCommand = new SlashCommandBuilder()
-        .setName('패널')
-        .setDescription('안내 패널을 생성합니다.')
-        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
 
     const coopBetrayCommand = new SlashCommandBuilder()
         .setName('협력배신패널')
@@ -480,70 +399,105 @@ client.once('ready', async () => {
                 .setRequired(false)
         );
 
-    const endEventCommand = new SlashCommandBuilder()
-        .setName('이벤트종료')
-        .setDescription('지정한 메시지 ID의 이벤트를 즉시 종료합니다.')
-        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-        .addStringOption(option =>
-            option.setName('메시지_아이디')
-                .setDescription('종료할 이벤트 패널 메시지 ID')
-                .setRequired(true)
-        );
-
-    const eventLogCommand = new SlashCommandBuilder()
-        .setName('이벤트로그')
-        .setDescription('해당 이벤트 참여자 목록을 페이지로 조회합니다.')
-        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-        .addStringOption(option =>
-            option.setName('메시지_아이디')
-                .setDescription('조회할 이벤트 패널 메시지 ID')
-                .setRequired(true)
-        );
-
-    await client.application.commands.create(logCommand);
-    await client.application.commands.create(panelCommand);
     await client.application.commands.create(coopBetrayCommand);
-    await client.application.commands.create(endEventCommand);
-    await client.application.commands.create(eventLogCommand);
     console.log('슬래시 명령어 등록 완료');
 });
 
 client.on('interactionCreate', async interaction => {
+    if (interaction.isChatInputCommand()) {
+        if (interaction.commandName === '협력배신패널') {
+            const logChannel = interaction.options.getChannel('로그채널');
+            const coopRole = interaction.options.getRole('협력역할');
+            const betrayRole = interaction.options.getRole('배신역할');
+            const durationStr = interaction.options.getString('시간');
+            const giveawayDurationStr = interaction.options.getString('기브어웨이시간');
+            const titleStr = interaction.options.getString('제목');
+            const contentStr = interaction.options.getString('문구');
+            
+            // 멘션 역할 ID 추출
+            const pingRole = interaction.options.getRole('멘션');
+            const pingRoleId = pingRole ? pingRole.id : null;
+
+            const giveawayChannel = interaction.options.getChannel('기브어웨이채널');
+            const giveawayWinnerCount = interaction.options.getInteger('기브어웨이당첨자수') || 1;
+            const imageUrl = interaction.options.getString('이미지_url');
+
+            const durationMs = parseDuration(durationStr);
+            const giveawayDurationMs = parseDuration(giveawayDurationStr);
+
+            if (!durationMs || !giveawayDurationMs) {
+                return interaction.reply({
+                    content: '시간 형식이 올바르지 않습니다. (예: 10m, 1h, 2d)',
+                    ephemeral: true
+                });
+            }
+
+            const endTime = Math.floor((Date.now() + durationMs) / 1000);
+
+            const titleComp = new TextDisplayBuilder().setContent(`## [이벤트] ${titleStr}`);
+            const descComp = new TextDisplayBuilder().setContent(
+                `${contentStr}\n\n` +
+                `⏳ **종료 시간**: <t:${endTime}:R> (<t:${endTime}:f> 까지)`
+            );
+
+            const buttons = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId('game_cooperate')
+                    .setLabel('협력')
+                    .setStyle(ButtonStyle.Success),
+                new ButtonBuilder()
+                    .setCustomId('game_betray')
+                    .setLabel('배신')
+                    .setStyle(ButtonStyle.Danger)
+            );
+
+            const container = new ContainerBuilder()
+                .setAccentColor(LIGHT_PINK_COLOR)
+                .addTextDisplayComponents(titleComp)
+                .addSeparatorComponents(new SeparatorBuilder())
+                .addTextDisplayComponents(descComp)
+                .addSeparatorComponents(new SeparatorBuilder())
+                .addActionRowComponents(buttons);
+
+            const sendMessageOptions = {
+                components: [container],
+                flags: MessageFlags.IsComponentsV2
+            };
+
+            // 패널 전송 시 멘션 적용
+            if (pingRoleId) {
+                sendMessageOptions.content = `<@&${pingRoleId}>`;
+                sendMessageOptions.allowedMentions = { roles: [pingRoleId] };
+            }
+
+            await interaction.reply({ content: '이벤트 패널을 생성 중입니다...', ephemeral: true });
+
+            const eventMsg = await interaction.channel.send(sendMessageOptions);
+
+            // 이벤트 데이터 저장
+            eventDataMap.set(eventMsg.id, {
+                logChannelId: logChannel.id,
+                coopRoleId: coopRole.id,
+                betrayRoleId: betrayRole.id,
+                title: titleStr,
+                giveawayDurationMs: giveawayDurationMs,
+                giveawayChannelId: giveawayChannel ? giveawayChannel.id : null,
+                giveawayWinnerCount: giveawayWinnerCount,
+                pingRoleId: pingRoleId,
+                choices: new Map()
+            });
+
+            // 마감 타이머 설정
+            const timerId = setTimeout(() => {
+                closeEventPanel(interaction.channel.id, eventMsg.id);
+            }, durationMs);
+
+            activeTimers.set(eventMsg.id, timerId);
+            return interaction.editReply({ content: '성공적으로 이벤트 패널이 생성되었습니다!' });
+        }
+    }
 
     if (interaction.isButton()) {
-
-        if (interaction.customId === 'notice_btn') {
-            await interaction.reply({
-                content:
-                    `### <#1457384179535712473> 미작성 시 주의사항\n` +
-                    `-# - 2일 내 작성하지 않으면 <@&1550129139086794852> 지급돼요.\n` +
-                    `-# - 해당 역할 보유 시 다음 번 구매가 어려울 수 있어요.`,
-                ephemeral: true
-            });
-            return;
-        }
-
-        if (interaction.customId === 'panel_inquiry') {
-            await interaction.reply({ content: '문의사항이 있다면 관리자에게 문의해주세요.', ephemeral: true });
-            return;
-        }
-
-        if (interaction.customId === 'panel_apply') {
-            await interaction.reply({ content: '신청을 진행하려면 안내사항을 먼저 확인해주세요.', ephemeral: true });
-            return;
-        }
-
-        if (interaction.customId === 'panel_rules') {
-            await interaction.reply({ content: '서버 이용 규정을 확인해주세요.', ephemeral: true });
-            return;
-        }
-
-        if (interaction.customId === 'panel_help') {
-            await interaction.reply({ content: '도움이 필요한 경우 관리자에게 문의해주세요.', ephemeral: true });
-            return;
-        }
-
-        // 기브어웨이 응모 버튼 클릭
         if (interaction.customId === 'giveaway_enter') {
             const giveawayMsgId = interaction.message.id;
             const allowedUsers = giveawayAllowedUsers.get(giveawayMsgId);
@@ -554,7 +508,6 @@ client.on('interactionCreate', async interaction => {
                 return interaction.reply({ content: '이미 마감되었거나 존재하지 않는 기브어웨이입니다.', ephemeral: true });
             }
 
-            // 부계정 감지
             const isAdmin = interaction.memberPermissions?.has(PermissionFlagsBits.Administrator);
             if (!isAdmin) {
                 const accountAgeDays = (Date.now() - interaction.user.createdTimestamp) / (1000 * 60 * 60 * 24);
@@ -566,7 +519,6 @@ client.on('interactionCreate', async interaction => {
                 }
             }
 
-            // 자격 검증
             if (!allowedUsers.has(interaction.user.id)) {
                 return interaction.reply({
                     content: '❌ 이번 기브어웨이에 응모할 수 있는 대상이 아닙니다. (이벤트 선택 결과 조건 불인정)',
@@ -574,12 +526,10 @@ client.on('interactionCreate', async interaction => {
                 });
             }
 
-            // 이미 응모한 경우
             if (participants.has(interaction.user.id)) {
                 return interaction.reply({ content: '이미 이 기브어웨이에 응모하셨습니다.', ephemeral: true });
             }
 
-            // --- 선착순 정원 체크 (모두 협력 시 등) ---
             if (maxParticipants !== null && participants.size >= maxParticipants) {
                 return interaction.reply({
                     content: `❌ 선착순 응모 인원(\`${maxParticipants}명\`)이 이미 모두 차서 더 이상 응모할 수 없습니다!`,
@@ -587,7 +537,6 @@ client.on('interactionCreate', async interaction => {
                 });
             }
 
-            // 응모 등록
             participants.add(interaction.user.id);
 
             const parentEventId = giveawayParentEventMap.get(giveawayMsgId);
@@ -596,7 +545,6 @@ client.on('interactionCreate', async interaction => {
 
             const maxText = maxParticipants ? ` / 제한 ${maxParticipants}명` : '';
 
-            // 버튼 라벨 업데이트
             const updatedButton = new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
                     .setCustomId('giveaway_enter')
