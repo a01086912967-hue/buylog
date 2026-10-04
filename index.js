@@ -34,11 +34,11 @@ const CALCULATOR_ROLE_ID = '1456747541348749342';
 const IMAGE_URL = 'https://i.imgur.com/jokl6LQ.gif';
 const LIGHT_PINK_COLOR = 0xFFB6C1;
 
-// 부계정 방지 설정 (계정 생성 후 최소 일수 - 예: 7일 미만 계정 차단)
+// 부계정 방지 설정 (계정 생성 후 최소 일수)
 const MIN_ACCOUNT_AGE_DAYS = 7;
 
 // 저장소
-const eventDataMap = new Map(); // MessageID -> { logChannelId, coopRoleId, betrayRoleId, title, giveawayDurationMs, giveawayChannelId, giveawayWinnerCount, choices: Map }
+const eventDataMap = new Map(); // MessageID -> { logChannelId, coopRoleId, betrayRoleId, title, giveawayDurationMs, giveawayChannelId, giveawayWinnerCount, pingRoleId, choices: Map }
 const activeTimers = new Map();
 const closedEvents = new Set();
 const giveawayParticipants = new Map(); // GiveawayMessageID -> Set<UserID>
@@ -84,7 +84,6 @@ async function endGiveaway(channel, giveawayMessageId, eventTitle, winnerCount =
         const parentEventId = giveawayParentEventMap.get(giveawayMessageId);
         const parentEvent = parentEventId ? eventDataMap.get(parentEventId) : null;
 
-        let winnerText = '';
         let winnerTextWithChoice = '';
 
         if (participantArray.length === 0) {
@@ -239,12 +238,15 @@ async function closeEventPanel(channelId, messageId) {
         if (totalUsers === 0) {
             ruleNoticeText = '이벤트 참여자가 없어 기브어웨이가 진행되지 않습니다.';
         } else if (betrayCount === 0) {
+            // 모두 협력: 먼저 선택(클릭)한 선착순 절반만 자격 부여
             coopUsers.sort((a, b) => a.timestamp - b.timestamp);
-            const limit = Math.floor(totalUsers / 2);
+            const limit = Math.max(1, Math.floor(totalUsers / 2));
             const qualifiedCoop = coopUsers.slice(0, limit);
-            allowedUserSet = new Set(qualifiedCoop.map(u => u.id));
+            
+            // 모든 협력자 자격 부여 (응모 시점에 선착순 계산)
+            allowedUserSet = new Set(coopUsers.map(u => u.id));
             maxAllowedCount = limit;
-            ruleNoticeText = `**[모두 협력 결과]** 참가자의 절반(\`${limit}명\`)까지 **선착순**으로 응모 가능합니다.`;
+            ruleNoticeText = `**[모두 협력 결과]** 선착순 **${limit}명**만 응모할 수 있습니다. (응모 기준: 먼저 응모 버튼을 누르는 사람)`;
         } else if (coopCount > 0 && betrayCount > 0) {
             allowedUserSet = new Set(betrayUsers.map(u => u.id));
             ruleNoticeText = `**[협력 + 배신 결과]** **배신**을 선택한 유저만 응모할 수 있습니다.`;
@@ -253,7 +255,6 @@ async function closeEventPanel(channelId, messageId) {
         }
 
         if (allowedUserSet.size > 0) {
-            // 기브어웨이 전송 채널 결정 (지정 채널이 없으면 현재 채널 사용)
             let targetGiveawayChannel = channel;
             if (data.giveawayChannelId) {
                 try {
@@ -270,7 +271,8 @@ async function closeEventPanel(channelId, messageId) {
             const giveawayTitle = new TextDisplayBuilder()
                 .setContent(`## [이벤트 기브어웨이] - ${data.title}`);
 
-            // 당첨자 수 언급 제거된 문구
+            const maxText = maxAllowedCount ? ` (선착순 제한: 최대 ${maxAllowedCount}명)` : '';
+
             const giveawayDesc = new TextDisplayBuilder()
                 .setContent(
                     `이벤트가 성공적으로 마감되었습니다.\n` +
@@ -281,7 +283,7 @@ async function closeEventPanel(channelId, messageId) {
             const giveawayButtonRow = new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
                     .setCustomId('giveaway_enter')
-                    .setLabel('응모하기 (현재 0명)')
+                    .setLabel(`응모하기 (현재 0명${maxText})`)
                     .setStyle(ButtonStyle.Success)
             );
 
@@ -293,10 +295,17 @@ async function closeEventPanel(channelId, messageId) {
                 .addSeparatorComponents(new SeparatorBuilder())
                 .addActionRowComponents(giveawayButtonRow);
 
-            const giveawayMessage = await targetGiveawayChannel.send({
+            const sendOptions = {
                 components: [giveawayContainer],
                 flags: MessageFlags.IsComponentsV2
-            });
+            };
+
+            if (data.pingRoleId) {
+                sendOptions.content = `<@&${data.pingRoleId}>`;
+                sendOptions.allowedMentions = { roles: [data.pingRoleId] };
+            }
+
+            const giveawayMessage = await targetGiveawayChannel.send(sendOptions);
 
             giveawayAllowedUsers.set(giveawayMessage.id, allowedUserSet);
             giveawayMaxParticipants.set(giveawayMessage.id, maxAllowedCount);
@@ -448,6 +457,11 @@ client.once('ready', async () => {
                 .setDescription('패널 본문 메시지')
                 .setRequired(true)
         )
+        .addRoleOption(option =>
+            option.setName('멘션')
+                .setDescription('패널 및 기브어웨이 호출 시 핑(멘션)할 역할 (선택)')
+                .setRequired(false)
+        )
         .addChannelOption(option =>
             option.setName('기브어웨이채널')
                 .setDescription('기브어웨이 패널이 생성될 채널 (미설정 시 현재 채널)')
@@ -540,487 +554,73 @@ client.on('interactionCreate', async interaction => {
                 return interaction.reply({ content: '이미 마감되었거나 존재하지 않는 기브어웨이입니다.', ephemeral: true });
             }
 
-            // 부계정 감지 (관리자 권한 없는 경우 계정 생성일 기준 필터링)
+            // 부계정 감지
             const isAdmin = interaction.memberPermissions?.has(PermissionFlagsBits.Administrator);
             if (!isAdmin) {
                 const accountAgeDays = (Date.now() - interaction.user.createdTimestamp) / (1000 * 60 * 60 * 24);
                 if (accountAgeDays < MIN_ACCOUNT_AGE_DAYS) {
                     return interaction.reply({
-                        content: `부계정 방지 시스템: 계정 생성 후 최소 ${MIN_ACCOUNT_AGE_DAYS}일이 지나야 응모할 수 있습니다.`,
+                        content: `⚠️ 계정 생성 후 최소 ${MIN_ACCOUNT_AGE_DAYS}일이 지나지 않은 계정은 응모할 수 없습니다.`,
                         ephemeral: true
                     });
                 }
             }
 
-            // 응모 자격 확인
+            // 자격 검증
             if (!allowedUsers.has(interaction.user.id)) {
-                return interaction.reply({ content: '이벤트 결과에 따라 귀하는 이번 기브어웨이 응모 자격이 없습니다.', ephemeral: true });
-            }
-
-            if (participants.has(interaction.user.id)) {
-                return interaction.reply({ content: '이미 기브어웨이에 응모하셨습니다.', ephemeral: true });
-            }
-
-            // 선착순 인원 제한 검증
-            if (maxParticipants !== null && maxParticipants !== undefined && participants.size >= maxParticipants) {
-                return interaction.reply({ content: `선착순 응모 인원(\`${maxParticipants}명\`)이 마감되어 더 이상 응모할 수 없습니다.`, ephemeral: true });
-            }
-
-            participants.add(interaction.user.id);
-
-            // 실시간 응모자 수 업데이트
-            try {
-                const updatedRow = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder()
-                        .setCustomId('giveaway_enter')
-                        .setLabel(`응모하기 (현재 ${participants.size}명)`)
-                        .setStyle(ButtonStyle.Success)
-                );
-
-                const currentComponents = interaction.message.components.map(row => {
-                    const rowJson = row.toJSON();
-                    if (rowJson.components[0].custom_id === 'giveaway_enter') {
-                        return updatedRow;
-                    }
-                    return row;
-                });
-
-                await interaction.message.edit({
-                    components: currentComponents
-                });
-            } catch (err) {
-                console.error('버튼 수량 업데이트 실패:', err);
-            }
-
-            return interaction.reply({
-                content: '기브어웨이 응모가 완료되었습니다!',
-                ephemeral: true
-            });
-        }
-
-        // 로그 페이지 이동 버튼
-        if (interaction.customId.startsWith('view_event_logs_')) {
-            const parts = interaction.customId.split('_');
-            const targetMsgId = parts[3];
-            const page = parseInt(parts[4], 10) || 0;
-
-            const result = buildLogPageEmbeds(targetMsgId, page);
-            if (result.error) {
-                return interaction.reply({ content: `${result.error}`, ephemeral: true });
-            }
-
-            if (interaction.replied || interaction.deferred) {
-                await interaction.editReply({ embeds: result.embeds, components: result.components });
-            } else {
-                await interaction.reply({ embeds: result.embeds, components: result.components, ephemeral: true });
-            }
-            return;
-        }
-
-        // 협력 / 배신 버튼 클릭 및 역할 자동 지급
-        if (interaction.customId === 'game_cooperate' || interaction.customId === 'game_betray') {
-
-            const messageId = interaction.message.id;
-
-            if (closedEvents.has(messageId)) {
-                await interaction.reply({ content: '이미 종료된 이벤트입니다.', ephemeral: true });
-                return;
-            }
-
-            const data = eventDataMap.get(messageId);
-            if (!data) {
-                return interaction.reply({ content: '이벤트 정보를 찾을 수 없습니다.', ephemeral: true });
-            }
-
-            const choicesMap = data.choices;
-            const userId = interaction.user.id;
-
-            if (choicesMap.has(userId)) {
-                const existingChoice = choicesMap.get(userId).choice === 'cooperate' ? '협력' : '배신';
-                await interaction.reply({
-                    content: `이미 선택을 완료하셨습니다. (선택 항목: **${existingChoice}**)`,
+                return interaction.reply({
+                    content: '❌ 이번 기브어웨이에 응모할 수 있는 대상이 아닙니다. (이벤트 선택 결과 조건 불인정)',
                     ephemeral: true
                 });
-                return;
             }
 
-            const choiceType = interaction.customId === 'game_cooperate' ? 'cooperate' : 'betray';
-            const choiceLabel = choiceType === 'cooperate' ? '협력' : '배신';
-            const targetRoleId = choiceType === 'cooperate' ? data.coopRoleId : data.betrayRoleId;
-
-            // 역할 지급
-            try {
-                const member = await interaction.guild.members.fetch(userId);
-                if (targetRoleId && member) {
-                    await member.roles.add(targetRoleId);
-                }
-            } catch (err) {
-                console.error('역할 부여 실패:', err);
+            // 이미 응모한 경우
+            if (participants.has(interaction.user.id)) {
+                return interaction.reply({ content: '이미 이 기브어웨이에 응모하셨습니다.', ephemeral: true });
             }
 
-            choicesMap.set(userId, {
-                choice: choiceType,
-                user: interaction.user,
-                timestamp: Date.now()
-            });
-
-            await interaction.reply({
-                content: `**${choiceLabel}** 항목을 선택하였으며, 관련 역할이 지급되었습니다.`,
-                ephemeral: true
-            });
-
-            // 지정 로그 채널 전송
-            try {
-                const targetLogChannel = await interaction.guild.channels.fetch(data.logChannelId);
-                if (targetLogChannel) {
-                    const choiceLogEmbed = new EmbedBuilder()
-                        .setColor(choiceType === 'cooperate' ? 0x57F287 : 0xED4245)
-                        .setTitle('[이벤트] 플레이어 선택 로그')
-                        .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
-                        .addFields(
-                            { name: '유저', value: `${interaction.user} (\`${interaction.user.tag}\`)`, inline: true },
-                            { name: '선택 항목', value: `**${choiceLabel}**`, inline: true },
-                            { name: '지급 역할', value: `<@&${targetRoleId}>`, inline: true }
-                        )
-                        .setTimestamp();
-
-                    await targetLogChannel.send({ embeds: [choiceLogEmbed] });
-                }
-            } catch (err) {
-                console.error('로그 채널 전송 실패:', err);
+            // --- 선착순 정원 체크 (모두 협력 시 등) ---
+            if (maxParticipants !== null && participants.size >= maxParticipants) {
+                return interaction.reply({
+                    content: `❌ 선착순 응모 인원(\`${maxParticipants}명\`)이 이미 모두 차서 더 이상 응모할 수 없습니다!`,
+                    ephemeral: true
+                });
             }
 
-            return;
-        }
+            // 응모 등록
+            participants.add(interaction.user.id);
 
-        return;
-    }
+            const parentEventId = giveawayParentEventMap.get(giveawayMsgId);
+            const parentEvent = parentEventId ? eventDataMap.get(parentEventId) : null;
+            const eventTitle = parentEvent ? parentEvent.title : '기브어웨이';
 
-    if (!interaction.isChatInputCommand()) return;
+            const maxText = maxParticipants ? ` / 제한 ${maxParticipants}명` : '';
 
-    // /협력배신패널
-    if (interaction.commandName === '협력배신패널') {
-
-        const logChannel = interaction.options.getChannel('로그채널');
-        const coopRole = interaction.options.getRole('협력역할');
-        const betrayRole = interaction.options.getRole('배신역할');
-        const timeInput = interaction.options.getString('시간');
-        const giveawayTimeInput = interaction.options.getString('기브어웨이시간');
-        const customTitle = interaction.options.getString('제목');
-        const customDescription = interaction.options.getString('문구');
-        const giveawayChannel = interaction.options.getChannel('기브어웨이채널');
-        const giveawayWinners = interaction.options.getInteger('기브어웨이당첨자수') || 1;
-        const imageUrl = interaction.options.getString('이미지_url');
-
-        const durationMs = parseDuration(timeInput);
-        if (!durationMs) {
-            return interaction.reply({
-                content: '이벤트 시간 형식이 올바르지 않습니다. 예시: `10m`, `1h`, `1d`',
-                ephemeral: true
-            });
-        }
-
-        const giveawayDurationMs = parseDuration(giveawayTimeInput);
-        if (!giveawayDurationMs) {
-            return interaction.reply({
-                content: '기브어웨이 시간 형식이 올바르지 않습니다. 예시: `10m`, `3h`, `1d`',
-                ephemeral: true
-            });
-        }
-
-        const endTime = Math.floor((Date.now() + durationMs) / 1000);
-
-        const titleDisplay = new TextDisplayBuilder()
-            .setContent(`## ${customTitle}`);
-
-        const descriptionDisplay = new TextDisplayBuilder()
-            .setContent(`${customDescription}\n\n마감 시간: <t:${endTime}:R> (<t:${endTime}:f> 까지)`);
-
-        const actionRow = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId('game_cooperate')
-                .setLabel('협력')
-                .setStyle(ButtonStyle.Success),
-            new ButtonBuilder()
-                .setCustomId('game_betray')
-                .setLabel('배신')
-                .setStyle(ButtonStyle.Danger)
-        );
-
-        const panelContainer = new ContainerBuilder()
-            .setAccentColor(LIGHT_PINK_COLOR)
-            .addTextDisplayComponents(titleDisplay)
-            .addSeparatorComponents(new SeparatorBuilder())
-            .addTextDisplayComponents(descriptionDisplay);
-
-        if (imageUrl) {
-            try {
-                const mediaItem = new MediaGalleryItemBuilder().setURL(imageUrl);
-                const mediaGallery = new MediaGalleryBuilder().addItems(mediaItem);
-                panelContainer.addMediaGalleryComponents(mediaGallery);
-            } catch (e) {
-                console.error('이미지 설정 실패:', e);
-            }
-        }
-
-        panelContainer
-            .addSeparatorComponents(new SeparatorBuilder())
-            .addActionRowComponents(actionRow);
-
-        const panelMessage = await interaction.channel.send({
-            components: [panelContainer],
-            flags: MessageFlags.IsComponentsV2
-        });
-
-        eventDataMap.set(panelMessage.id, {
-            logChannelId: logChannel.id,
-            coopRoleId: coopRole.id,
-            betrayRoleId: betrayRole.id,
-            title: customTitle,
-            giveawayDurationMs: giveawayDurationMs,
-            giveawayChannelId: giveawayChannel ? giveawayChannel.id : null,
-            giveawayWinnerCount: giveawayWinners,
-            choices: new Map()
-        });
-
-        await interaction.reply({
-            content: `패널이 생성되었습니다. (메시지 ID: \`${panelMessage.id}\`)`,
-            ephemeral: true
-        });
-
-        const timer = setTimeout(() => {
-            closeEventPanel(interaction.channel.id, panelMessage.id);
-        }, durationMs);
-
-        activeTimers.set(panelMessage.id, timer);
-
-        return;
-    }
-
-    // /이벤트종료
-    if (interaction.commandName === '이벤트종료') {
-
-        const targetMessageId = interaction.options.getString('메시지_아이디');
-        const result = await closeEventPanel(interaction.channel.id, targetMessageId);
-
-        if (result === 'already_closed') {
-            await interaction.reply({ content: '해당 이벤트는 이미 종료되었거나 마감된 상태입니다.', ephemeral: true });
-        } else if (result === 'success') {
-            await interaction.reply({
-                content: `메시지 ID (\`${targetMessageId}\`) 이벤트 마감 처리가 완료되었습니다.`,
-                ephemeral: true
-            });
-        } else {
-            await interaction.reply({ content: '해당 메시지를 찾을 수 없습니다.', ephemeral: true });
-        }
-
-        return;
-    }
-
-    // /이벤트로그
-    if (interaction.commandName === '이벤트로그') {
-
-        const targetMessageId = interaction.options.getString('메시지_아이디');
-        const result = buildLogPageEmbeds(targetMessageId, 0);
-
-        if (result.error) {
-            return interaction.reply({ content: `${result.error}`, ephemeral: true });
-        }
-
-        await interaction.reply({
-            content: `이벤트 참여자 목록 조회 결과입니다.`,
-            embeds: result.embeds,
-            components: result.components,
-            ephemeral: true
-        });
-
-        return;
-    }
-
-    // /패널
-    if (interaction.commandName === '패널') {
-
-        const title = new TextDisplayBuilder().setContent('## 서버 이용 안내');
-        const description = new TextDisplayBuilder().setContent(
-            '필요한 메뉴를 아래에서 선택해주세요.\n' +
-            '각 버튼을 눌러 관련 안내를 확인할 수 있습니다.'
-        );
-
-        const panelButtons = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('panel_inquiry').setLabel('문의').setStyle(ButtonStyle.Success),
-            new ButtonBuilder().setCustomId('panel_apply').setLabel('신청').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('panel_rules').setLabel('규정').setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId('panel_help').setLabel('도움말').setStyle(ButtonStyle.Secondary)
-        );
-
-        const panel = new ContainerBuilder()
-            .setAccentColor(LIGHT_PINK_COLOR)
-            .addTextDisplayComponents(title)
-            .addTextDisplayComponents(description)
-            .addActionRowComponents(panelButtons);
-
-        await interaction.channel.send({
-            components: [panel],
-            flags: MessageFlags.IsComponentsV2
-        });
-
-        await interaction.reply({ content: '패널을 생성했습니다.', ephemeral: true });
-
-        return;
-    }
-
-    // /지급완료
-    if (interaction.commandName === '지급완료') {
-
-        await interaction.reply({ content: '지급완료를 처리 중입니다.', ephemeral: true });
-
-        const buyer = interaction.options.getUser('구매자');
-        const item = interaction.options.getString('상품');
-        const count = interaction.options.getString('수량');
-        const price = interaction.options.getString('금액');
-        const seller = interaction.options.getUser('판매자') || interaction.user;
-
-        try {
-            const member = await interaction.guild.members.fetch(buyer.id);
-            if (member && !member.roles.cache.has(ROLE_ID)) {
-                await member.roles.add(ROLE_ID);
-            }
-        } catch (error) {
-            console.error('역할 부여 중 오류 발생:', error);
-        }
-
-        const logChannel = interaction.guild.channels.cache.get(LOG_CHANNEL_ID);
-        if (!logChannel) {
-            return interaction.followUp({ content: '로그 채널을 찾을 수 없습니다.', ephemeral: true });
-        }
-
-        const logEmbed = new EmbedBuilder()
-            .setColor(LIGHT_PINK_COLOR)
-            .setDescription(
-                `${buyer}, ${item} (${count}) 구매 감사합니다.\n\n` +
-                `사용된 금액 : ${price}\n\n` +
-                `해당 관리 판매자: ${seller}`
-            )
-            .setImage(IMAGE_URL);
-
-        await logChannel.send({ content: `${buyer}`, embeds: [logEmbed] });
-
-        const replyEmbed = new EmbedBuilder()
-            .setColor(LIGHT_PINK_COLOR)
-            .setDescription(
-                `아이템이 정상적으로 지급되었습니다.\n` +
-                `https://discord.com/channels/1456729030459134115/1457384179535712473 작성은 필수입니다.`
+            // 버튼 라벨 업데이트
+            const updatedButton = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId('giveaway_enter')
+                    .setLabel(`응모하기 (현재 ${participants.size}명${maxText})`)
+                    .setStyle(ButtonStyle.Success)
             );
 
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('notice_btn').setLabel('주의사항').setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setLabel('후기작성').setStyle(ButtonStyle.Link).setURL(`https://discord.com/channels/${interaction.guildId}/1457384179535712473`)
-        );
-
-        await interaction.channel.send({
-            content: `${buyer}`,
-            embeds: [replyEmbed],
-            components: [row]
-        });
-
-        return;
-    }
-
-});
-
-// $가격 / $로벅스
-client.on('messageCreate', async message => {
-
-    if (message.author.bot) return;
-
-    const args = message.content.trim().split(/\s+/);
-    const command = args[0];
-
-    switch (command) {
-
-        case '$가격':
-        case '$로벅스': {
-
-            if (!message.member || !message.member.roles.cache.has(CALCULATOR_ROLE_ID)) {
-                return message.reply('해당 명령어를 사용할 권한이 없습니다.');
-            }
-
-            const tempMsg = await message.reply('계산을 진행 중입니다.');
-
             try {
-                if (message.deletable) await message.delete();
-            } catch (err) {
-                console.error('유저 메시지 삭제 오류:', err);
+                const container = interaction.message.components[0];
+                await interaction.message.edit({
+                    components: [
+                        new ContainerBuilder(container.data)
+                            .addActionRowComponents(updatedButton)
+                    ],
+                    flags: MessageFlags.IsComponentsV2
+                });
+            } catch (e) {
+                console.error('기브어웨이 버튼 카운트 업데이트 실패:', e);
             }
 
-            await sleep(2000);
-
-            try {
-                if (tempMsg.deletable) await tempMsg.delete();
-            } catch (err) {
-                console.error('안내 메시지 삭제 오류:', err);
-            }
-
-            if (command === '$가격') {
-                const rate = parseFloat(args[1]);
-                const robux = parseFloat(args[2]);
-
-                if (isNaN(rate) || isNaN(robux) || rate <= 0 || robux <= 0) {
-                    return message.channel.send(
-                        '사용법: `$가격 (만 원당 로벅스량) (구매할 로벅스 수)`\n' +
-                        '예시: `$가격 1300 240`'
-                    );
-                }
-
-                const rawPrice = (robux / rate) * 10000;
-                const finalPrice = Math.ceil(rawPrice / 100) * 100;
-
-                const embed = new EmbedBuilder()
-                    .setColor(LIGHT_PINK_COLOR)
-                    .setDescription(
-                        `## 로벅스 가격 결과\n` +
-                        `**만 원당 로벅스 가격 : \`${rate.toLocaleString()}\`\n` +
-                        `구매할 로벅스 수량 : \`${robux.toLocaleString()}\`**\n\n` +
-                        `**계산된 로벅스 가격 = \`${finalPrice.toLocaleString()}\`원**`
-                    );
-
-                return message.channel.send({ embeds: [embed] });
-            }
-
-            if (command === '$로벅스') {
-                const rate = parseFloat(args[1]);
-                const money = parseFloat(args[2]);
-
-                if (isNaN(rate) || isNaN(money) || rate <= 0 || money <= 0) {
-                    return message.channel.send(
-                        '사용법: `$로벅스 (만 원당 로벅스량) (보낼 돈)`\n' +
-                        '예시: `$로벅스 1300 1900`'
-                    );
-                }
-
-                const totalRobux = Math.floor((money / 10000) * rate);
-
-                const embed = new EmbedBuilder()
-                    .setColor(LIGHT_PINK_COLOR)
-                    .setDescription(
-                        `## 지급 로벅스 결과\n` +
-                        `**만 원당 로벅스 가격 : \`${rate.toLocaleString()}\`\n` +
-                        `보낼 금액 : \`${money.toLocaleString()}\`원**\n\n` +
-                        `**계산된 로벅스 수량 = \`${totalRobux.toLocaleString()}\` R$**`
-                    );
-
-                return message.channel.send({ embeds: [embed] });
-            }
-
-            break;
+            return interaction.reply({
+                content: `🎉 **${eventTitle}** 기브어웨이에 성공적으로 응모되었습니다! (현재 선착순 ${participants.size}번째 응모자)`,
+                ephemeral: true
+            });
         }
     }
-
 });
-
-// 로그인
-if (!process.env.TOKEN) {
-    console.error("오류: TOKEN이 설정되어 있지 않습니다. .env 파일이나 환경 변수를 확인해주세요.");
-} else {
-    client.login(process.env.TOKEN);
-}
