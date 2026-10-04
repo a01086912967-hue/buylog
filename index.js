@@ -31,11 +31,19 @@ const CALCULATOR_ROLE_ID = '1456747541348749342';
 const IMAGE_URL = 'https://i.imgur.com/jokl6LQ.gif';
 const LIGHT_PINK_COLOR = 0xFFB6C1;
 
+// ========================================
+// ⚙️ 협력/배신 결과값 설정 (원하는 값으로 수정 가능)
+// ========================================
+const GAME_RESULTS = {
+    cooperate: "🤝 **[협력 선택]** 상대방과 협력하기로 선택하셨습니다. 정해진 보상이 지급됩니다!",
+    betray: "🗡️️ **[배신 선택]** 상대방을 배신하기로 선택하셨습니다. 독식 또는 위험이 뒤따릅니다!"
+};
+
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 
 // ========================================
-// 봇 준비
+// 봇 준비 & 슬래시 명령어 등록
 // ========================================
 
 client.once('ready', async () => {
@@ -45,7 +53,6 @@ client.once('ready', async () => {
     try {
         const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
 
-        // 기존 슬래시 명령어 삭제
         await rest.put(
             Routes.applicationCommands(client.user.id),
             { body: [] }
@@ -66,7 +73,7 @@ client.once('ready', async () => {
         .addStringOption(option => option.setName('상품').setDescription('구매한 상품명').setRequired(true))
         .addStringOption(option => option.setName('수량').setDescription('구매한 수량').setRequired(true))
         .addStringOption(option => option.setName('금액').setDescription('사용된 금액').setRequired(true))
-        .addUserOption(option => option.setName('판매자').setDescription('해당 관리 판매자 (미선택 시 명령어 사용자로 지정)').setRequired(false));
+        .addUserOption(option => option.setName('판매자').setDescription('해당 관리 판매자').setRequired(false));
 
     // 2) /패널
     const panelCommand = new SlashCommandBuilder()
@@ -74,27 +81,32 @@ client.once('ready', async () => {
         .setDescription('안내 패널을 생성합니다.')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
 
-    // 3) /서바이벌
-    const survivalCommand = new SlashCommandBuilder()
-        .setName('서바이벌')
-        .setDescription('서바이벌 패널을 생성합니다.')
-        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
+    // 3) [신규] /협력배신패널 (제목, 문구 직접 설정 가능)
+    const coopBetrayCommand = new SlashCommandBuilder()
+        .setName('협력배신패널')
+        .setDescription('협력/배신 선택 패널을 생성합니다.')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .addStringOption(option => 
+            option.setName('제목')
+                .setDescription('패널에 들어갈 제목을 입력하세요.')
+                .setRequired(false)
+        )
+        .addStringOption(option => 
+            option.setName('문구')
+                .setDescription('패널에 들어갈 설명 문구를 입력하세요.')
+                .setRequired(false)
+        );
 
-    // 명령어 등록
     await client.application.commands.create(logCommand);
-    console.log('/지급완료 명령어가 등록되었습니다.');
-
     await client.application.commands.create(panelCommand);
-    console.log('/패널 명령어가 등록되었습니다.');
-
-    await client.application.commands.create(survivalCommand);
-    console.log('/서바이벌 명령어가 등록되었습니다.');
+    await client.application.commands.create(coopBetrayCommand);
+    console.log('슬래시 명령어들이 성공적으로 등록되었습니다.');
 
 });
 
 
 // ========================================
-// 버튼 / 인터랙션
+// 인터랙션 (버튼 & 슬래시 명령어)
 // ========================================
 
 client.on('interactionCreate', async interaction => {
@@ -104,6 +116,7 @@ client.on('interactionCreate', async interaction => {
     // ========================================
     if (interaction.isButton()) {
 
+        // 기존 지급완료 관련 버튼
         if (interaction.customId === 'notice_btn') {
             await interaction.reply({
                 content:
@@ -135,19 +148,14 @@ client.on('interactionCreate', async interaction => {
             return;
         }
 
-        // 서바이벌 버튼 응답
-        if (interaction.customId === 'survival_info') {
-            await interaction.reply({ content: '⚔️ 현재 서바이벌 시즌 1 진행 중입니다.', ephemeral: true });
+        // 🤝 협력 / 🗡️ 배신 버튼 클릭 반응 (개인 메시지/Ephemeral 처리)
+        if (interaction.customId === 'game_cooperate') {
+            await interaction.reply({ content: GAME_RESULTS.cooperate, ephemeral: true });
             return;
         }
 
-        if (interaction.customId === 'survival_rules') {
-            await interaction.reply({ content: '📜 **서바이벌 규칙**: 테러, 핵 사용 금지', ephemeral: true });
-            return;
-        }
-
-        if (interaction.customId === 'survival_shop') {
-            await interaction.reply({ content: '🛒 상점 기능은 상점 채널을 이용해 주세요.', ephemeral: true });
+        if (interaction.customId === 'game_betray') {
+            await interaction.reply({ content: GAME_RESULTS.betray, ephemeral: true });
             return;
         }
 
@@ -155,48 +163,55 @@ client.on('interactionCreate', async interaction => {
     }
 
 
-    // 슬래시 명령어가 아니면 종료
     if (!interaction.isChatInputCommand()) return;
 
 
     // ========================================
-    // /서바이벌 (Components V2 / SeparatorBuilder 적용)
+    // /협력배신패널 (Components V2 / SeparatorBuilder)
     // ========================================
-    if (interaction.commandName === '서바이벌') {
+    if (interaction.commandName === '협력배신패널') {
 
-        const title = new TextDisplayBuilder()
-            .setContent('## ⚔️ 서바이벌 콘텐츠 안내');
+        // 옵션값 가져오기 (입력 안 한 경우 기본값)
+        const customTitle = interaction.options.getString('제목') || '🤝 협력 vs 🗡️ 배신';
+        const customDescription = interaction.options.getString('문구') || '신중하게 선택하세요.\n당신의 선택이 결과를 좌우합니다!';
 
-        const description = new TextDisplayBuilder()
-            .setContent(
-                '서바이벌 모드에 오신 것을 환영합니다!\n' +
-                '아래 버튼을 눌러 관련 정보를 확인하세요.'
-            );
+        const titleDisplay = new TextDisplayBuilder()
+            .setContent(`## ${customTitle}`);
+
+        const descriptionDisplay = new TextDisplayBuilder()
+            .setContent(customDescription);
 
         const separator1 = new SeparatorBuilder();
         const separator2 = new SeparatorBuilder();
 
-        const survivalButtons = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('survival_info').setLabel('정보 확인').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('survival_rules').setLabel('서바이벌 규칙').setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId('survival_shop').setLabel('상점').setStyle(ButtonStyle.Success)
+        const actionRow = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId('game_cooperate')
+                .setLabel('협력')
+                .setEmoji('🤝')
+                .setStyle(ButtonStyle.Success),
+            new ButtonBuilder()
+                .setCustomId('game_betray')
+                .setLabel('배신')
+                .setEmoji('🗡️')
+                .setStyle(ButtonStyle.Danger)
         );
 
-        const survivalPanel = new ContainerBuilder()
+        const panelContainer = new ContainerBuilder()
             .setAccentColor(LIGHT_PINK_COLOR)
-            .addTextDisplayComponents(title)
+            .addTextDisplayComponents(titleDisplay)
             .addSeparatorComponents(separator1)
-            .addTextDisplayComponents(description)
+            .addTextDisplayComponents(descriptionDisplay)
             .addSeparatorComponents(separator2)
-            .addActionRowComponents(survivalButtons);
+            .addActionRowComponents(actionRow);
 
         await interaction.channel.send({
-            components: [survivalPanel],
+            components: [panelContainer],
             flags: MessageFlags.IsComponentsV2
         });
 
         await interaction.reply({
-            content: '서바이벌 패널을 생성했습니다.',
+            content: '협력/배신 패널을 성공적으로 전송했습니다.',
             ephemeral: true
         });
 
@@ -308,7 +323,7 @@ client.on('interactionCreate', async interaction => {
 
 
 // ========================================
-// $가격 / $로벅스 / $서바이벌
+// $가격 / $로벅스
 // ========================================
 
 client.on('messageCreate', async message => {
@@ -319,15 +334,6 @@ client.on('messageCreate', async message => {
     const command = args[0];
 
     switch (command) {
-
-        case '$서바이벌': {
-            const embed = new EmbedBuilder()
-                .setColor(LIGHT_PINK_COLOR)
-                .setTitle('⚔️ 서바이벌 정보')
-                .setDescription('`$서바이벌` 명령어가 실행되었습니다.');
-
-            return message.channel.send({ embeds: [embed] });
-        }
 
         case '$가격':
         case '$로벅스': {
