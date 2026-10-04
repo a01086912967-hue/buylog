@@ -12,6 +12,8 @@ const {
     ContainerBuilder,
     TextDisplayBuilder,
     SeparatorBuilder,
+    MediaGalleryBuilder,
+    MediaGalleryItemBuilder,
     MessageFlags
 } = require('discord.js');
 
@@ -31,13 +33,88 @@ const CALCULATOR_ROLE_ID = '1456747541348749342';
 const IMAGE_URL = 'https://i.imgur.com/jokl6LQ.gif';
 const LIGHT_PINK_COLOR = 0xFFB6C1;
 
-// ========================================
-// 🎲 데이터 저장소 (1인 1회 선택 제한 메모리)
-// ========================================
-// Key: MessageID_UserID -> Value: 'cooperate' | 'betray'
+// 선택 저장소 (MessageID_UserID -> 'cooperate' | 'betray')
 const userChoices = new Map();
+// 진행 중인 타이머 저장소 (MessageID -> setTimeout)
+const activeTimers = new Map();
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// ========================================
+// ⏱️ 시간 파싱 함수 (1d, 1h, 1m, 30s -> ms 변환)
+// ========================================
+function parseDuration(str) {
+    if (!str) return null;
+    const regex = /^(\d+)\s*([smhd])$/i;
+    const match = str.trim().match(regex);
+    if (!match) return null;
+
+    const value = parseInt(match[1], 10);
+    const unit = match[2].toLowerCase();
+
+    switch (unit) {
+        case 's': return value * 1000;
+        case 'm': return value * 60 * 1000;
+        case 'h': return value * 60 * 60 * 1000;
+        case 'd': return value * 24 * 60 * 60 * 1000;
+        default: return null;
+    }
+}
+
+// ========================================
+// 🔒 패널 종료 함수 (자동 마감 & 수동 종료 공통 사용)
+// ========================================
+async function closeEventPanel(channel, messageId) {
+    try {
+        const message = await channel.messages.fetch(messageId);
+        if (!message) return false;
+
+        const disabledRow = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId('game_cooperate')
+                .setLabel('협력 (마감)')
+                .setEmoji('🤝')
+                .setStyle(ButtonStyle.Success)
+                .setDisabled(true),
+            new ButtonBuilder()
+                .setCustomId('game_betray')
+                .setLabel('배신 (마감)')
+                .setEmoji('🗡️️')
+                .setStyle(ButtonStyle.Danger)
+                .setDisabled(true)
+        );
+
+        const closedTitle = new TextDisplayBuilder()
+            .setContent(`## 🔒 [이벤트 종료됨]`);
+
+        const closedDescription = new TextDisplayBuilder()
+            .setContent(`🚫 **해당 이벤트 진행 및 선택이 마감되었습니다.**`);
+
+        const closedContainer = new ContainerBuilder()
+            .setAccentColor(0x808080) // 회색 변경
+            .addTextDisplayComponents(closedTitle)
+            .addSeparatorComponents(new SeparatorBuilder())
+            .addTextDisplayComponents(closedDescription)
+            .addSeparatorComponents(new SeparatorBuilder())
+            .addActionRowComponents(disabledRow);
+
+        await message.edit({
+            components: [closedContainer],
+            flags: MessageFlags.IsComponentsV2
+        });
+
+        // 타이머 제거
+        if (activeTimers.has(messageId)) {
+            clearTimeout(activeTimers.get(messageId));
+            activeTimers.delete(messageId);
+        }
+
+        return true;
+    } catch (err) {
+        console.error('패널 마감 처리 중 오류 발생:', err);
+        return false;
+    }
+}
 
 
 // ========================================
@@ -50,17 +127,14 @@ client.once('ready', async () => {
 
     try {
         const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
-
         await rest.put(
             Routes.applicationCommands(client.user.id),
             { body: [] }
         );
         console.log('기존 슬래시 명령어를 모두 삭제했습니다.');
-
     } catch (error) {
         console.error('기존 명령어 삭제 중 오류 발생:', error);
     }
-
 
     // 1) /지급완료
     const logCommand = new SlashCommandBuilder()
@@ -79,30 +153,47 @@ client.once('ready', async () => {
         .setDescription('안내 패널을 생성합니다.')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
 
-    // 3) /협력배신패널 (시간, 제목, 문구 옵션)
+    // 3) /협력배신패널 (시간, 제목, 문구, 이미지)
     const coopBetrayCommand = new SlashCommandBuilder()
         .setName('협력배신패널')
-        .setDescription('시간 제한이 있는 협력/배신 선택 패널을 생성합니다.')
+        .setDescription('협력/배신 이벤트 패널을 생성합니다.')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-        .addIntegerOption(option =>
-            option.setName('시간_분')
-                .setDescription('패널을 몇 분 동안 진행할지 설정하세요. (예: 10)')
+        .addStringOption(option =>
+            option.setName('시간')
+                .setDescription('진행 시간 입력 (예: 10m, 1h, 1d)')
                 .setRequired(true)
         )
         .addStringOption(option =>
             option.setName('제목')
-                .setDescription('패널 제목 (기본값: 🤝 협력 vs 🗡️ 배신)')
-                .setRequired(false)
+                .setDescription('패널 제목을 입력하세요.')
+                .setRequired(true)
         )
         .addStringOption(option =>
             option.setName('문구')
-                .setDescription('패널 추가 설명 문구')
+                .setDescription('패널에 들어갈 본문 메시지를 입력하세요.')
+                .setRequired(true)
+        )
+        .addStringOption(option =>
+            option.setName('이미지_url')
+                .setDescription('패널에 첨부할 이미지/GIF 링크를 입력하세요. (선택사항)')
                 .setRequired(false)
+        );
+
+    // 4) /이벤트종료
+    const endEventCommand = new SlashCommandBuilder()
+        .setName('이벤트종료')
+        .setDescription('지정한 메시지 ID의 이벤트를 즉시 종료합니다.')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .addStringOption(option =>
+            option.setName('메시지_아이디')
+                .setDescription('종료할 이벤트 패널의 메시지 ID를 입력하세요.')
+                .setRequired(true)
         );
 
     await client.application.commands.create(logCommand);
     await client.application.commands.create(panelCommand);
     await client.application.commands.create(coopBetrayCommand);
+    await client.application.commands.create(endEventCommand);
     console.log('슬래시 명령어들이 성공적으로 등록되었습니다.');
 
 });
@@ -119,7 +210,6 @@ client.on('interactionCreate', async interaction => {
     // ========================================
     if (interaction.isButton()) {
 
-        // 기존 일반 패널 버튼들
         if (interaction.customId === 'notice_btn') {
             await interaction.reply({
                 content:
@@ -152,16 +242,14 @@ client.on('interactionCreate', async interaction => {
         }
 
 
-        // ========================================
-        // 🤝 협력 / 🗡️ 배신 버튼 클릭 반응
-        // ========================================
+        // 🤝 협력 / 🗡️ 배신 버튼 클릭
         if (interaction.customId === 'game_cooperate' || interaction.customId === 'game_betray') {
 
             const messageId = interaction.message.id;
             const userId = interaction.user.id;
             const storageKey = `${messageId}_${userId}`;
 
-            // 이미 선택한 경우 변경 불가
+            // 선택 중복 체크
             if (userChoices.has(storageKey)) {
                 const existingChoice = userChoices.get(storageKey) === 'cooperate' ? '🤝 협력' : '🗡️ 배신';
                 await interaction.reply({
@@ -174,21 +262,19 @@ client.on('interactionCreate', async interaction => {
             const choiceType = interaction.customId === 'game_cooperate' ? 'cooperate' : 'betray';
             const choiceLabel = choiceType === 'cooperate' ? '🤝 협력' : '🗡️ 배신';
 
-            // 선택 내역 메모리에 저장
             userChoices.set(storageKey, choiceType);
 
-            // 유저에게 응답
             await interaction.reply({
                 content: `🔮 **${choiceLabel}**을(를) 선택하셨습니다.\n선택은 변경할 수 없습니다. 결과를 운명에 맡기세요 . . . 🎲`,
                 ephemeral: true
             });
 
-            // 📜 로그 채널에 기록 알림 전송
+            // 📜 로그 채널 전송
             const logChannel = interaction.guild.channels.cache.get(LOG_CHANNEL_ID);
             if (logChannel) {
                 const choiceLogEmbed = new EmbedBuilder()
                     .setColor(choiceType === 'cooperate' ? 0x57F287 : 0xED4245)
-                    .setTitle('🎲 [협력/배신] 플레이어 선택 로그')
+                    .setTitle('🎲 [이벤트] 플레이어 선택 로그')
                     .addFields(
                         { name: '👤 유저', value: `${interaction.user} (${interaction.user.tag})`, inline: true },
                         { name: '🎯 선택한 항목', value: `**${choiceLabel}**`, inline: true },
@@ -210,33 +296,30 @@ client.on('interactionCreate', async interaction => {
 
 
     // ========================================
-    // /협력배신패널 (시간설정, 로그 기록, V2 Component)
+    // /협력배신패널
     // ========================================
     if (interaction.commandName === '협력배신패널') {
 
-        const durationMinutes = interaction.options.getInteger('시간_분');
-        const customTitle = interaction.options.getString('제목') || '🤝 협력 vs 🗡️ 배신';
-        const customDescription = interaction.options.getString('문구') || '상대방과의 관계를 생각하여 신중하게 선택하세요!';
+        const timeInput = interaction.options.getString('시간');
+        const customTitle = interaction.options.getString('제목');
+        const customDescription = interaction.options.getString('문구');
+        const imageUrl = interaction.options.getString('이미지_url');
 
-        // 마감 시간 계산
-        const endTime = Math.floor((Date.now() + durationMinutes * 60 * 1000) / 1000);
+        const durationMs = parseDuration(timeInput);
+        if (!durationMs) {
+            return interaction.reply({
+                content: '❌ 올바른 시간 형식이 아닙니다! 예시: `10m` (10분), `1h` (1시간), `1d` (1일)',
+                ephemeral: true
+            });
+        }
+
+        const endTime = Math.floor((Date.now() + durationMs) / 1000);
 
         const titleDisplay = new TextDisplayBuilder()
             .setContent(`## ${customTitle}`);
 
         const descriptionDisplay = new TextDisplayBuilder()
-            .setContent(
-                `${customDescription}\n\n` +
-                `⏳ **마감 시간**: <t:${endTime}:R> (<t:${endTime}:f> 까지)\n` +
-                `⚠️ **주의**: 한 번 선택하면 절대로 변경할 수 없습니다.\n\n` +
-                `📜 **게임 룰 안내**\n` +
-                `• **협력 + 협력** ➔ 전체 이벤트 룰렛\n` +
-                `• **배신 + 협력** ➔ 배신자만 이벤트 룰렛\n` +
-                `• **배신 + 배신** ➔ 보상 없음`
-            );
-
-        const separator1 = new SeparatorBuilder();
-        const separator2 = new SeparatorBuilder();
+            .setContent(`${customDescription}\n\n⏳ **마감 시간**: <t:${endTime}:R> (<t:${endTime}:f> 까지)`);
 
         const actionRow = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
@@ -254,71 +337,65 @@ client.on('interactionCreate', async interaction => {
         const panelContainer = new ContainerBuilder()
             .setAccentColor(LIGHT_PINK_COLOR)
             .addTextDisplayComponents(titleDisplay)
-            .addSeparatorComponents(separator1)
-            .addTextDisplayComponents(descriptionDisplay)
-            .addSeparatorComponents(separator2)
+            .addSeparatorComponents(new SeparatorBuilder())
+            .addTextDisplayComponents(descriptionDisplay);
+
+        // 이미지 옵션이 있을 경우 첨부
+        if (imageUrl) {
+            try {
+                const mediaItem = new MediaGalleryItemBuilder().setURL(imageUrl);
+                const mediaGallery = new MediaGalleryBuilder().addItems(mediaItem);
+                panelContainer.addMediaGalleryComponents(mediaGallery);
+            } catch (e) {
+                console.error('이미지 설정 실패:', e);
+            }
+        }
+
+        panelContainer
+            .addSeparatorComponents(new SeparatorBuilder())
             .addActionRowComponents(actionRow);
 
-        // 채널에 패널 전송
         const panelMessage = await interaction.channel.send({
             components: [panelContainer],
             flags: MessageFlags.IsComponentsV2
         });
 
         await interaction.reply({
-            content: `협력/배신 패널이 생성되었습니다. (${durationMinutes}분 후 마감됩니다)`,
+            content: `패널이 생성되었습니다. (메시지 ID: \`${panelMessage.id}\`)`,
             ephemeral: true
         });
 
-        // ========================================
-        // ⏱️ 지정된 시간 후 패널 마감 처리 (비활성화)
-        // ========================================
-        setTimeout(async () => {
-            try {
-                const closedTitle = new TextDisplayBuilder()
-                    .setContent(`## 🔒 ${customTitle} [종료됨]`);
+        // ⏱️ 자동 종료 타이머 설정
+        const timer = setTimeout(() => {
+            closeEventPanel(interaction.channel, panelMessage.id);
+        }, durationMs);
 
-                const closedDescription = new TextDisplayBuilder()
-                    .setContent(
-                        `🚫 **본 패널 선택이 마감되었습니다.**\n\n` +
-                        `📜 **게임 룰**\n` +
-                        `• **협력 + 협력** ➔ 전체 이벤트 룰렛\n` +
-                        `• **배신 + 협력** ➔ 배신자만 이벤트 룰렛\n` +
-                        `• **배신 + 배신** ➔ 보상 없음`
-                    );
+        activeTimers.set(panelMessage.id, timer);
 
-                const disabledRow = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder()
-                        .setCustomId('game_cooperate')
-                        .setLabel('협력 (마감)')
-                        .setEmoji('🤝')
-                        .setStyle(ButtonStyle.Success)
-                        .setDisabled(true),
-                    new ButtonBuilder()
-                        .setCustomId('game_betray')
-                        .setLabel('배신 (마감)')
-                        .setEmoji('🗡️')
-                        .setStyle(ButtonStyle.Danger)
-                        .setDisabled(true)
-                );
+        return;
+    }
 
-                const closedContainer = new ContainerBuilder()
-                    .setAccentColor(0x808080) // 회색으로 변경
-                    .addTextDisplayComponents(closedTitle)
-                    .addSeparatorComponents(separator1)
-                    .addTextDisplayComponents(closedDescription)
-                    .addSeparatorComponents(separator2)
-                    .addActionRowComponents(disabledRow);
 
-                await panelMessage.edit({
-                    components: [closedContainer],
-                    flags: MessageFlags.IsComponentsV2
-                });
+    // ========================================
+    // /이벤트종료 (수동 마감 명령어)
+    // ========================================
+    if (interaction.commandName === '이벤트종료') {
 
-            } catch (err) {
-                console.error('패널 마감 처리 실패 (메시지가 삭제되었을 수 있음):', err);
-            }
-        }, durationMinutes * 60 * 1000);
+        const targetMessageId = interaction.options.getString('메시지_아이디');
+
+        const success = await closeEventPanel(interaction.channel, targetMessageId);
+
+        if (success) {
+            await interaction.reply({
+                content: `✅ 메시지 ID (\`${targetMessageId}\`) 이벤트가 성공적으로 종료 처리되었습니다.`,
+                ephemeral: true
+            });
+        } else {
+            await interaction.reply({
+                content: `❌ 해당 메시지를 찾을 수 없거나 종료 처리에 실패했습니다. (채널 및 메시지 ID 확인 필요)`,
+                ephemeral: true
+            });
+        }
 
         return;
     }
@@ -522,7 +599,7 @@ client.on('messageCreate', async message => {
 
 
 // ========================================
-// TOKEN 확인 및 로그인
+// TOKEN 로그인
 // ========================================
 
 if (!process.env.TOKEN) {
