@@ -884,9 +884,9 @@ client.on('messageCreate', async message => {
 
 });
 
+// 환경변수 체크 및 디스코드 로그인
 if (!process.env.TOKEN) {
-    console.error("오류: TOKEN이 설정되어 있지 않습니다.");
-    process.exit(1);
+    console.error("오류: TOKEN이 설정되어 있지 않습니다. .env 파일이나 환경 변수를 확인해주세요.");
+} else {
+    client.login(process.env.TOKEN);
 }
-
-client.login(process.env.TOKEN);
