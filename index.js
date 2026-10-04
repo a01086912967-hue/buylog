@@ -38,13 +38,13 @@ const LIGHT_PINK_COLOR = 0xFFB6C1;
 const MIN_ACCOUNT_AGE_DAYS = 7;
 
 // 저장소
-const eventDataMap = new Map(); // MessageID -> { logChannelId, coopRoleId, betrayRoleId, title, giveawayDurationMs, giveawayChannelId, giveawayWinnerCount, pingRoleId, choices: Map }
+const eventDataMap = new Map();
 const activeTimers = new Map();
 const closedEvents = new Set();
-const giveawayParticipants = new Map(); // GiveawayMessageID -> Set<UserID>
-const giveawayAllowedUsers = new Map(); // GiveawayMessageID -> Set<UserID>
-const giveawayMaxParticipants = new Map(); // GiveawayMessageID -> maxAllowedCount
-const giveawayParentEventMap = new Map(); // GiveawayMessageID -> EventMessageID
+const giveawayParticipants = new Map();
+const giveawayAllowedUsers = new Map();
+const giveawayMaxParticipants = new Map();
+const giveawayParentEventMap = new Map();
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -238,7 +238,6 @@ async function closeEventPanel(channelId, messageId) {
         if (totalUsers === 0) {
             ruleNoticeText = '이벤트 참여자가 없어 기브어웨이가 진행되지 않습니다.';
         } else if (betrayCount === 0) {
-            // 모두 협력: 모든 협력 유저에게 응모 자격을 주되, 선착순 절반 인원 제한 설정 (버튼 클릭 기준)
             const limit = Math.max(1, Math.floor(totalUsers / 2));
             allowedUserSet = new Set(coopUsers.map(u => u.id));
             maxAllowedCount = limit;
@@ -269,12 +268,17 @@ async function closeEventPanel(channelId, messageId) {
 
             const maxTextNotice = maxAllowedCount ? ` (선착순 최대 ${maxAllowedCount}명)` : '';
 
-            const giveawayDesc = new TextDisplayBuilder()
-                .setContent(
-                    `이벤트가 성공적으로 마감되었습니다.\n` +
-                    `${ruleNoticeText}\n\n` +
-                    `마감 시간: <t:${giveawayEndTime}:R> (<t:${giveawayEndTime}:f> 까지)`
-                );
+            // 멘션 문구를 컨테이너 내 텍스트 디스플레이에 포함
+            let giveawayDescContent = '';
+            if (data.pingRoleId) {
+                giveawayDescContent += `<@&${data.pingRoleId}>\n\n`;
+            }
+            giveawayDescContent += 
+                `이벤트가 성공적으로 마감되었습니다.\n` +
+                `${ruleNoticeText}\n\n` +
+                `마감 시간: <t:${giveawayEndTime}:R> (<t:${giveawayEndTime}:f> 까지)`;
+
+            const giveawayDesc = new TextDisplayBuilder().setContent(giveawayDescContent);
 
             const giveawayButtonRow = new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
@@ -296,9 +300,7 @@ async function closeEventPanel(channelId, messageId) {
                 flags: MessageFlags.IsComponentsV2
             };
 
-            // 기브어웨이 메시지에도 핑 설정 반영
             if (data.pingRoleId) {
-                sendOptions.content = `<@&${data.pingRoleId}>`;
                 sendOptions.allowedMentions = { roles: [data.pingRoleId] };
             }
 
@@ -596,9 +598,8 @@ client.on('interactionCreate', async interaction => {
             const updatedRow = new ActionRowBuilder().addComponents(updatedButton);
 
             try {
-                // Components V2 및 일반 구조 대응 UI 업데이트
                 const container = interaction.message.components[0];
-                if (container && container.type === 17) { // ContainerBuilder (V2)
+                if (container && container.type === 17) {
                     await interaction.message.edit({
                         components: [
                             new ContainerBuilder(container.data)
@@ -755,8 +756,14 @@ client.on('interactionCreate', async interaction => {
         const titleDisplay = new TextDisplayBuilder()
             .setContent(`## ${customTitle}`);
 
-        const descriptionDisplay = new TextDisplayBuilder()
-            .setContent(`${customDescription}\n\n마감 시간: <t:${endTime}:R> (<t:${endTime}:f> 까지)`);
+        // 멘션 역할이 있으면 컨테이너 상단에 멘션 추가
+        let fullDescription = '';
+        if (pingRole) {
+            fullDescription += `<@&${pingRole.id}>\n\n`;
+        }
+        fullDescription += `${customDescription}\n\n마감 시간: <t:${endTime}:R> (<t:${endTime}:f> 까지)`;
+
+        const descriptionDisplay = new TextDisplayBuilder().setContent(fullDescription);
 
         const actionRow = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
@@ -795,7 +802,6 @@ client.on('interactionCreate', async interaction => {
         };
 
         if (pingRole) {
-            sendOptions.content = `<@&${pingRole.id}>`;
             sendOptions.allowedMentions = { roles: [pingRole.id] };
         }
 
