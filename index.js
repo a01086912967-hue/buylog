@@ -238,10 +238,10 @@ async function closeEventPanel(channelId, messageId) {
         if (totalUsers === 0) {
             ruleNoticeText = '이벤트 참여자가 없어 기브어웨이가 진행되지 않습니다.';
         } else if (betrayCount === 0) {
-            const limit = Math.max(1, Math.floor(totalUsers / 2));
+            // 모두 협력 시: 협력한 유저 전원 응모 가능
             allowedUserSet = new Set(coopUsers.map(u => u.id));
-            maxAllowedCount = limit;
-            ruleNoticeText = `**[모두 협력 결과]** 기브어웨이 응모 버튼을 먼저 누르는 **선착순 절반(\`${limit}명\`)**만 응모 가능합니다.`;
+            maxAllowedCount = null;
+            ruleNoticeText = `**[모두 협력 결과]** 협력을 선택한 **모든 유저**가 기브어웨이에 응모할 수 있습니다.`;
         } else if (coopCount > 0 && betrayCount > 0) {
             allowedUserSet = new Set(betrayUsers.map(u => u.id));
             ruleNoticeText = `**[협력 + 배신 결과]** **배신**을 선택한 유저만 응모할 수 있습니다.`;
@@ -573,7 +573,7 @@ client.on('interactionCreate', async interaction => {
                 return interaction.reply({ content: '이미 기브어웨이에 응모하셨습니다.', ephemeral: true });
             }
 
-            // 선착순 인원이 이미 꽉 찬 경우 안내 메시지만 출력 (패널 메시지는 수정하지 않음)
+            // 선착순 인원이 이미 꽉 찬 경우 안내 메시지만 출력
             if (maxParticipants !== null && maxParticipants !== undefined && participants.size >= maxParticipants) {
                 return interaction.reply({
                     content: `❌ 선착순 응모 인원(\`${maxParticipants}명\`)이 이미 꽉 차서 더 이상 응모할 수 없습니다!`,
