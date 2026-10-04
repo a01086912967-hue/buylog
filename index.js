@@ -230,23 +230,24 @@ async function closeEventPanel(channelId, messageId) {
             activeTimers.delete(messageId);
         }
 
-        // --- 딜레마 규칙에 따른 기브어웨이 응모 자격 산출 ---
+        // --- 새로 정의된 비율 기준 기브어웨이 응모 자격 산출 ---
         let allowedUserSet = new Set();
         let maxAllowedCount = null;
         let ruleNoticeText = '';
 
         if (totalUsers === 0) {
             ruleNoticeText = '이벤트 참여자가 없어 기브어웨이가 진행되지 않습니다.';
-        } else if (betrayCount === 0) {
-            // 모두 협력 시: 협력한 유저 전원 응모 가능
+        } else if (betrayCount / totalUsers >= 2 / 3) {
+            // 배신이 2/3 이상일 경우
+            ruleNoticeText = `**[이벤트 파기]** 배신자 비율이 2/3 이상(\`${betrayPercent}%\`)에 달하여 **이벤트가 취소되었으며 기브어웨이는 진행되지 않습니다.**`;
+        } else if (coopCount / totalUsers > 2 / 3) {
+            // 협력이 2/3 초과일 경우 (협력자 전원 응모 가능)
             allowedUserSet = new Set(coopUsers.map(u => u.id));
-            maxAllowedCount = null;
-            ruleNoticeText = `**[모두 협력 결과]** 협력을 선택한 **모든 유저**가 기브어웨이에 응모할 수 있습니다.`;
-        } else if (coopCount > 0 && betrayCount > 0) {
+            ruleNoticeText = `**[협력 승리]** 협력 비율이 2/3를 초과(\`${coopPercent}%\`)하여 **협력한 모든 유저**가 기브어웨이에 응모할 수 있습니다!`;
+        } else {
+            // 그 외 (절반 이하이거나 배신 비율이 우세한 경우 등 -> 배신자 승리)
             allowedUserSet = new Set(betrayUsers.map(u => u.id));
-            ruleNoticeText = `**[협력 + 배신 결과]** **배신**을 선택한 유저만 응모할 수 있습니다.`;
-        } else if (coopCount === 0 && betrayCount > 0) {
-            ruleNoticeText = `**[모두 배신 결과]** 모든 유저가 배신을 선택하여 **아무도 기브어웨이에 응모할 수 없습니다.**`;
+            ruleNoticeText = `**[배신 승리]** 협력 비율이 부족하여 **배신을 선택한 유저**만 기브어웨이에 응모할 수 있습니다.`;
         }
 
         if (allowedUserSet.size > 0) {
@@ -266,8 +267,6 @@ async function closeEventPanel(channelId, messageId) {
             const giveawayTitle = new TextDisplayBuilder()
                 .setContent(`## [이벤트 기브어웨이] - ${data.title}`);
 
-            const maxTextNotice = maxAllowedCount ? ` (선착순 최대 ${maxAllowedCount}명)` : '';
-
             let giveawayDescContent = '';
             if (data.pingRoleId) {
                 giveawayDescContent += `<@&${data.pingRoleId}>\n\n`;
@@ -282,7 +281,7 @@ async function closeEventPanel(channelId, messageId) {
             const giveawayButtonRow = new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
                     .setCustomId('giveaway_enter')
-                    .setLabel(`응모하기${maxTextNotice}`)
+                    .setLabel('응모하기')
                     .setStyle(ButtonStyle.Success)
             );
 
@@ -315,7 +314,7 @@ async function closeEventPanel(channelId, messageId) {
             }, giveawayDurationMs);
         } else {
             await channel.send({
-                content: `📢 **[ ${data.title} ]** 이벤트 결과: ${ruleNoticeText}`
+                content: `📢 **[ ${data.title} ]**${ruleNoticeText}`
             });
         }
 
@@ -546,7 +545,6 @@ client.on('interactionCreate', async interaction => {
             const giveawayMsgId = interaction.message.id;
             const allowedUsers = giveawayAllowedUsers.get(giveawayMsgId);
             const participants = giveawayParticipants.get(giveawayMsgId);
-            const maxParticipants = giveawayMaxParticipants.get(giveawayMsgId);
 
             if (!participants || !allowedUsers) {
                 return interaction.reply({ content: '이미 마감되었거나 존재하지 않는 기브어웨이입니다.', ephemeral: true });
@@ -573,19 +571,11 @@ client.on('interactionCreate', async interaction => {
                 return interaction.reply({ content: '이미 기브어웨이에 응모하셨습니다.', ephemeral: true });
             }
 
-            // 선착순 인원이 이미 꽉 찬 경우 안내 메시지만 출력
-            if (maxParticipants !== null && maxParticipants !== undefined && participants.size >= maxParticipants) {
-                return interaction.reply({
-                    content: `❌ 선착순 응모 인원(\`${maxParticipants}명\`)이 이미 꽉 차서 더 이상 응모할 수 없습니다!`,
-                    ephemeral: true
-                });
-            }
-
             // 참여자 등록
             participants.add(interaction.user.id);
 
             return interaction.reply({
-                content: `🎉 기브어웨이 응모가 완료되었습니다! (현재 선착순 ${participants.size}번째 응모자)`,
+                content: `🎉 기브어웨이 응모가 완료되었습니다! (현재 ${participants.size}번째 응모자)`,
                 ephemeral: true
             });
         }
