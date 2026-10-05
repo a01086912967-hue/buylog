@@ -230,7 +230,7 @@ async function closeEventPanel(channelId, messageId) {
             activeTimers.delete(messageId);
         }
 
-        // --- 새로 정의된 비율 기준 기브어웨이 응모 자격 산출 ---
+        // 비율 기준 기브어웨이 응모 자격 산출
         let allowedUserSet = new Set();
         let maxAllowedCount = null;
         let ruleNoticeText = '';
@@ -238,14 +238,11 @@ async function closeEventPanel(channelId, messageId) {
         if (totalUsers === 0) {
             ruleNoticeText = '이벤트 참여자가 없어 기브어웨이가 진행되지 않습니다.';
         } else if (betrayCount / totalUsers >= 2 / 3) {
-            // 배신이 2/3 이상일 경우
             ruleNoticeText = `**[이벤트 파기]** 배신자 비율이 2/3 이상(\`${betrayPercent}%\`)에 달하여 **이벤트가 취소되었으며 기브어웨이는 진행되지 않습니다.**`;
         } else if (coopCount / totalUsers > 2 / 3) {
-            // 협력이 2/3 초과일 경우 (협력자 전원 응모 가능)
             allowedUserSet = new Set(coopUsers.map(u => u.id));
             ruleNoticeText = `**[협력 승리]** 협력 비율이 2/3를 초과(\`${coopPercent}%\`)하여 **협력한 모든 유저**가 기브어웨이에 응모할 수 있습니다!`;
         } else {
-            // 그 외 (절반 이하이거나 배신 비율이 우세한 경우 등 -> 배신자 승리)
             allowedUserSet = new Set(betrayUsers.map(u => u.id));
             ruleNoticeText = `**[배신 승리]** 협력 비율이 부족하여 **배신을 선택한 유저**만 기브어웨이에 응모할 수 있습니다.`;
         }
@@ -540,14 +537,16 @@ client.on('interactionCreate', async interaction => {
             return;
         }
 
-        // 기브어웨이 응모 버튼 클릭
+        // 기브어웨이 응모 버튼 클릭 (대용량 보완: deferReply 적용)
         if (interaction.customId === 'giveaway_enter') {
+            await interaction.deferReply({ ephemeral: true }).catch(() => {});
+
             const giveawayMsgId = interaction.message.id;
             const allowedUsers = giveawayAllowedUsers.get(giveawayMsgId);
             const participants = giveawayParticipants.get(giveawayMsgId);
 
             if (!participants || !allowedUsers) {
-                return interaction.reply({ content: '이미 마감되었거나 존재하지 않는 기브어웨이입니다.', ephemeral: true });
+                return interaction.editReply({ content: '이미 마감되었거나 존재하지 않는 기브어웨이입니다.' });
             }
 
             // 부계정 감지
@@ -555,63 +554,60 @@ client.on('interactionCreate', async interaction => {
             if (!isAdmin) {
                 const accountAgeDays = (Date.now() - interaction.user.createdTimestamp) / (1000 * 60 * 60 * 24);
                 if (accountAgeDays < MIN_ACCOUNT_AGE_DAYS) {
-                    return interaction.reply({
-                        content: `부계정 방지 시스템: 계정 생성 후 최소 ${MIN_ACCOUNT_AGE_DAYS}일이 지나야 응모할 수 있습니다.`,
-                        ephemeral: true
+                    return interaction.editReply({
+                        content: `부계정 방지 시스템: 계정 생성 후 최소 ${MIN_ACCOUNT_AGE_DAYS}일이 지나야 응모할 수 있습니다.`
                     });
                 }
             }
 
             // 이벤트 결과 조건 검증
             if (!allowedUsers.has(interaction.user.id)) {
-                return interaction.reply({ content: '❌ 이벤트 결과 조건에 따라 귀하는 이번 기브어웨이 응모 자격이 없습니다.', ephemeral: true });
+                return interaction.editReply({ content: '❌ 이벤트 결과 조건에 따라 귀하는 이번 기브어웨이 응모 자격이 없습니다.' });
             }
 
             if (participants.has(interaction.user.id)) {
-                return interaction.reply({ content: '이미 기브어웨이에 응모하셨습니다.', ephemeral: true });
+                return interaction.editReply({ content: '이미 기브어웨이에 응모하셨습니다.' });
             }
 
             // 참여자 등록
             participants.add(interaction.user.id);
 
-            return interaction.reply({
-                content: `🎉 기브어웨이 응모가 완료되었습니다! (현재 ${participants.size}번째 응모자)`,
-                ephemeral: true
+            return interaction.editReply({
+                content: `🎉 기브어웨이 응모가 완료되었습니다! (현재 ${participants.size}번째 응모자)`
             });
         }
 
-        // 로그 페이지 이동 버튼
+        // 로그 페이지 이동 버튼 (deferReply 적용)
         if (interaction.customId.startsWith('view_event_logs_')) {
+            await interaction.deferReply({ ephemeral: true }).catch(() => {});
+
             const parts = interaction.customId.split('_');
             const targetMsgId = parts[3];
             const page = parseInt(parts[4], 10) || 0;
 
             const result = buildLogPageEmbeds(targetMsgId, page);
             if (result.error) {
-                return interaction.reply({ content: `${result.error}`, ephemeral: true });
+                return interaction.editReply({ content: `${result.error}` });
             }
 
-            if (interaction.replied || interaction.deferred) {
-                await interaction.editReply({ embeds: result.embeds, components: result.components });
-            } else {
-                await interaction.reply({ embeds: result.embeds, components: result.components, ephemeral: true });
-            }
-            return;
+            return interaction.editReply({ embeds: result.embeds, components: result.components });
         }
 
-        // 협력 / 배신 버튼 클릭
+        // 협력 / 배신 버튼 클릭 (대규모 동시 요청 대비 deferReply 및 비동기 비블로킹 처리)
         if (interaction.customId === 'game_cooperate' || interaction.customId === 'game_betray') {
+            
+            // 1. 디스코드 3초 타임아웃 차단을 위해 최우선 지연 응답
+            await interaction.deferReply({ ephemeral: true }).catch(() => {});
 
             const messageId = interaction.message.id;
 
             if (closedEvents.has(messageId)) {
-                await interaction.reply({ content: '이미 종료된 이벤트입니다.', ephemeral: true });
-                return;
+                return interaction.editReply({ content: '이미 종료된 이벤트입니다.' });
             }
 
             const data = eventDataMap.get(messageId);
             if (!data) {
-                return interaction.reply({ content: '이벤트 정보를 찾을 수 없습니다.', ephemeral: true });
+                return interaction.editReply({ content: '이벤트 정보를 찾을 수 없습니다. (다시 시도해주세요)' });
             }
 
             const choicesMap = data.choices;
@@ -619,56 +615,58 @@ client.on('interactionCreate', async interaction => {
 
             if (choicesMap.has(userId)) {
                 const existingChoice = choicesMap.get(userId).choice === 'cooperate' ? '협력' : '배신';
-                await interaction.reply({
-                    content: `이미 선택을 완료하셨습니다. (선택 항목: **${existingChoice}**)`,
-                    ephemeral: true
+                return interaction.editReply({
+                    content: `이미 선택을 완료하셨습니다. (선택 항목: **${existingChoice}**)`
                 });
-                return;
             }
 
             const choiceType = interaction.customId === 'game_cooperate' ? 'cooperate' : 'betray';
             const choiceLabel = choiceType === 'cooperate' ? '협력' : '배신';
             const targetRoleId = choiceType === 'cooperate' ? data.coopRoleId : data.betrayRoleId;
 
-            try {
-                const member = await interaction.guild.members.fetch(userId);
-                if (targetRoleId && member) {
-                    await member.roles.add(targetRoleId);
-                }
-            } catch (err) {
-                console.error('역할 부여 실패:', err);
-            }
-
+            // 선택 항목 메모리에 기록 (빠른 응답 처리)
             choicesMap.set(userId, {
                 choice: choiceType,
                 user: interaction.user,
                 timestamp: Date.now()
             });
 
-            await interaction.reply({
-                content: `**${choiceLabel}** 항목을 선택하였으며, 관련 역할이 지급되었습니다.`,
-                ephemeral: true
+            // 즉시 사용자에게 완료 안내
+            await interaction.editReply({
+                content: `**${choiceLabel}** 항목을 선택하였으며, 관련 역할이 지급되고 있습니다.`
             });
 
-            try {
-                const targetLogChannel = await interaction.guild.channels.fetch(data.logChannelId);
-                if (targetLogChannel) {
-                    const choiceLogEmbed = new EmbedBuilder()
-                        .setColor(choiceType === 'cooperate' ? 0x57F287 : 0xED4245)
-                        .setTitle('[이벤트] 플레이어 선택 로그')
-                        .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
-                        .addFields(
-                            { name: '유저', value: `${interaction.user} (\`${interaction.user.tag}\`)`, inline: true },
-                            { name: '선택 항목', value: `**${choiceLabel}**`, inline: true },
-                            { name: '지급 역할', value: `<@&${targetRoleId}>`, inline: true }
-                        )
-                        .setTimestamp();
-
-                    await targetLogChannel.send({ embeds: [choiceLogEmbed] });
+            // 백그라운드 처리: 역할 지급 및 로그 채널 메시지 전송 (메인 응답 병목 방지)
+            (async () => {
+                try {
+                    const member = await interaction.guild.members.fetch(userId);
+                    if (targetRoleId && member) {
+                        await member.roles.add(targetRoleId);
+                    }
+                } catch (err) {
+                    console.error('역할 부여 실패:', err);
                 }
-            } catch (err) {
-                console.error('로그 채널 전송 실패:', err);
-            }
+
+                try {
+                    const targetLogChannel = await interaction.guild.channels.fetch(data.logChannelId);
+                    if (targetLogChannel) {
+                        const choiceLogEmbed = new EmbedBuilder()
+                            .setColor(choiceType === 'cooperate' ? 0x57F287 : 0xED4245)
+                            .setTitle('[이벤트] 플레이어 선택 로그')
+                            .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
+                            .addFields(
+                                { name: '유저', value: `${interaction.user} (\`${interaction.user.tag}\`)`, inline: true },
+                                { name: '선택 항목', value: `**${choiceLabel}**`, inline: true },
+                                { name: '지급 역할', value: `<@&${targetRoleId}>`, inline: true }
+                            )
+                            .setTimestamp();
+
+                        await targetLogChannel.send({ embeds: [choiceLogEmbed] });
+                    }
+                } catch (err) {
+                    console.error('로그 채널 전송 실패:', err);
+                }
+            })();
 
             return;
         }
