@@ -122,6 +122,52 @@ function fit(ctx, text, family, maxSize, minSize, maxWidth) {
     return { text: t + '…', size: minSize };
 }
  
+// 띄어쓰기 단위로 최대 2줄까지 줄바꿈 (넘치면 마지막 줄 말줄임표). ctx.font는 미리 설정해 둘 것.
+function wrapTwoLines(ctx, text, maxW) {
+    const words = String(text).split(' ').filter(Boolean);
+    const lines = [];
+    let cur = '';
+    let overflow = false;
+    const pushWord = (w) => {
+        const trial = cur ? `${cur} ${w}` : w;
+        if (ctx.measureText(trial).width <= maxW) {
+            cur = trial;
+            return;
+        }
+        if (cur) {
+            lines.push(cur);
+            cur = '';
+        }
+        // 단어 하나가 너무 길면 글자 단위로 쪼갬
+        for (const ch of Array.from(w)) {
+            if (ctx.measureText(cur + ch).width > maxW && cur) {
+                lines.push(cur);
+                cur = ch;
+            } else {
+                cur += ch;
+            }
+        }
+    };
+    for (const w of words) {
+        pushWord(w);
+        if (lines.length >= 2) {
+            overflow = true;
+            break;
+        }
+    }
+    if (lines.length < 2 && cur) lines.push(cur);
+    else if (lines.length >= 2) overflow = true;
+ 
+    const out = lines.slice(0, 2);
+    const consumed = out.join(' ');
+    if (overflow || consumed.replace(/ /g, '') !== String(text).replace(/ /g, '')) {
+        let l2 = out[out.length - 1] || '';
+        while (l2.length > 1 && ctx.measureText(l2 + '…').width > maxW) l2 = l2.slice(0, -1);
+        out[out.length - 1] = l2 + '…';
+    }
+    return out;
+}
+ 
 // ==================== 로블록스 / 이미지 ====================
 async function fetchBuffer(url, ms = 10000) {
     const res = await fetch(url, { signal: AbortSignal.timeout(ms) });
@@ -296,24 +342,26 @@ function drawSpaced(ctx, text, rightX, y, spacing) {
  
 // ==================== 카드 렌더링 ====================
 /**
+ * 세로형(정사각형에 가까운) 구매 감사 카드
  * o = {
  *   kind: 'robux' | 'ingame' | 'etc',
- *   buyerName, buyerAvatarBuf,      // 구매자 디스코드 닉네임 / 프사
- *   robloxAvatarBuf,                // 로블록스 아바타(상반신) - 큰 원형 자리
+ *   buyerName, buyerAvatarBuf,      // 구매자 디스코드 아이디 / 프사 (작은 배지)
+ *   robloxAvatarBuf,                // 로블록스 아바타(상반신) - 큰 원형
  *   item, count, price,
- *   sellerName, sellerAvatarBuf,
- *   guildName, guildIconBuf,
+ *   sellerName, sellerAvatarBuf
  * }
+ * (서버 이름/아이콘은 이제 임베드 푸터에 표시하므로 이미지에는 넣지 않아요)
  * 반환: PNG Buffer
  */
 async function renderPurchaseCard(o) {
     ensureFonts();
  
+    const PW = 1100;
+    const PH = 1160;
     const isRobux = o.kind === 'robux';
     const kindLabel = KIND_LABEL[o.kind] || '기타';
     const buyerName = clean(o.buyerName, '구매자');
     const sellerName = clean(o.sellerName, '-');
-    const guildName = clean(o.guildName, '');
     const summary = buildSummary(o.kind, o.item, o.count);
  
     const safeLoad = async (buf) => {
@@ -324,33 +372,33 @@ async function renderPurchaseCard(o) {
             return null;
         }
     };
-    const [rbxImg, buyerImg, sellerImg, guildImg] = await Promise.all([
+    const [rbxImg, buyerImg, sellerImg] = await Promise.all([
         safeLoad(o.robloxAvatarBuf),
         safeLoad(o.buyerAvatarBuf),
         safeLoad(o.sellerAvatarBuf),
-        safeLoad(o.guildIconBuf),
     ]);
  
-    const canvas = createCanvas(W, H);
+    const canvas = createCanvas(PW, PH);
     const ctx = canvas.getContext('2d');
     let g;
+    const cx = PW / 2;
  
     // ---------- 배경 ----------
-    rr(ctx, 0, 0, W, H, 48);
+    rr(ctx, 0, 0, PW, PH, 56);
     ctx.save();
     ctx.clip();
-    g = ctx.createLinearGradient(0, 0, 0, H);
+    g = ctx.createLinearGradient(0, 0, 0, PH);
     g.addColorStop(0, '#100e13');
     g.addColorStop(1, '#0a090c');
     ctx.fillStyle = g;
-    ctx.fillRect(0, 0, W, H);
-    glow(ctx, W - 160, 40, 560, 'rgba(255,143,181,0.14)');
-    glow(ctx, 60, H - 20, 460, 'rgba(255,143,181,0.07)');
+    ctx.fillRect(0, 0, PW, PH);
+    glow(ctx, PW - 100, 40, 560, 'rgba(255,143,181,0.14)');
+    glow(ctx, 40, PH - 20, 480, 'rgba(255,143,181,0.08)');
+    glow(ctx, cx, 300, 380, 'rgba(255,143,181,0.12)');
     ctx.restore();
  
-    // 테두리
-    rr(ctx, 20, 20, W - 40, H - 40, 38);
-    g = ctx.createLinearGradient(W, 0, 0, H);
+    rr(ctx, 20, 20, PW - 40, PH - 40, 44);
+    g = ctx.createLinearGradient(PW, 0, 0, PH);
     g.addColorStop(0, 'rgba(255,168,196,0.85)');
     g.addColorStop(0.5, 'rgba(255,168,196,0.25)');
     g.addColorStop(1, 'rgba(255,168,196,0.12)');
@@ -358,10 +406,33 @@ async function renderPurchaseCard(o) {
     ctx.lineWidth = 2;
     ctx.stroke();
  
-    // ---------- 왼쪽: 로블록스 아바타 (원형) ----------
-    const cx = 190;
-    const cy = 178;
-    const R = 106;
+    // ---------- 상단: 종류 태그 + 지급 일시 ----------
+    ctx.font = '22px NSKB';
+    const pillLabel = `${kindLabel} 구매`;
+    const pillW = ctx.measureText(pillLabel).width + 40;
+    rr(ctx, 60, 58, pillW, 38, 19);
+    ctx.fillStyle = 'rgba(255,143,181,0.14)';
+    ctx.fill();
+    setStroke(ctx, 'rgba(255,143,181,0.55)', 1.5);
+    ctx.stroke();
+    ctx.fillStyle = PINK;
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    ctx.fillText(pillLabel, 80, 78);
+ 
+    ctx.font = '26px NSKB';
+    const dateStr = kstNowString();
+    const dW = ctx.measureText(dateStr).width;
+    ctx.fillStyle = '#e9e3ea';
+    ctx.textAlign = 'right';
+    ctx.fillText(dateStr, PW - 60, 78);
+    iconCalendar(ctx, PW - 60 - dW - 32, 80);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+ 
+    // ---------- 로블록스 아바타 (큰 원형) ----------
+    const cy = 300;
+    const R = 140;
  
     g = ctx.createLinearGradient(cx - R, cy - R, cx + R, cy + R);
     g.addColorStop(0, '#4a2535');
@@ -375,22 +446,21 @@ async function renderPurchaseCard(o) {
     if (rbxImg) ctx.drawImage(rbxImg, cx - R, cy - R, R * 2, R * 2);
     ctx.restore();
  
-    // 핑크 링
     ctx.beginPath();
-    ctx.arc(cx, cy, R + 10, 0, Math.PI * 2);
+    ctx.arc(cx, cy, R + 12, 0, Math.PI * 2);
     g = ctx.createLinearGradient(cx - R, cy - R, cx + R, cy + R);
     g.addColorStop(0, '#ffc0d6');
     g.addColorStop(1, '#ff8fb5');
     ctx.strokeStyle = g;
-    ctx.lineWidth = 4;
+    ctx.lineWidth = 5;
     ctx.stroke();
  
     // 구매자 디스코드 프사 배지
-    const bx = cx + 80;
-    const by = cy + 82;
-    const br = 30;
+    const bx = cx + 106;
+    const by = cy + 110;
+    const br = 38;
     ctx.beginPath();
-    ctx.arc(bx, by, br + 8, 0, Math.PI * 2);
+    ctx.arc(bx, by, br + 9, 0, Math.PI * 2);
     ctx.fillStyle = '#0d0b0f';
     ctx.fill();
     drawCircleImage(ctx, buyerImg, bx, by, br);
@@ -400,100 +470,52 @@ async function renderPurchaseCard(o) {
     ctx.lineWidth = 3;
     ctx.stroke();
  
-    // ---------- 중앙: 텍스트 ----------
-    const x0 = 360;
+    // ---------- 이름 / 문구 (가운데 정렬) ----------
+    ctx.textAlign = 'center';
  
-    // 종류 알약
-    ctx.font = '22px NSKB';
-    const pillLabel = `${kindLabel} 구매`;
-    const pillW = ctx.measureText(pillLabel).width + 40;
-    rr(ctx, x0, 58, pillW, 38, 19);
-    ctx.fillStyle = 'rgba(255,143,181,0.14)';
-    ctx.fill();
-    setStroke(ctx, 'rgba(255,143,181,0.55)', 1.5);
-    ctx.stroke();
-    ctx.fillStyle = PINK;
-    ctx.textBaseline = 'middle';
-    ctx.textAlign = 'left';
-    ctx.fillText(pillLabel, x0 + 20, 78);
-    ctx.textBaseline = 'alphabetic';
- 
-    // 구매자 닉네임 (큰 그라데이션 글씨)
-    // (너무 길면 닉네임만 줄이고 " 님"은 유지)
-    let nameFit = { text: `${buyerName} 님`, size: 68 };
-    {
-        const f = fit(ctx, `${buyerName} 님`, 'NSKB', 68, 36, 560);
-        if (f.text.endsWith('…')) {
-            ctx.font = '36px NSKB';
-            let n = buyerName;
-            while (n.length > 1 && ctx.measureText(`${n}… 님`).width > 560) n = n.slice(0, -1);
-            nameFit = { text: `${n}… 님`, size: 36 };
-        } else {
-            nameFit = f;
-        }
+    // 구매자 디스코드 아이디 (큰 그라데이션 글씨, 너무 길면 이름만 줄이고 " 님"은 유지)
+    let nameFit = fit(ctx, `${buyerName} 님`, 'NSKB', 76, 40, 900);
+    if (nameFit.text.endsWith('…')) {
+        ctx.font = '40px NSKB';
+        let n = buyerName;
+        while (n.length > 1 && ctx.measureText(`${n}… 님`).width > 900) n = n.slice(0, -1);
+        nameFit = { text: `${n}… 님`, size: 40 };
     }
     ctx.font = `${nameFit.size}px NSKB`;
     const nameW = ctx.measureText(nameFit.text).width;
-    g = ctx.createLinearGradient(x0, 0, x0 + nameW, 0);
+    g = ctx.createLinearGradient(cx - nameW / 2, 0, cx + nameW / 2, 0);
     g.addColorStop(0, '#ffffff');
     g.addColorStop(1, '#ffbfd6');
     ctx.fillStyle = g;
-    ctx.fillText(nameFit.text, x0, 172);
+    ctx.fillText(nameFit.text, cx, 540);
  
-    // 서브 문구
-    ctx.font = '32px NSK';
+    ctx.font = '34px NSK';
     ctx.fillStyle = MUTED;
-    ctx.fillText('구매 감사합니다!', x0, 218);
+    ctx.fillText('구매 감사합니다!', cx, 594);
  
-    // 구매 요약 (핑크 강조)
-    iconCoin(ctx, x0 + 15, 250, 14);
-    const sumFit = fit(ctx, `${summary} 구매`, 'NSKB', 34, 20, 540);
+    // 구매 요약 (코인 아이콘 + 핑크 강조)
+    const sumFit = fit(ctx, `${summary} 구매`, 'NSKB', 42, 24, 820);
     ctx.font = `${sumFit.size}px NSKB`;
+    const sumW = ctx.measureText(sumFit.text).width;
+    const totalW = 36 + 14 + sumW;
+    const sx0 = cx - totalW / 2;
+    iconCoin(ctx, sx0 + 17, 640, 16);
+    ctx.textAlign = 'left';
     ctx.fillStyle = PINK;
-    ctx.fillText(sumFit.text, x0 + 42, 262);
+    ctx.fillText(sumFit.text, sx0 + 50, 654);
  
-    // ---------- 우측 상단: 서버 정보 + 지급 일시 ----------
-    const rightEdge = W - 60;
-    if (guildName || guildImg) {
-        let gw = 0;
-        let gText = '';
-        let gSize = 24;
-        if (guildName) {
-            const f = fit(ctx, guildName, 'NSKB', 24, 14, 300);
-            gText = f.text;
-            gSize = f.size;
-            ctx.font = `${gSize}px NSKB`;
-            gw = ctx.measureText(gText).width;
-        }
-        ctx.textBaseline = 'middle';
-        if (gText) {
-            ctx.fillStyle = '#e9e3ea';
-            ctx.textAlign = 'right';
-            ctx.fillText(gText, rightEdge, 78);
-        }
-        if (guildImg) {
-            const ix = rightEdge - gw - (gText ? 14 : 0) - 20;
-            drawCircleImage(ctx, guildImg, ix, 78, 20);
-        }
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'alphabetic';
-    }
+    // 구분선
+    setStroke(ctx, 'rgba(255,255,255,0.08)', 1.5);
+    ctx.beginPath();
+    ctx.moveTo(60, 704);
+    ctx.lineTo(PW - 60, 704);
+    ctx.stroke();
  
-    iconCalendar(ctx, 1030, 168);
-    ctx.font = '24px NSK';
-    ctx.fillStyle = MUTED;
-    ctx.fillText('지급 일시', 1074, 158);
-    const dateFit = fit(ctx, kstNowString(), 'NSKB', 32, 20, rightEdge - 1074);
-    ctx.font = `${dateFit.size}px NSKB`;
-    ctx.fillStyle = '#ffffff';
-    ctx.fillText(dateFit.text, 1074, 204);
- 
-    // ---------- 유리 카드 4개 ----------
-    const cardsY = 336;
-    const cardH = 215;
+    // ---------- 유리 카드 4개 (2x2) ----------
     const gap = 24;
-    const margin = 60;
-    const cw = (W - margin * 2 - gap * 3) / 4;
+    const cw = (PW - 120 - gap) / 2;
+    const ch = 176;
+    const startY = 736;
  
     const cards = [
         { icon: iconBag, label: '구매 상품', value: isRobux ? '로벅스' : clean(o.item, '-') },
@@ -503,98 +525,58 @@ async function renderPurchaseCard(o) {
     ];
  
     cards.forEach((c, i) => {
-        const x = margin + i * (cw + gap);
-        const y = cardsY;
+        const x = 60 + (i % 2) * (cw + gap);
+        const y = startY + Math.floor(i / 2) * (ch + gap);
  
-        rr(ctx, x, y, cw, cardH, 28);
+        rr(ctx, x, y, cw, ch, 28);
         ctx.fillStyle = 'rgba(255,255,255,0.035)';
         ctx.fill();
- 
         ctx.save();
-        rr(ctx, x, y, cw, cardH, 28);
+        rr(ctx, x, y, cw, ch, 28);
         ctx.clip();
-        glow(ctx, x + cw, y + cardH, 200, 'rgba(255,143,181,0.16)');
+        glow(ctx, x + cw, y + ch, 200, 'rgba(255,143,181,0.16)');
         ctx.restore();
- 
-        rr(ctx, x, y, cw, cardH, 28);
+        rr(ctx, x, y, cw, ch, 28);
         setStroke(ctx, 'rgba(255,168,196,0.24)', 1.5);
         ctx.stroke();
  
-        c.icon(ctx, x + 52, y + 58);
+        c.icon(ctx, x + 52, y + 46);
         ctx.font = '28px NSK';
         ctx.fillStyle = '#d9d2db';
-        ctx.fillText(c.label, x + 98, y + 68);
+        ctx.fillText(c.label, x + 98, y + 56);
  
         setStroke(ctx, 'rgba(255,255,255,0.08)', 1.5);
         ctx.beginPath();
-        ctx.moveTo(x + 36, y + 102);
-        ctx.lineTo(x + cw - 36, y + 102);
+        ctx.moveTo(x + 36, y + 78);
+        ctx.lineTo(x + cw - 36, y + 78);
         ctx.stroke();
  
         if (c.avatar) {
-            drawCircleImage(ctx, sellerImg, x + 36 + 26, y + 158, 26);
+            drawCircleImage(ctx, sellerImg, x + 36 + 28, y + 126, 28);
             ctx.beginPath();
-            ctx.arc(x + 36 + 26, y + 158, 27, 0, Math.PI * 2);
+            ctx.arc(x + 36 + 28, y + 126, 29, 0, Math.PI * 2);
             setStroke(ctx, 'rgba(255,143,181,0.7)', 2);
             ctx.stroke();
-            const vf = fit(ctx, c.value, 'NSKB', 40, 20, cw - 36 - 70 - 30);
+            const vf = fit(ctx, c.value, 'NSKB', 42, 22, cw - 36 - 76 - 30);
             ctx.font = `${vf.size}px NSKB`;
             ctx.fillStyle = '#ffffff';
-            ctx.fillText(vf.text, x + 36 + 66, y + 158 + vf.size * 0.35);
+            ctx.fillText(vf.text, x + 36 + 74, y + 126 + vf.size * 0.35);
         } else {
             const maxW = cw - 72;
             const vf = fit(ctx, c.value, 'NSKB', 46, 30, maxW);
             ctx.fillStyle = '#ffffff';
             if (!vf.text.endsWith('…') || vf.text === c.value) {
                 ctx.font = `${vf.size}px NSKB`;
-                ctx.fillText(vf.text, x + 36, y + 168);
+                ctx.fillText(vf.text, x + 36, y + 142);
             } else {
-                // 긴 상품명은 2줄로 나눠서 표시 (2번째 줄이 넘치면 말줄임표)
+                // 긴 상품명은 띄어쓰기 기준 2줄로 (넘치면 말줄임표)
                 ctx.font = '30px NSKB';
-                const chars = Array.from(c.value);
-                const lines = [];
-                let cur = '';
-                for (const ch of chars) {
-                    if (ctx.measureText(cur + ch).width > maxW && cur) {
-                        lines.push(cur);
-                        cur = ch;
-                        if (lines.length === 2) break;
-                    } else {
-                        cur += ch;
-                    }
-                }
-                if (lines.length < 2) lines.push(cur);
-                if (lines.length === 2 && chars.join('') !== lines.join('') ) {
-                    let l2 = lines[1];
-                    while (l2.length > 1 && ctx.measureText(l2 + '…').width > maxW) l2 = l2.slice(0, -1);
-                    lines[1] = l2 + '…';
-                }
-                ctx.fillText(lines[0], x + 36, y + 148);
-                if (lines[1]) ctx.fillText(lines[1], x + 36, y + 188);
+                const lines = wrapTwoLines(ctx, c.value, maxW);
+                ctx.fillText(lines[0], x + 36, y + 118);
+                if (lines[1]) ctx.fillText(lines[1], x + 36, y + 156);
             }
         }
     });
- 
-    // ---------- 푸터 ----------
-    const fy = H - 66;
-    iconInfo(ctx, 84, fy);
-    ctx.font = '24px NSK';
-    ctx.fillStyle = MUTED;
-    const footerText = '구매 후 후기 작성은 필수입니다.';
-    ctx.fillText(footerText, 114, fy + 8);
-    const footerW = ctx.measureText(footerText).width;
- 
-    let rightTextW = 0;
-    if (guildName) {
-        ctx.font = '18px NSK';
-        ctx.fillStyle = 'rgba(255,255,255,0.28)';
-        rightTextW = drawSpaced(ctx, guildName.toUpperCase(), W - 60, fy + 6, 5);
-    }
-    setStroke(ctx, 'rgba(255,168,196,0.25)', 1.5);
-    ctx.beginPath();
-    ctx.moveTo(114 + footerW + 32, fy);
-    ctx.lineTo(W - 60 - rightTextW - 32, fy);
-    ctx.stroke();
  
     return canvas.toBuffer('image/png');
 }
