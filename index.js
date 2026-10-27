@@ -989,9 +989,10 @@ client.on('interactionCreate', async interaction => {
  
             const cardEmbed = new EmbedBuilder()
                 .setColor(LIGHT_PINK_COLOR)
-                .setTitle(`${buyer.username}님, ${summary} 구매 감사합니다 .ᐟ.ᐟ`.slice(0, 256))
+                .setDescription(`## ${buyer.username}님, ${summary} 구매 감사합니다 .ᐟ.ᐟ`.slice(0, 4000))
                 .setImage('attachment://purchase.png')
-                .setFooter(guildIcon ? { text: shopName, iconURL: guildIcon } : { text: shopName });
+                .setFooter(guildIcon ? { text: shopName, iconURL: guildIcon } : { text: shopName })
+                .setTimestamp();
  
             await logChannel.send({
                 content: `${buyer}`,
