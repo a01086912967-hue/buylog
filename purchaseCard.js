@@ -357,7 +357,7 @@ async function renderPurchaseCard(o) {
     ensureFonts();
  
     const PW = 1100;
-    const PH = 1236;
+    const PH = 1160;
     const isRobux = o.kind === 'robux';
     const kindLabel = KIND_LABEL[o.kind] || '기타';
     const buyerName = clean(o.buyerName, '구매자');
@@ -420,6 +420,14 @@ async function renderPurchaseCard(o) {
     ctx.textAlign = 'left';
     ctx.fillText(pillLabel, 80, 78);
  
+    ctx.textAlign = 'left';
+    ctx.font = '26px NSKB';
+    const dateStr = kstNowString();
+    const dW = ctx.measureText(dateStr).width;
+    ctx.fillStyle = '#e9e3ea';
+    ctx.textAlign = 'right';
+    ctx.fillText(dateStr, PW - 60, 78);
+    iconCalendar(ctx, PW - 60 - dW - 32, 80);
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
  
@@ -570,18 +578,6 @@ async function renderPurchaseCard(o) {
             }
         }
     });
- 
-    // ---------- 하단: 지급 일시 ----------
-    const dateStr = kstNowString();
-    ctx.font = '28px NSKB';
-    const dW = ctx.measureText(dateStr).width;
-    const dx0 = cx - (dW + 44) / 2;
-    iconCalendar(ctx, dx0 + 14, 1176);
-    ctx.fillStyle = '#cfc8d1';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(dateStr, dx0 + 44, 1176);
-    ctx.textBaseline = 'alphabetic';
  
     return canvas.toBuffer('image/png');
 }
