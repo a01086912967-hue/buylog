@@ -953,13 +953,13 @@ client.on('interactionCreate', async interaction => {
  
             cardBuffer = await renderPurchaseCard({
                 kind,
-                buyerName: buyerMember ? buyerMember.displayName : (buyer.globalName || buyer.username),
+                buyerName: buyer.username, // 서버 닉네임이 아닌 디스코드 아이디
                 buyerAvatarBuf,
                 robloxAvatarBuf,
                 item,
                 count,
                 price,
-                sellerName: sellerMember ? sellerMember.displayName : (seller.globalName || seller.username),
+                sellerName: seller.username, // 서버 닉네임이 아닌 디스코드 아이디
                 sellerAvatarBuf,
                 guildName: interaction.guild.name,
                 guildIconBuf
