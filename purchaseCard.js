@@ -456,20 +456,22 @@ async function renderPurchaseCard(o) {
     ctx.lineWidth = 5;
     ctx.stroke();
  
-    // 구매자 디스코드 프사 배지
-    const bx = cx + 106;
-    const by = cy + 110;
-    const br = 38;
-    ctx.beginPath();
-    ctx.arc(bx, by, br + 9, 0, Math.PI * 2);
-    ctx.fillStyle = '#0d0b0f';
-    ctx.fill();
-    drawCircleImage(ctx, buyerImg, bx, by, br);
-    ctx.beginPath();
-    ctx.arc(bx, by, br + 1, 0, Math.PI * 2);
-    ctx.strokeStyle = PINK_STRONG;
-    ctx.lineWidth = 3;
-    ctx.stroke();
+    // 구매자 디스코드 프사 배지 (로블록스 없이 디스코드 프사만 쓸 때는 생략)
+    if (!o.hideBadge) {
+        const bx = cx + 106;
+        const by = cy + 110;
+        const br = 38;
+        ctx.beginPath();
+        ctx.arc(bx, by, br + 9, 0, Math.PI * 2);
+        ctx.fillStyle = '#0d0b0f';
+        ctx.fill();
+        drawCircleImage(ctx, buyerImg, bx, by, br);
+        ctx.beginPath();
+        ctx.arc(bx, by, br + 1, 0, Math.PI * 2);
+        ctx.strokeStyle = PINK_STRONG;
+        ctx.lineWidth = 3;
+        ctx.stroke();
+    }
  
     // ---------- 이름 / 문구 (가운데 정렬) ----------
     ctx.textAlign = 'center';
@@ -793,4 +795,3 @@ module.exports = {
     fetchRobloxAvatar,
     fetchBuffer,
 };
- 
