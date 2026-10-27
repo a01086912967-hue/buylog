@@ -438,7 +438,7 @@ client.once('ready', async () => {
         .addStringOption(option => option.setName('상품').setDescription('구매한 상품명 (로벅스는 "로벅스"라고 입력)').setRequired(true))
         .addStringOption(option => option.setName('수량').setDescription('구매한 수량 (로벅스는 로벅스 수량)').setRequired(true))
         .addStringOption(option => option.setName('금액').setDescription('사용된 금액').setRequired(true))
-        .addStringOption(option => option.setName('로블아이디').setDescription('구매자의 로블록스 아이디 (아바타 표시용)').setRequired(true))
+        .addStringOption(option => option.setName('로블아이디').setDescription('구매자의 로블록스 아이디 (없으면 X 입력 → 디스코드 프사만 표시)').setRequired(true))
         .addUserOption(option => option.setName('판매자').setDescription('해당 관리 판매자').setRequired(false));
  
     const panelCommand = new SlashCommandBuilder()
@@ -909,7 +909,8 @@ client.on('interactionCreate', async interaction => {
         const seller = interaction.options.getUser('판매자') || interaction.user;
  
         // 1) 로블록스 아이디 확인 (아바타 필수 → 없는 아이디면 아무것도 처리하지 않음)
-        const roblox = await lookupRobloxUser(robloxInput);
+        const skipRoblox = robloxInput.toLowerCase() === 'x'; // X 입력 시 로블록스 없이 디스코드 프사만
+        const roblox = skipRoblox ? { status: 'skip' } : await lookupRobloxUser(robloxInput);
         if (roblox.status === 'notfound') {
             return interaction.editReply({
                 content: `❌ 로블록스 아이디 \`${robloxInput}\` 을(를) 찾을 수 없어요. 철자를 확인하고 다시 입력해 주세요. (아무것도 처리되지 않았어요)`
@@ -961,7 +962,7 @@ client.on('interactionCreate', async interaction => {
             }
             if (!robloxAvatarBuf) {
                 robloxAvatarBuf = buyerAvatarBuf; // 로블록스 서버 문제 시 디스코드 프사로 대체
-                warn = '⚠️ 로블록스 아바타를 불러오지 못해 디스코드 프사로 대체했어요. (로블록스 서버 응답 문제일 수 있어요)';
+                if (!skipRoblox) warn = '⚠️ 로블록스 아바타를 불러오지 못해 디스코드 프사로 대체했어요. (로블록스 서버 응답 문제일 수 있어요)';
             }
  
             cardBuffer = await renderPurchaseCard({
@@ -969,6 +970,7 @@ client.on('interactionCreate', async interaction => {
                 buyerName: buyer.username, // 서버 닉네임이 아닌 디스코드 아이디
                 buyerAvatarBuf,
                 robloxAvatarBuf,
+                hideBadge: skipRoblox,
                 item,
                 count,
                 price,
@@ -987,9 +989,14 @@ client.on('interactionCreate', async interaction => {
             const shopName = (SHOP_NAME_OVERRIDE || interaction.guild.name).toUpperCase();
             const guildIcon = interaction.guild.iconURL({ extension: 'png', size: 64 });
  
+            // 디스코드 아이디에 로블록스 프로필 링크 연결 (X 입력 시 링크 없이 아이디만)
+            const titleName = roblox.status === 'ok'
+                ? `[${buyer.username}](https://www.roblox.com/users/${roblox.id}/profile)`
+                : buyer.username;
+ 
             const cardEmbed = new EmbedBuilder()
                 .setColor(LIGHT_PINK_COLOR)
-                .setDescription(`## ${buyer.username}님, ${summary} 구매 감사합니다 .ᐟ.ᐟ`.slice(0, 4000))
+                .setDescription(`## ${titleName}님 ${summary} 구매 감사합니다 .ᐟ.ᐟ`.slice(0, 4000))
                 .setImage('attachment://purchase.png')
                 .setFooter(guildIcon ? { text: shopName, iconURL: guildIcon } : { text: shopName })
                 .setTimestamp();
