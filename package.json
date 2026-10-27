@@ -1,11 +1,16 @@
 {
-  "name": "discord-log-bot",
+  "name": "lilyway-bot",
   "version": "1.0.0",
+  "description": "Discord bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
-    "discord.js": "^14.14.1"
+    "@napi-rs/canvas": "^0.1.100",
+    "discord.js": "^14.19.0"
   }
 }
