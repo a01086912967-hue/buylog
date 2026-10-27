@@ -20,6 +20,7 @@ const {
 } = require('discord.js');
 const {
     renderPurchaseCard,
+    renderCalcCard,
     buildSummary,
     lookupRobloxUser,
     fetchRobloxAvatar,
@@ -58,6 +59,16 @@ const giveawayMaxParticipants = new Map();
 const giveawayParentEventMap = new Map();
  
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+ 
+// 서버 아이콘 이미지 (계산기 카드용, 실패 시 null)
+async function getGuildIconBuf(guild) {
+    try {
+        const url = guild && guild.iconURL({ extension: 'png', size: 128 });
+        return url ? await fetchBuffer(url) : null;
+    } catch (e) {
+        return null;
+    }
+}
  
 function parseDuration(str) {
     if (!str) return null;
@@ -1065,6 +1076,20 @@ client.on('messageCreate', async message => {
                 const rawPrice = (robux / rate) * 10000;
                 const finalPrice = Math.ceil(rawPrice / 100) * 100;
  
+                try {
+                    const cardBuf = await renderCalcCard({
+                        mode: 'price',
+                        rate,
+                        amountIn: robux,
+                        result: finalPrice,
+                        guildName: message.guild ? message.guild.name : '',
+                        guildIconBuf: await getGuildIconBuf(message.guild)
+                    });
+                    return message.channel.send({ files: [new AttachmentBuilder(cardBuf, { name: 'calc.png' })] });
+                } catch (e) {
+                    console.error('계산기 카드 생성 실패, 임베드로 대체:', e);
+                }
+ 
                 const embed = new EmbedBuilder()
                     .setColor(LIGHT_PINK_COLOR)
                     .setDescription(
@@ -1089,6 +1114,20 @@ client.on('messageCreate', async message => {
                 }
  
                 const totalRobux = Math.floor((money / 10000) * rate);
+ 
+                try {
+                    const cardBuf = await renderCalcCard({
+                        mode: 'robux',
+                        rate,
+                        amountIn: money,
+                        result: totalRobux,
+                        guildName: message.guild ? message.guild.name : '',
+                        guildIconBuf: await getGuildIconBuf(message.guild)
+                    });
+                    return message.channel.send({ files: [new AttachmentBuilder(cardBuf, { name: 'calc.png' })] });
+                } catch (e) {
+                    console.error('계산기 카드 생성 실패, 임베드로 대체:', e);
+                }
  
                 const embed = new EmbedBuilder()
                     .setColor(LIGHT_PINK_COLOR)
