@@ -599,7 +599,211 @@ async function renderPurchaseCard(o) {
     return canvas.toBuffer('image/png');
 }
  
+// ==================== 계산기 카드 ====================
+function fmtNum(n) {
+    return Number.isFinite(n) ? n.toLocaleString('en-US', { maximumFractionDigits: 2 }) : String(n);
+}
+ 
+/**
+ * o = {
+ *   mode: 'price'  -> $가격  (rate: 만 원당 로벅스, amountIn: 구매할 로벅스 수량, result: 계산된 원화 가격)
+ *         'robux'  -> $로벅스 (rate: 만 원당 로벅스, amountIn: 보낼 금액(원),     result: 계산된 로벅스 수량)
+ *   guildName, guildIconBuf
+ * }
+ * 반환: PNG Buffer
+ */
+async function renderCalcCard(o) {
+    ensureFonts();
+ 
+    const CW = 1200;
+    const CH = 566;
+    const isPrice = o.mode === 'price';
+    const guildName = clean(o.guildName, '');
+    const guildImg = o.guildIconBuf ? await loadImage(o.guildIconBuf).catch(() => null) : null;
+ 
+    const pillLabel = isPrice ? '로벅스 가격 계산' : '지급 로벅스 계산';
+    const title = isPrice ? '로벅스 가격 결과' : '지급 로벅스 결과';
+    const heroLabel = isPrice ? '계산된 로벅스 가격' : '계산된 로벅스 수량';
+    const heroValue = isPrice ? `${fmtNum(o.result)}원` : `${fmtNum(o.result)} R$`;
+    const sideCards = isPrice
+        ? [
+              ['만 원당 로벅스', fmtNum(o.rate)],
+              ['구매할 로벅스 수량', `${fmtNum(o.amountIn)} R$`],
+          ]
+        : [
+              ['만 원당 로벅스', fmtNum(o.rate)],
+              ['보낼 금액', `${fmtNum(o.amountIn)}원`],
+          ];
+    const formula = isPrice ? '100원 단위 올림' : '소수점 버림';
+ 
+    const canvas = createCanvas(CW, CH);
+    const ctx = canvas.getContext('2d');
+    let g;
+ 
+    // ---------- 배경 ----------
+    rr(ctx, 0, 0, CW, CH, 48);
+    ctx.save();
+    ctx.clip();
+    g = ctx.createLinearGradient(0, 0, 0, CH);
+    g.addColorStop(0, '#100e13');
+    g.addColorStop(1, '#0a090c');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, CW, CH);
+    glow(ctx, CW - 140, 30, 520, 'rgba(255,143,181,0.14)');
+    glow(ctx, 40, CH - 10, 420, 'rgba(255,143,181,0.07)');
+    ctx.restore();
+ 
+    rr(ctx, 20, 20, CW - 40, CH - 40, 38);
+    g = ctx.createLinearGradient(CW, 0, 0, CH);
+    g.addColorStop(0, 'rgba(255,168,196,0.85)');
+    g.addColorStop(0.5, 'rgba(255,168,196,0.25)');
+    g.addColorStop(1, 'rgba(255,168,196,0.12)');
+    ctx.strokeStyle = g;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+ 
+    // ---------- 상단 ----------
+    ctx.font = '22px NSKB';
+    const pillW = ctx.measureText(pillLabel).width + 40;
+    rr(ctx, 60, 56, pillW, 38, 19);
+    ctx.fillStyle = 'rgba(255,143,181,0.14)';
+    ctx.fill();
+    setStroke(ctx, 'rgba(255,143,181,0.55)', 1.5);
+    ctx.stroke();
+    ctx.fillStyle = PINK;
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    ctx.fillText(pillLabel, 80, 76);
+    ctx.textBaseline = 'alphabetic';
+ 
+    const rightEdge = CW - 60;
+    if (guildName || guildImg) {
+        let gw = 0;
+        let gText = '';
+        if (guildName) {
+            const f = fit(ctx, guildName, 'NSKB', 24, 14, 300);
+            gText = f.text;
+            ctx.font = `${f.size}px NSKB`;
+            gw = ctx.measureText(gText).width;
+        }
+        ctx.textBaseline = 'middle';
+        if (gText) {
+            ctx.fillStyle = '#e9e3ea';
+            ctx.textAlign = 'right';
+            ctx.fillText(gText, rightEdge, 76);
+        }
+        if (guildImg) {
+            drawCircleImage(ctx, guildImg, rightEdge - gw - (gText ? 14 : 0) - 20, 76, 20);
+        }
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'alphabetic';
+    }
+ 
+    // 타이틀 (그라데이션) + 서브
+    ctx.font = '62px NSKB';
+    const tW = ctx.measureText(title).width;
+    g = ctx.createLinearGradient(60, 0, 60 + tW, 0);
+    g.addColorStop(0, '#ffffff');
+    g.addColorStop(1, '#ffbfd6');
+    ctx.fillStyle = g;
+    ctx.fillText(title, 60, 174);
+ 
+    ctx.font = '28px NSK';
+    ctx.fillStyle = MUTED;
+    ctx.fillText(`만 원당 ${fmtNum(o.rate)} 로벅스 기준`, 60, 220);
+ 
+    // ---------- 메인 결과 카드 ----------
+    const hx = 60;
+    const hy = 256;
+    const hw = 650;
+    const hh = 214;
+ 
+    rr(ctx, hx, hy, hw, hh, 30);
+    ctx.fillStyle = 'rgba(255,255,255,0.04)';
+    ctx.fill();
+    ctx.save();
+    rr(ctx, hx, hy, hw, hh, 30);
+    ctx.clip();
+    glow(ctx, hx + hw, hy + hh, 320, 'rgba(255,143,181,0.24)');
+    ctx.restore();
+    rr(ctx, hx, hy, hw, hh, 30);
+    setStroke(ctx, 'rgba(255,168,196,0.45)', 1.8);
+    ctx.stroke();
+ 
+    iconCoin(ctx, hx + 52, hy + 52, 17);
+    ctx.font = '28px NSK';
+    ctx.fillStyle = '#d9d2db';
+    ctx.fillText(heroLabel, hx + 98, hy + 62);
+ 
+    setStroke(ctx, 'rgba(255,255,255,0.08)', 1.5);
+    ctx.beginPath();
+    ctx.moveTo(hx + 36, hy + 90);
+    ctx.lineTo(hx + hw - 36, hy + 90);
+    ctx.stroke();
+ 
+    const hv = fit(ctx, heroValue, 'NSKB', 96, 44, hw - 72);
+    ctx.font = `${hv.size}px NSKB`;
+    const hvW = ctx.measureText(hv.text).width;
+    g = ctx.createLinearGradient(hx + 36, 0, hx + 36 + hvW, 0);
+    g.addColorStop(0, '#ffd3e2');
+    g.addColorStop(1, '#ff8fb5');
+    ctx.fillStyle = g;
+    ctx.fillText(hv.text, hx + 36, hy + 176);
+ 
+    // ---------- 우측 입력값 카드 2개 ----------
+    const sx = 730;
+    const sw = CW - 60 - sx;
+    const sh = 97;
+    sideCards.forEach(([label, value], i) => {
+        const sy = hy + i * (sh + 20);
+        rr(ctx, sx, sy, sw, sh, 24);
+        ctx.fillStyle = 'rgba(255,255,255,0.035)';
+        ctx.fill();
+        ctx.save();
+        rr(ctx, sx, sy, sw, sh, 24);
+        ctx.clip();
+        glow(ctx, sx + sw, sy + sh, 170, 'rgba(255,143,181,0.14)');
+        ctx.restore();
+        rr(ctx, sx, sy, sw, sh, 24);
+        setStroke(ctx, 'rgba(255,168,196,0.24)', 1.5);
+        ctx.stroke();
+ 
+        ctx.font = '23px NSK';
+        ctx.fillStyle = MUTED;
+        ctx.fillText(label, sx + 32, sy + 36);
+ 
+        const f = fit(ctx, value, 'NSKB', 40, 22, sw - 64);
+        ctx.font = `${f.size}px NSKB`;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(f.text, sx + 32, sy + 78);
+    });
+ 
+    // ---------- 푸터 (작은 안내 문구만) ----------
+    const fy = CH - 52;
+    ctx.font = '18px NSK';
+    ctx.fillStyle = MUTED;
+    ctx.fillText(formula, 64, fy + 6);
+    const fW = ctx.measureText(formula).width;
+ 
+    let rW = 0;
+    if (guildName) {
+        ctx.font = '18px NSK';
+        ctx.fillStyle = 'rgba(255,255,255,0.28)';
+        rW = drawSpaced(ctx, guildName.toUpperCase(), CW - 60, fy + 6, 5);
+    }
+    if (64 + fW + 32 < CW - 60 - rW - 32) {
+        setStroke(ctx, 'rgba(255,168,196,0.25)', 1.5);
+        ctx.beginPath();
+        ctx.moveTo(64 + fW + 28, fy);
+        ctx.lineTo(CW - 60 - rW - 28, fy);
+        ctx.stroke();
+    }
+ 
+    return canvas.toBuffer('image/png');
+}
+ 
 module.exports = {
+    renderCalcCard,
     renderPurchaseCard,
     buildSummary,
     lookupRobloxUser,
