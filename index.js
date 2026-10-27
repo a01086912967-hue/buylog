@@ -26,6 +26,9 @@ const {
     fetchBuffer
 } = require('./purchaseCard');
  
+// TOKEN 또는 DISCORD_TOKEN 환경변수 모두 인식
+const BOT_TOKEN = (process.env.TOKEN || process.env.DISCORD_TOKEN || '').trim();
+ 
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -395,7 +398,7 @@ client.once('ready', async () => {
     console.log(`[릴리웨이] 봇이 성공적으로 실행되었습니다: ${client.user.tag}`);
  
     try {
-        const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
+        const rest = new REST({ version: '10' }).setToken(BOT_TOKEN);
         await rest.put(
             Routes.applicationCommands(client.user.id),
             { body: [] }
@@ -1106,8 +1109,12 @@ client.on('messageCreate', async message => {
 });
  
 // 로그인
-if (!process.env.TOKEN) {
+if (!BOT_TOKEN) {
+    const similar = Object.keys(process.env).filter(k => /token/i.test(k));
     console.error("오류: TOKEN이 설정되어 있지 않습니다. .env 파일이나 환경 변수를 확인해주세요.");
+    console.error(`감지된 토큰 관련 변수 이름: ${similar.length ? similar.map(k => `"${k}"`).join(', ') : '(없음)'}`);
+    console.error('Railway → 이 서비스의 Variables 탭에 TOKEN (또는 DISCORD_TOKEN) 이 있는지, 추가 후 Deploy 했는지 확인하세요.');
 } else {
-    client.login(process.env.TOKEN);
+    client.login(BOT_TOKEN);
 }
+ 
