@@ -41,6 +41,8 @@ const client = new Client({
  
 // 기본 설정
 const LOG_CHANNEL_ID = '1457384858065047663';
+// 구매로그 임베드 하단에 표시할 가게 이름 (비워두면 서버 이름을 대문자로 사용)
+const SHOP_NAME_OVERRIDE = '';
 const ROLE_ID = '1457383788236505299';
 const CALCULATOR_ROLE_ID = '1456747541348749342';
 const IMAGE_URL = 'https://i.imgur.com/jokl6LQ.gif';
@@ -981,8 +983,18 @@ client.on('interactionCreate', async interaction => {
  
         // 4) 구매 로그 전송
         if (cardBuffer) {
+            // 이미지를 임베드 안에 넣고, 아래에 작은 글씨로 "서버 프로필 + 가게 이름"만 표시
+            const shopName = (SHOP_NAME_OVERRIDE || interaction.guild.name).toUpperCase();
+            const guildIcon = interaction.guild.iconURL({ extension: 'png', size: 64 });
+ 
+            const cardEmbed = new EmbedBuilder()
+                .setColor(LIGHT_PINK_COLOR)
+                .setImage('attachment://purchase.png')
+                .setFooter(guildIcon ? { text: shopName, iconURL: guildIcon } : { text: shopName });
+ 
             await logChannel.send({
-                content: `${buyer}님, **${summary}** 구매 감사합니다!`,
+                content: `${buyer}`,
+                embeds: [cardEmbed],
                 files: [new AttachmentBuilder(cardBuffer, { name: 'purchase.png' })]
             });
         } else {
