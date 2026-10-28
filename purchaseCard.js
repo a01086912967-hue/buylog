@@ -8,9 +8,9 @@ const { createCanvas, loadImage, GlobalFonts } = require('@napi-rs/canvas');
  
 const W = 1500;
 const H = 650;
-const PINK = '#ffa8c4';
-const PINK_STRONG = '#ff8fb5';
-const MUTED = '#9a949e';
+const PINK = '#3d9bf5';
+const PINK_STRONG = '#4aa8ff';
+const MUTED = '#6a88aa';
  
 const KIND_LABEL = { robux: '로벅스', ingame: '인게임 상품', etc: '기타' };
  
@@ -228,7 +228,7 @@ function rr(ctx, x, y, w, h, r) {
 function glow(ctx, x, y, r, color) {
     const g = ctx.createRadialGradient(x, y, 0, x, y, r);
     g.addColorStop(0, color);
-    g.addColorStop(1, 'rgba(255,143,181,0)');
+    g.addColorStop(1, color.replace(/[\d.]+\)$/, '0)'));
     ctx.fillStyle = g;
     ctx.fillRect(x - r, y - r, r * 2, r * 2);
 }
@@ -241,7 +241,7 @@ function drawCircleImage(ctx, img, cx, cy, r) {
     if (img) {
         ctx.drawImage(img, cx - r, cy - r, r * 2, r * 2);
     } else {
-        ctx.fillStyle = '#3a1f2c';
+        ctx.fillStyle = '#cfe6ff';
         ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
     }
     ctx.restore();
@@ -340,6 +340,89 @@ function drawSpaced(ctx, text, rightX, y, spacing) {
     return total;
 }
  
+ 
+function cloud(ctx, x, y, w, a = 1) {
+    const h = w * 0.4;
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.shadowColor = 'rgba(100,165,230,0.35)';
+    ctx.shadowBlur = w * 0.07;
+    const g = ctx.createLinearGradient(0, y - h, 0, y);
+    g.addColorStop(0, '#ffffff');
+    g.addColorStop(1, '#e4f2ff');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    const puffs = [[-0.32, 0.30, 0.30], [-0.10, 0.50, 0.42], [0.16, 0.44, 0.38], [0.36, 0.28, 0.28]];
+    for (const [dx, dy, r] of puffs) {
+        ctx.moveTo(x + dx * w + r * h, y - dy * h);
+        ctx.arc(x + dx * w, y - dy * h, r * h, 0, Math.PI * 2);
+    }
+    ctx.moveTo(x - w * 0.34, y);
+    ctx.lineTo(x - w * 0.34, y - h * 0.3);
+    ctx.lineTo(x + w * 0.34, y - h * 0.3);
+    ctx.lineTo(x + w * 0.34, y);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+}
+function sparkle(ctx, x, y, r, color = '#ffe58a') {
+    ctx.save();
+    ctx.shadowColor = 'rgba(255,220,120,0.9)';
+    ctx.shadowBlur = r * 0.9;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(x, y - r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.quadraticCurveTo(x, y, x, y + r);
+    ctx.quadraticCurveTo(x, y, x - r, y);
+    ctx.quadraticCurveTo(x, y, x, y - r);
+    ctx.fill();
+    ctx.restore();
+}
+function drawSky(ctx, W, H, R, inset, innerR, kind) {
+    rr(ctx, 0, 0, W, H, R);
+    ctx.save();
+    ctx.clip();
+    let g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#a9d8ff');
+    g.addColorStop(0.5, '#cdeaff');
+    g.addColorStop(1, '#e9f6ff');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+    glow(ctx, W * 0.82, H * 0.08, W * 0.5, 'rgba(255,255,255,0.8)');
+    glow(ctx, W * 0.1, H * 0.9, W * 0.4, 'rgba(255,255,255,0.55)');
+    if (kind === 'portrait') {
+        cloud(ctx, 130, 520, 420, 0.95);
+        cloud(ctx, W - 110, 400, 380, 0.9);
+        cloud(ctx, 960, 140, 300, 0.7);
+        cloud(ctx, 200, H + 10, 620, 1);
+        cloud(ctx, W - 160, H + 20, 640, 1);
+        sparkle(ctx, 300, 250, 22);
+        sparkle(ctx, 810, 190, 16);
+        sparkle(ctx, 850, 520, 26);
+        sparkle(ctx, 170, 300, 14);
+    } else if (kind === 'calc') {
+        cloud(ctx, 1000, 110, 340, 0.75);
+        cloud(ctx, 180, H + 10, 560, 1);
+        cloud(ctx, W - 150, H + 20, 600, 1);
+        sparkle(ctx, 640, 150, 18);
+        sparkle(ctx, 1130, 250, 24);
+        sparkle(ctx, 560, 62, 14);
+    } else {
+        cloud(ctx, W * 0.86, H * 0.07, W * 0.28, 0.7);
+        cloud(ctx, W * 0.14, H + 10, W * 0.5, 1);
+        cloud(ctx, W * 0.86, H + 20, W * 0.52, 1);
+        sparkle(ctx, W * 0.52, H * 0.07, 16);
+        sparkle(ctx, W * 0.955, H * 0.3, 22);
+        sparkle(ctx, W * 0.04, H * 0.55, 14);
+    }
+    ctx.restore();
+    rr(ctx, inset, inset, W - inset * 2, H - inset * 2, innerR);
+    ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+}
+ 
 // ==================== 카드 렌더링 ====================
 /**
  * 세로형(정사각형에 가까운) 구매 감사 카드
@@ -384,36 +467,16 @@ async function renderPurchaseCard(o) {
     const cx = PW / 2;
  
     // ---------- 배경 ----------
-    rr(ctx, 0, 0, PW, PH, 56);
-    ctx.save();
-    ctx.clip();
-    g = ctx.createLinearGradient(0, 0, 0, PH);
-    g.addColorStop(0, '#100e13');
-    g.addColorStop(1, '#0a090c');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, PW, PH);
-    glow(ctx, PW - 100, 40, 560, 'rgba(255,143,181,0.14)');
-    glow(ctx, 40, PH - 20, 480, 'rgba(255,143,181,0.08)');
-    glow(ctx, cx, 300, 380, 'rgba(255,143,181,0.12)');
-    ctx.restore();
- 
-    rr(ctx, 20, 20, PW - 40, PH - 40, 44);
-    g = ctx.createLinearGradient(PW, 0, 0, PH);
-    g.addColorStop(0, 'rgba(255,168,196,0.85)');
-    g.addColorStop(0.5, 'rgba(255,168,196,0.25)');
-    g.addColorStop(1, 'rgba(255,168,196,0.12)');
-    ctx.strokeStyle = g;
-    ctx.lineWidth = 2;
-    ctx.stroke();
+    drawSky(ctx, PW, PH, 56, 20, 44, 'portrait');
  
     // ---------- 상단: 종류 태그 + 지급 일시 ----------
     ctx.font = '22px NSKB';
     const pillLabel = `${kindLabel} 구매`;
     const pillW = ctx.measureText(pillLabel).width + 40;
     rr(ctx, 60, 58, pillW, 38, 19);
-    ctx.fillStyle = 'rgba(255,143,181,0.14)';
+    ctx.fillStyle = 'rgba(74,168,255,0.14)';
     ctx.fill();
-    setStroke(ctx, 'rgba(255,143,181,0.55)', 1.5);
+    setStroke(ctx, 'rgba(74,168,255,0.55)', 1.5);
     ctx.stroke();
     ctx.fillStyle = PINK;
     ctx.textBaseline = 'middle';
@@ -424,7 +487,7 @@ async function renderPurchaseCard(o) {
     ctx.font = '26px NSKB';
     const dateStr = kstNowString();
     const dW = ctx.measureText(dateStr).width;
-    ctx.fillStyle = '#e9e3ea';
+    ctx.fillStyle = '#3d5f8a';
     ctx.textAlign = 'right';
     ctx.fillText(dateStr, PW - 60, 78);
     iconCalendar(ctx, PW - 60 - dW - 32, 80);
@@ -436,8 +499,8 @@ async function renderPurchaseCard(o) {
     const R = 140;
  
     g = ctx.createLinearGradient(cx - R, cy - R, cx + R, cy + R);
-    g.addColorStop(0, '#4a2535');
-    g.addColorStop(1, '#17111a');
+    g.addColorStop(0, '#e3f2ff');
+    g.addColorStop(1, '#a9d2f7');
     ctx.save();
     ctx.beginPath();
     ctx.arc(cx, cy, R, 0, Math.PI * 2);
@@ -450,8 +513,8 @@ async function renderPurchaseCard(o) {
     ctx.beginPath();
     ctx.arc(cx, cy, R + 12, 0, Math.PI * 2);
     g = ctx.createLinearGradient(cx - R, cy - R, cx + R, cy + R);
-    g.addColorStop(0, '#ffc0d6');
-    g.addColorStop(1, '#ff8fb5');
+    g.addColorStop(0, '#a8d6ff');
+    g.addColorStop(1, '#4aa8ff');
     ctx.strokeStyle = g;
     ctx.lineWidth = 5;
     ctx.stroke();
@@ -463,7 +526,7 @@ async function renderPurchaseCard(o) {
         const br = 38;
         ctx.beginPath();
         ctx.arc(bx, by, br + 9, 0, Math.PI * 2);
-        ctx.fillStyle = '#0d0b0f';
+        ctx.fillStyle = '#ffffff';
         ctx.fill();
         drawCircleImage(ctx, buyerImg, bx, by, br);
         ctx.beginPath();
@@ -487,8 +550,8 @@ async function renderPurchaseCard(o) {
     ctx.font = `${nameFit.size}px NSKB`;
     const nameW = ctx.measureText(nameFit.text).width;
     g = ctx.createLinearGradient(cx - nameW / 2, 0, cx + nameW / 2, 0);
-    g.addColorStop(0, '#ffffff');
-    g.addColorStop(1, '#ffbfd6');
+    g.addColorStop(0, '#1d3a66');
+    g.addColorStop(1, '#3d9bf5');
     ctx.fillStyle = g;
     ctx.fillText(nameFit.text, cx, 540);
  
@@ -508,7 +571,7 @@ async function renderPurchaseCard(o) {
     ctx.fillText(sumFit.text, sx0 + 50, 654);
  
     // 구분선
-    setStroke(ctx, 'rgba(255,255,255,0.08)', 1.5);
+    setStroke(ctx, 'rgba(70,130,210,0.18)', 1.5);
     ctx.beginPath();
     ctx.moveTo(60, 704);
     ctx.lineTo(PW - 60, 704);
@@ -532,23 +595,23 @@ async function renderPurchaseCard(o) {
         const y = startY + Math.floor(i / 2) * (ch + gap);
  
         rr(ctx, x, y, cw, ch, 28);
-        ctx.fillStyle = 'rgba(255,255,255,0.035)';
+        ctx.fillStyle = 'rgba(255,255,255,0.62)';
         ctx.fill();
         ctx.save();
         rr(ctx, x, y, cw, ch, 28);
         ctx.clip();
-        glow(ctx, x + cw, y + ch, 200, 'rgba(255,143,181,0.16)');
+        glow(ctx, x + cw, y + ch, 200, 'rgba(74,168,255,0.16)');
         ctx.restore();
         rr(ctx, x, y, cw, ch, 28);
-        setStroke(ctx, 'rgba(255,168,196,0.24)', 1.5);
+        setStroke(ctx, 'rgba(120,180,240,0.55)', 2);
         ctx.stroke();
  
         c.icon(ctx, x + 52, y + 46);
         ctx.font = '28px NSK';
-        ctx.fillStyle = '#d9d2db';
+        ctx.fillStyle = '#4d6a8c';
         ctx.fillText(c.label, x + 98, y + 56);
  
-        setStroke(ctx, 'rgba(255,255,255,0.08)', 1.5);
+        setStroke(ctx, 'rgba(70,130,210,0.18)', 1.5);
         ctx.beginPath();
         ctx.moveTo(x + 36, y + 78);
         ctx.lineTo(x + cw - 36, y + 78);
@@ -558,16 +621,16 @@ async function renderPurchaseCard(o) {
             drawCircleImage(ctx, sellerImg, x + 36 + 28, y + 126, 28);
             ctx.beginPath();
             ctx.arc(x + 36 + 28, y + 126, 29, 0, Math.PI * 2);
-            setStroke(ctx, 'rgba(255,143,181,0.7)', 2);
+            setStroke(ctx, 'rgba(74,168,255,0.7)', 2);
             ctx.stroke();
             const vf = fit(ctx, c.value, 'NSKB', 42, 22, cw - 36 - 76 - 30);
             ctx.font = `${vf.size}px NSKB`;
-            ctx.fillStyle = '#ffffff';
+            ctx.fillStyle = '#1d3a66';
             ctx.fillText(vf.text, x + 36 + 74, y + 126 + vf.size * 0.35);
         } else {
             const maxW = cw - 72;
             const vf = fit(ctx, c.value, 'NSKB', 46, 30, maxW);
-            ctx.fillStyle = '#ffffff';
+            ctx.fillStyle = '#1d3a66';
             if (!vf.text.endsWith('…') || vf.text === c.value) {
                 ctx.font = `${vf.size}px NSKB`;
                 ctx.fillText(vf.text, x + 36, y + 142);
@@ -626,34 +689,15 @@ async function renderCalcCard(o) {
     let g;
  
     // ---------- 배경 ----------
-    rr(ctx, 0, 0, CW, CH, 48);
-    ctx.save();
-    ctx.clip();
-    g = ctx.createLinearGradient(0, 0, 0, CH);
-    g.addColorStop(0, '#100e13');
-    g.addColorStop(1, '#0a090c');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, CW, CH);
-    glow(ctx, CW - 140, 30, 520, 'rgba(255,143,181,0.14)');
-    glow(ctx, 40, CH - 10, 420, 'rgba(255,143,181,0.07)');
-    ctx.restore();
- 
-    rr(ctx, 20, 20, CW - 40, CH - 40, 38);
-    g = ctx.createLinearGradient(CW, 0, 0, CH);
-    g.addColorStop(0, 'rgba(255,168,196,0.85)');
-    g.addColorStop(0.5, 'rgba(255,168,196,0.25)');
-    g.addColorStop(1, 'rgba(255,168,196,0.12)');
-    ctx.strokeStyle = g;
-    ctx.lineWidth = 2;
-    ctx.stroke();
+    drawSky(ctx, CW, CH, 48, 20, 38, 'calc');
  
     // ---------- 상단 ----------
     ctx.font = '22px NSKB';
     const pillW = ctx.measureText(pillLabel).width + 40;
     rr(ctx, 60, 56, pillW, 38, 19);
-    ctx.fillStyle = 'rgba(255,143,181,0.14)';
+    ctx.fillStyle = 'rgba(74,168,255,0.14)';
     ctx.fill();
-    setStroke(ctx, 'rgba(255,143,181,0.55)', 1.5);
+    setStroke(ctx, 'rgba(74,168,255,0.55)', 1.5);
     ctx.stroke();
     ctx.fillStyle = PINK;
     ctx.textBaseline = 'middle';
@@ -661,35 +705,12 @@ async function renderCalcCard(o) {
     ctx.fillText(pillLabel, 80, 76);
     ctx.textBaseline = 'alphabetic';
  
-    const rightEdge = CW - 60;
-    if (guildName || guildImg) {
-        let gw = 0;
-        let gText = '';
-        if (guildName) {
-            const f = fit(ctx, guildName, 'NSKB', 24, 14, 300);
-            gText = f.text;
-            ctx.font = `${f.size}px NSKB`;
-            gw = ctx.measureText(gText).width;
-        }
-        ctx.textBaseline = 'middle';
-        if (gText) {
-            ctx.fillStyle = '#e9e3ea';
-            ctx.textAlign = 'right';
-            ctx.fillText(gText, rightEdge, 76);
-        }
-        if (guildImg) {
-            drawCircleImage(ctx, guildImg, rightEdge - gw - (gText ? 14 : 0) - 20, 76, 20);
-        }
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'alphabetic';
-    }
- 
     // 타이틀 (그라데이션) + 서브
     ctx.font = '62px NSKB';
     const tW = ctx.measureText(title).width;
     g = ctx.createLinearGradient(60, 0, 60 + tW, 0);
-    g.addColorStop(0, '#ffffff');
-    g.addColorStop(1, '#ffbfd6');
+    g.addColorStop(0, '#1d3a66');
+    g.addColorStop(1, '#3d9bf5');
     ctx.fillStyle = g;
     ctx.fillText(title, 60, 174);
  
@@ -704,23 +725,23 @@ async function renderCalcCard(o) {
     const hh = 214;
  
     rr(ctx, hx, hy, hw, hh, 30);
-    ctx.fillStyle = 'rgba(255,255,255,0.04)';
+    ctx.fillStyle = 'rgba(255,255,255,0.68)';
     ctx.fill();
     ctx.save();
     rr(ctx, hx, hy, hw, hh, 30);
     ctx.clip();
-    glow(ctx, hx + hw, hy + hh, 320, 'rgba(255,143,181,0.24)');
+    glow(ctx, hx + hw, hy + hh, 320, 'rgba(74,168,255,0.24)');
     ctx.restore();
     rr(ctx, hx, hy, hw, hh, 30);
-    setStroke(ctx, 'rgba(255,168,196,0.45)', 1.8);
+    setStroke(ctx, 'rgba(120,190,255,0.45)', 1.8);
     ctx.stroke();
  
     iconCoin(ctx, hx + 52, hy + 52, 17);
     ctx.font = '28px NSK';
-    ctx.fillStyle = '#d9d2db';
+    ctx.fillStyle = '#4d6a8c';
     ctx.fillText(heroLabel, hx + 98, hy + 62);
  
-    setStroke(ctx, 'rgba(255,255,255,0.08)', 1.5);
+    setStroke(ctx, 'rgba(70,130,210,0.18)', 1.5);
     ctx.beginPath();
     ctx.moveTo(hx + 36, hy + 90);
     ctx.lineTo(hx + hw - 36, hy + 90);
@@ -730,8 +751,8 @@ async function renderCalcCard(o) {
     ctx.font = `${hv.size}px NSKB`;
     const hvW = ctx.measureText(hv.text).width;
     g = ctx.createLinearGradient(hx + 36, 0, hx + 36 + hvW, 0);
-    g.addColorStop(0, '#ffd3e2');
-    g.addColorStop(1, '#ff8fb5');
+    g.addColorStop(0, '#7cc4ff');
+    g.addColorStop(1, '#2f86e8');
     ctx.fillStyle = g;
     ctx.fillText(hv.text, hx + 36, hy + 176);
  
@@ -742,15 +763,15 @@ async function renderCalcCard(o) {
     sideCards.forEach(([label, value], i) => {
         const sy = hy + i * (sh + 20);
         rr(ctx, sx, sy, sw, sh, 24);
-        ctx.fillStyle = 'rgba(255,255,255,0.035)';
+        ctx.fillStyle = 'rgba(255,255,255,0.62)';
         ctx.fill();
         ctx.save();
         rr(ctx, sx, sy, sw, sh, 24);
         ctx.clip();
-        glow(ctx, sx + sw, sy + sh, 170, 'rgba(255,143,181,0.14)');
+        glow(ctx, sx + sw, sy + sh, 170, 'rgba(74,168,255,0.14)');
         ctx.restore();
         rr(ctx, sx, sy, sw, sh, 24);
-        setStroke(ctx, 'rgba(255,168,196,0.24)', 1.5);
+        setStroke(ctx, 'rgba(120,180,240,0.55)', 2);
         ctx.stroke();
  
         ctx.font = '23px NSK';
@@ -759,7 +780,7 @@ async function renderCalcCard(o) {
  
         const f = fit(ctx, value, 'NSKB', 40, 22, sw - 64);
         ctx.font = `${f.size}px NSKB`;
-        ctx.fillStyle = '#ffffff';
+        ctx.fillStyle = '#1d3a66';
         ctx.fillText(f.text, sx + 32, sy + 78);
     });
  
@@ -773,11 +794,11 @@ async function renderCalcCard(o) {
     let rW = 0;
     if (guildName) {
         ctx.font = '18px NSK';
-        ctx.fillStyle = 'rgba(255,255,255,0.28)';
+        ctx.fillStyle = 'rgba(40,90,160,0.5)';
         rW = drawSpaced(ctx, guildName.toUpperCase(), CW - 60, fy + 6, 5);
     }
     if (64 + fW + 32 < CW - 60 - rW - 32) {
-        setStroke(ctx, 'rgba(255,168,196,0.25)', 1.5);
+        setStroke(ctx, 'rgba(120,190,255,0.25)', 1.5);
         ctx.beginPath();
         ctx.moveTo(64 + fW + 28, fy);
         ctx.lineTo(CW - 60 - rW - 28, fy);
@@ -788,6 +809,7 @@ async function renderCalcCard(o) {
 }
  
 module.exports = {
+    helpers: { ensureFonts, rr, glow, cloud, sparkle, drawSky, drawCircleImage, setStroke, fit, clean, loadImage, MUTED, iconBag, iconList, iconCoin, iconUser, iconCalendar },
     renderCalcCard,
     renderPurchaseCard,
     buildSummary,
@@ -795,3 +817,4 @@ module.exports = {
     fetchRobloxAvatar,
     fetchBuffer,
 };
+ 
