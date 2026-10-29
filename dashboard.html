@@ -1,0 +1,495 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SODDU SHOP 대시보드</title>
+<style>
+:root {
+  --sky1: #a9d8ff;
+  --sky2: #cdeaff;
+  --sky3: #eaf6ff;
+  --blue: #3d9bf5;
+  --blue-d: #2f86e8;
+  --navy: #1d3a66;
+  --muted: #6a88aa;
+  --card: rgba(255, 255, 255, 0.78);
+  --line: rgba(120, 180, 240, 0.5);
+  --danger: #e0457f;
+  --ok: #12a86b;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; }
+body {
+  font-family: "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", system-ui, sans-serif;
+  color: var(--navy);
+  background:
+    radial-gradient(900px 420px at 85% -5%, rgba(255,255,255,.9), transparent 60%),
+    radial-gradient(700px 380px at 5% 105%, rgba(255,255,255,.8), transparent 60%),
+    linear-gradient(180deg, var(--sky1), var(--sky2) 45%, var(--sky3));
+  background-attachment: fixed;
+}
+body::before, body::after {
+  content: ""; position: fixed; pointer-events: none; z-index: 0;
+  background: #fff; border-radius: 999px; filter: blur(2px); opacity: .75;
+  box-shadow: 120px 30px 0 -10px #fff, 260px 10px 0 -20px #fff, -110px 24px 0 -14px #fff;
+}
+body::before { width: 260px; height: 70px; left: 6%; bottom: 8%; }
+body::after  { width: 220px; height: 60px; right: 8%; top: 14%; opacity: .6; }
+button, input, select, textarea { font: inherit; color: inherit; }
+a { color: var(--blue-d); }
+
+.top {
+  position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 28px; background: rgba(255,255,255,.7); backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line);
+}
+.brand { font-weight: 800; font-size: 20px; letter-spacing: .5px; display: flex; align-items: center; gap: 10px; }
+.brand small { font-weight: 600; color: var(--muted); font-size: 14px; letter-spacing: 0; }
+.logo { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; color: #fff;
+  background: linear-gradient(135deg, #7cc4ff, #3d9bf5); font-size: 18px; }
+.who { display: flex; align-items: center; gap: 10px; font-weight: 600; }
+.who img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid #fff; }
+.who a { color: var(--muted); font-size: 14px; font-weight: 500; white-space: nowrap; }
+.who span { white-space: nowrap; max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 600px) { .brand small { display: none; } .top { padding: 12px 16px; } .who span { max-width: 80px; } .wrap { padding: 18px 14px 120px; } }
+
+.wrap { position: relative; z-index: 1; max-width: 1180px; margin: 0 auto; padding: 28px 22px 120px; }
+.shell { display: grid; grid-template-columns: 230px 1fr; gap: 22px; align-items: start; }
+@media (max-width: 860px) { .shell { grid-template-columns: 1fr; } }
+
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 22px; padding: 22px;
+  box-shadow: 0 8px 30px rgba(70, 130, 210, .12); backdrop-filter: blur(6px); }
+.side { position: sticky; top: 84px; }
+.side .g { display: flex; align-items: center; gap: 12px; padding-bottom: 16px; margin-bottom: 12px; border-bottom: 1px solid var(--line); }
+.gicon { width: 46px; height: 46px; border-radius: 14px; background: linear-gradient(135deg,#7cc4ff,#3d9bf5); color: #fff;
+  display: grid; place-items: center; font-weight: 800; overflow: hidden; flex: none; }
+.gicon img { width: 100%; height: 100%; object-fit: cover; }
+.g b { display: block; line-height: 1.25; word-break: break-all; }
+.nav { display: flex; flex-direction: column; gap: 6px; }
+.nav button { text-align: left; border: 0; background: transparent; padding: 11px 14px; border-radius: 12px; cursor: pointer; font-weight: 600; color: var(--muted); }
+.nav button:hover { background: rgba(61,155,245,.1); }
+.nav button.on { background: linear-gradient(135deg,#7cc4ff,#3d9bf5); color: #fff; }
+
+h1 { margin: 0 0 4px; font-size: 30px; }
+h2 { margin: 0 0 4px; font-size: 22px; }
+h3 { margin: 0; font-size: 17px; }
+.muted { color: var(--muted); font-size: 14px; }
+.row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.between { justify-content: space-between; }
+.gap { margin-top: 18px; }
+
+.btn { border: 0; cursor: pointer; border-radius: 12px; padding: 10px 18px; font-weight: 700; color: #fff;
+  background: linear-gradient(135deg, #7cc4ff, #3d9bf5); box-shadow: 0 4px 14px rgba(61,155,245,.35); }
+.btn:hover { filter: brightness(1.05); }
+.btn:disabled { opacity: .55; cursor: default; }
+.btn.ghost { background: rgba(255,255,255,.85); color: var(--navy); box-shadow: none; border: 1px solid var(--line); }
+.btn.danger { color: var(--danger); }
+.btn.sm { padding: 7px 13px; font-size: 14px; }
+.btn.big { padding: 14px 26px; font-size: 17px; }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 16px; }
+.srv { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.srv .gicon { width: 72px; height: 72px; border-radius: 22px; font-size: 26px; }
+
+.pcard { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; margin-top: 14px; }
+.tag { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; background: rgba(61,155,245,.14); color: var(--blue-d); }
+.tag.ok { background: rgba(18,168,107,.14); color: var(--ok); }
+.tag.off { background: rgba(106,136,170,.16); color: var(--muted); }
+
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid rgba(120,180,240,.3); }
+th { color: var(--muted); font-weight: 600; }
+
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 16px 0 18px; border-bottom: 1px solid var(--line); }
+.tabs button { border: 0; background: transparent; padding: 11px 18px; font-weight: 700; color: var(--muted); cursor: pointer; border-bottom: 3px solid transparent; margin-bottom: -1px; }
+.tabs button.on { color: var(--blue-d); border-bottom-color: var(--blue); }
+
+.cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 22px; align-items: start; }
+@media (max-width: 980px) { .cols { grid-template-columns: 1fr; } }
+.field { margin-bottom: 16px; }
+.field > label { display: block; font-weight: 700; margin-bottom: 6px; font-size: 14px; }
+.field .hint { color: var(--muted); font-size: 12.5px; margin-top: 5px; }
+input[type=text], input[type=url], input[type=number], select, textarea {
+  width: 100%; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: rgba(255,255,255,.92); outline: none;
+}
+input:focus, select:focus, textarea:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(61,155,245,.18); }
+textarea { min-height: 110px; resize: vertical; }
+input[type=color] { width: 46px; height: 42px; padding: 2px; border-radius: 10px; border: 1px solid var(--line); background: #fff; cursor: pointer; }
+.inline { display: flex; gap: 10px; align-items: center; }
+.sw { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,.7); margin-bottom: 10px; cursor: pointer; }
+.sw input { width: 18px; height: 18px; accent-color: var(--blue); flex: none; }
+.sw b { display: block; font-size: 14px; }
+.sw span { color: var(--muted); font-size: 12.5px; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { border: 1px solid var(--line); background: rgba(255,255,255,.85); border-radius: 999px; padding: 6px 13px; font-size: 13.5px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 7px; }
+.chip i { width: 10px; height: 10px; border-radius: 50%; background: #99aab5; display: inline-block; }
+.chip.on { background: linear-gradient(135deg,#7cc4ff,#3d9bf5); color: #fff; border-color: transparent; }
+
+.qcard { border: 1px solid var(--line); border-radius: 16px; padding: 14px; background: rgba(255,255,255,.7); margin-bottom: 12px; }
+.qcard .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; font-weight: 700; }
+.qcard .tools { display: flex; gap: 6px; }
+.qcard .tools button { border: 1px solid var(--line); background: #fff; border-radius: 8px; width: 32px; height: 30px; cursor: pointer; }
+
+/* 디스코드 미리보기 */
+.dc { background: #313338; border-radius: 16px; padding: 18px; color: #dbdee1; font-family: "gg sans", "Noto Sans", "Malgun Gothic", sans-serif; }
+.dc .msg { display: flex; gap: 14px; }
+.dc .av { width: 42px; height: 42px; border-radius: 50%; background: linear-gradient(135deg,#7cc4ff,#3d9bf5); flex: none; }
+.dc .nm { font-weight: 600; color: #fff; margin-bottom: 4px; }
+.dc .nm span { background: #5865f2; font-size: 10px; padding: 1px 5px; border-radius: 4px; margin-left: 6px; vertical-align: 2px; }
+.dc .emb { background: #2b2d31; border-left: 4px solid var(--blue); border-radius: 6px; padding: 10px 14px 12px; max-width: 440px; position: relative; }
+.dc .emb .t { font-weight: 700; color: #fff; margin-bottom: 6px; font-size: 16px; word-break: break-word; }
+.dc .emb .d { font-size: 14px; line-height: 1.4; word-break: break-word; }
+.dc .emb img.im { width: 100%; border-radius: 6px; margin-top: 10px; display: block; }
+.dc .emb img.th { position: absolute; right: 12px; top: 12px; width: 64px; height: 64px; border-radius: 6px; object-fit: cover; }
+.dc .emb .f { font-size: 12px; color: #b5bac1; margin-top: 10px; }
+.dc .b { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; padding: 6px 16px; border-radius: 4px; font-weight: 600; font-size: 14px; color: #fff; background: #5865f2; }
+.dc .b.Secondary { background: #4e5058; } .dc .b.Success { background: #248046; } .dc .b.Danger { background: #da373c; }
+
+.savebar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; padding: 12px 22px; display: flex; justify-content: center; }
+.savebar .in { width: 100%; max-width: 1136px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  background: rgba(255,255,255,.92); border: 1px solid var(--line); border-radius: 18px; padding: 12px 18px; box-shadow: 0 10px 34px rgba(70,130,210,.25); }
+.savebar .st { font-weight: 600; color: var(--muted); }
+.savebar.dirty .st { color: #d97706; }
+.toast { position: fixed; top: 76px; left: 50%; transform: translateX(-50%); z-index: 60; background: var(--navy); color: #fff; padding: 11px 20px; border-radius: 999px; font-weight: 600; box-shadow: 0 8px 24px rgba(0,0,0,.2); }
+.toast.err { background: var(--danger); }
+
+.hero { max-width: 520px; margin: 70px auto; text-align: center; }
+.hero h1 { font-size: 34px; margin-bottom: 10px; }
+.empty { text-align: center; color: var(--muted); padding: 26px 10px; }
+</style>
+</head>
+<body>
+<div id="top"></div>
+<div class="wrap" id="app"></div>
+<div id="bar"></div>
+<div id="toast"></div>
+
+<script>
+const $ = (s, el = document) => el.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const getP = (o, p) => p.split('.').reduce((a, k) => (a == null ? a : a[k]), o);
+const setP = (o, p, v) => { const ks = p.split('.'); const l = ks.pop(); ks.reduce((a, k) => a[k], o)[l] = v; };
+const rid = () => Array.from(crypto.getRandomValues(new Uint8Array(5)), (b) => b.toString(16).padStart(2, '0')).join('');
+
+const state = { me: null, guilds: [], gid: null, data: null, pid: null, tab: 'message', dirty: false, tickets: null, busy: false };
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, { credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'dashboard' }, ...opts });
+  if (r.status === 401) { state.me = null; render(); throw new Error('login'); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || '오류가 났어요.');
+  return j;
+}
+
+let toastTimer;
+function toast(msg, err) {
+  $('#toast').innerHTML = `<div class="toast ${err ? 'err' : ''}">${esc(msg)}</div>`;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => ($('#toast').innerHTML = ''), 3200);
+}
+
+// ---------- 라우팅 ----------
+function go(hash) {
+  if (state.dirty && !confirm('저장하지 않은 변경사항이 있어요. 그래도 이동할까요?')) return;
+  state.dirty = false;
+  if (state.data && !hash.startsWith('#/g/' + state.gid)) state.data = null;
+  location.hash = hash;
+}
+window.addEventListener('hashchange', route);
+window.addEventListener('beforeunload', (e) => { if (state.dirty) { e.preventDefault(); e.returnValue = ''; } });
+
+function route() {
+  const h = location.hash.replace(/^#\/?/, '').split('/');
+  state.gid = null; state.pid = null;
+  if (h[0] === 'g' && h[1]) {
+    state.gid = h[1];
+    if (h[2] === 'p' && h[3]) { state.pid = h[3]; state.tab = h[4] || 'message'; }
+  }
+  load();
+}
+
+async function load() {
+  if (!state.me) {
+    try { const j = await api('/api/me'); state.me = j.user; state.guilds = j.guilds; } catch (e) { state.me = null; }
+  }
+  if (state.me && state.gid && (!state.data || state.data.guild.id !== state.gid)) {
+    try { state.data = await api('/api/guild/' + state.gid); state.tickets = null; state.dirty = false; }
+    catch (e) { toast(e.message, true); state.gid = null; state.data = null; location.hash = '#/'; }
+  }
+  render();
+  if (state.me && state.gid && !state.pid && state.tickets === null) loadTickets();
+}
+
+async function loadTickets() {
+  try { state.tickets = (await api(`/api/guild/${state.gid}/tickets`)).tickets; } catch (e) { state.tickets = []; }
+  if (state.gid && !state.pid) renderMain();
+}
+
+// ---------- 화면 ----------
+const curPanel = () => state.data && state.data.config.panels.find((p) => p.id === state.pid);
+const chName = (id) => { const c = state.data.channels.find((x) => x.id === id); return c ? '#' + c.name : ''; };
+
+function renderTop() {
+  const me = state.me;
+  $('#top').innerHTML = `<header class="top"><div class="brand"><span class="logo">☁</span>SODDU SHOP <small>대시보드</small></div>
+    ${me ? `<div class="who">${me.avatar ? `<img src="${esc(me.avatar)}" alt="">` : ''}<span>${esc(me.name)}</span><a href="/logout">로그아웃</a></div>` : ''}</header>`;
+}
+
+function render() {
+  renderTop();
+  const app = $('#app');
+  if (!state.me) {
+    $('#bar').innerHTML = '';
+    app.innerHTML = `<div class="card hero"><h1>티켓 대시보드</h1>
+      <p class="muted">디스코드로 로그인해서 서버의 티켓 패널, 양식, 권한을 설정해 보세요.<br>서버 관리 권한이 있는 서버만 보여요.</p>
+      <p><a class="btn big" href="/login" style="display:inline-block;text-decoration:none">디스코드로 로그인</a></p></div>`;
+    return;
+  }
+  if (!state.gid) { $('#bar').innerHTML = ''; return renderServers(); }
+  if (!state.data) { app.innerHTML = '<div class="empty">불러오는 중...</div>'; return; }
+  const g = state.data.guild;
+  app.innerHTML = `<div class="shell">
+    <aside class="card side">
+      <div class="g"><div class="gicon">${g.icon ? `<img src="${esc(g.icon)}" alt="">` : esc(g.name.slice(0, 1))}</div><div><b>${esc(g.name)}</b><span class="muted">관리 중</span></div></div>
+      <nav class="nav"><button class="on" data-go="#/g/${esc(g.id)}">🎫 티켓</button><button data-go="#/">← 서버 목록</button></nav>
+    </aside>
+    <main id="main"></main></div>`;
+  renderMain();
+}
+
+function renderServers() {
+  const list = state.guilds;
+  $('#app').innerHTML = `<h1>서버 선택</h1><p class="muted">봇이 들어와 있고, 내가 "서버 관리" 권한을 가진 서버예요.</p>
+    ${list.length ? `<div class="grid gap">${list.map((g) => `<div class="card srv">
+      <div class="gicon">${g.icon ? `<img src="${esc(g.icon)}" alt="">` : esc(g.name.slice(0, 1))}</div>
+      <b>${esc(g.name)}</b><button class="btn" data-go="#/g/${esc(g.id)}">관리하기</button></div>`).join('')}</div>`
+      : `<div class="card empty gap">관리할 수 있는 서버가 없어요.<br>봇이 서버에 들어와 있는지, 내 계정에 "서버 관리" 권한이 있는지 확인해 주세요.</div>`}`;
+}
+
+function renderMain() {
+  const main = $('#main');
+  if (!main) return;
+  if (state.pid) {
+    if (!curPanel()) { state.pid = null; location.hash = '#/g/' + state.gid; return; }
+    renderPanel(main);
+  } else {
+    $('#bar').innerHTML = '';
+    renderPanelList(main);
+  }
+}
+
+function renderPanelList(main) {
+  const panels = state.data.config.panels;
+  const tk = state.tickets;
+  main.innerHTML = `<div class="row between"><div><h1>티켓</h1><p class="muted">패널을 만들고 설정하면 서버 채널에 티켓 열기 버튼이 생겨요.</p></div>
+    <button class="btn" data-act="new-panel">+ 새 패널 만들기</button></div>
+    ${panels.length ? panels.map((p) => `<div class="card pcard"><div><h3>${esc(p.name)}</h3>
+      <div class="muted" style="margin-top:4px">${p.channelId ? esc(chName(p.channelId)) : '채널 미선택'} · 질문 ${p.questions.length}개
+      · ${p.messageId ? '<span class="tag ok">전송됨</span>' : '<span class="tag off">아직 안 보냄</span>'}</div></div>
+      <div class="row"><button class="btn" data-go="#/g/${esc(state.gid)}/p/${esc(p.id)}/message">설정하기</button>
+      <button class="btn ghost danger" data-act="del-panel" data-id="${esc(p.id)}">삭제</button></div></div>`).join('')
+      : `<div class="card empty gap">아직 패널이 없어요. "새 패널 만들기"를 눌러 시작해 보세요.</div>`}
+    <h2 class="gap" style="margin-top:30px">최근 티켓</h2>
+    <div class="card" style="margin-top:10px">${tk === null ? '<div class="empty">불러오는 중...</div>' : tk.length ? `<table><tr><th>#</th><th>소유자</th><th>패널</th><th>열린 시간</th><th>상태</th><th></th></tr>
+      ${tk.map((t) => `<tr><td>${String(t.number).padStart(4, '0')}</td><td>${esc(t.ownerName)}</td><td>${esc(t.panelName)}</td>
+      <td>${esc(new Date(t.ts).toLocaleString('ko-KR'))}</td><td>${t.closed ? '<span class="tag off">닫힘</span>' : '<span class="tag ok">열림</span>'}</td>
+      <td>${!t.closed && t.exists ? `<a href="https://discord.com/channels/${esc(state.gid)}/${esc(t.channelId)}" target="_blank" rel="noopener">열기</a>` : ''}</td></tr>`).join('')}</table>`
+      : '<div class="empty">아직 열린 티켓이 없어요.</div>'}</div>`;
+}
+
+const TABS = [['message', '패널 메시지'], ['form', '양식'], ['perms', '권한'], ['settings', '티켓 설정']];
+
+function renderPanel(main) {
+  const p = curPanel();
+  main.innerHTML = `<div class="row between"><div><div class="muted"><a href="#/g/${esc(state.gid)}" data-go="#/g/${esc(state.gid)}">티켓</a> › 패널 설정</div>
+    <h1>${esc(p.name)}</h1></div></div>
+    <div class="tabs">${TABS.map(([k, n]) => `<button class="${state.tab === k ? 'on' : ''}" data-act="tab" data-tab="${k}">${n}</button>`).join('')}</div>
+    <div id="tab"></div>`;
+  renderTab();
+  renderBar();
+}
+
+function renderBar() {
+  $('#bar').innerHTML = `<div class="savebar ${state.dirty ? 'dirty' : ''}" id="savebar"><div class="in"><span class="st" id="stxt">${state.dirty ? '저장하지 않은 변경사항이 있어요' : '모든 변경사항이 저장됐어요'}</span>
+    <div class="row"><button class="btn" data-act="save" ${state.busy ? 'disabled' : ''}>저장</button></div></div></div>`;
+}
+
+function markDirty() {
+  if (!state.dirty) {
+    state.dirty = true;
+    const b = $('#savebar'); if (b) b.classList.add('dirty');
+    const t = $('#stxt'); if (t) t.textContent = '저장하지 않은 변경사항이 있어요';
+  }
+}
+
+// ----- 입력 도우미 -----
+const val = (path) => getP(curPanel(), path);
+const text = (label, path, o = {}) => `<div class="field"><label>${label}</label><input type="${o.type || 'text'}" data-p="${path}" value="${esc(val(path))}" ${o.max ? `maxlength="${o.max}"` : ''} placeholder="${esc(o.ph || '')}">${o.hint ? `<div class="hint">${o.hint}</div>` : ''}</div>`;
+const area = (label, path, o = {}) => `<div class="field"><label>${label}</label><textarea data-p="${path}" ${o.max ? `maxlength="${o.max}"` : ''}>${esc(val(path))}</textarea>${o.hint ? `<div class="hint">${o.hint}</div>` : ''}</div>`;
+const select = (label, path, options, o = {}) => `<div class="field"><label>${label}</label><select data-p="${path}">${options.map(([v, n]) => `<option value="${esc(v)}" ${String(val(path)) === String(v) ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>${o.hint ? `<div class="hint">${o.hint}</div>` : ''}</div>`;
+const toggle = (title, desc, path) => `<label class="sw"><input type="checkbox" data-p="${path}" data-t="check" ${val(path) ? 'checked' : ''}><div><b>${title}</b><span>${desc}</span></div></label>`;
+const chanOpts = (empty) => [['', empty], ...state.data.channels.map((c) => [c.id, '#' + c.name])];
+const catOpts = () => [['', '(카테고리 없음)'], ...state.data.categories.map((c) => [c.id, c.name])];
+const roleChips = (path) => { const sel = val(path) || [];
+  return `<div class="chips">${state.data.roles.length ? state.data.roles.map((r) => `<button type="button" class="chip ${sel.includes(r.id) ? 'on' : ''}" data-act="role" data-path="${path}" data-id="${esc(r.id)}"><i style="${r.color ? `background:${esc(r.color)}` : ''}"></i>${esc(r.name)}</button>`).join('') : '<span class="muted">선택할 수 있는 역할이 없어요.</span>'}</div>`; };
+
+function renderTab() {
+  const p = curPanel();
+  const el = $('#tab');
+  if (state.tab === 'message') {
+    el.innerHTML = `<div class="cols"><div class="card">
+      ${text('패널 이름 (관리용)', 'name', { max: 40 })}
+      ${text('제목', 'embed.title', { max: 256 })}
+      ${area('설명', 'embed.description', { max: 4000, hint: '**굵게** 처럼 디스코드 글씨 꾸미기를 쓸 수 있어요.' })}
+      <div class="field"><label>색상</label><div class="inline"><input type="color" data-p="embed.color" value="${esc(p.embed.color)}"><input type="text" data-p="embed.color" value="${esc(p.embed.color)}" maxlength="7"></div></div>
+      ${text('큰 이미지 주소 (선택)', 'embed.image', { type: 'url', ph: 'https://...' })}
+      ${text('작은 이미지 주소 (선택)', 'embed.thumbnail', { type: 'url', ph: 'https://...' })}
+      ${text('아래 작은 글씨 (선택)', 'embed.footer', { max: 200 })}
+      ${text('버튼 문구', 'button.label', { max: 80 })}
+      ${text('버튼 이모지 (선택)', 'button.emoji', { max: 64, ph: '🎫' })}
+      ${select('버튼 색', 'button.style', [['Primary', '파랑'], ['Secondary', '회색'], ['Success', '초록'], ['Danger', '빨강']])}
+      ${select('패널을 보낼 채널', 'channelId', chanOpts('(채널 선택)'))}
+      <button class="btn" data-act="send">${p.messageId ? '패널 업데이트' : '패널 보내기'}</button>
+      <div class="hint" style="margin-top:8px">누르면 먼저 저장한 뒤 선택한 채널에 패널을 보내요. 이미 보냈다면 그 메시지를 수정해요.</div>
+    </div><div><div class="muted" style="margin-bottom:8px;font-weight:700">미리보기</div><div id="preview"></div></div></div>`;
+    renderPreview();
+  } else if (state.tab === 'form') {
+    el.innerHTML = `<div class="card"><h2>양식 질문</h2><p class="muted">티켓 열기 버튼을 누르면 이 질문들이 창으로 떠요. 질문이 없으면 바로 티켓이 열려요. (디스코드 제한: 최대 5개)</p>
+      ${p.questions.map((q, i) => `<div class="qcard"><div class="head"><span>질문 ${i + 1}</span><div class="tools">
+        <button data-act="q-up" data-i="${i}" title="위로">▲</button><button data-act="q-down" data-i="${i}" title="아래로">▼</button><button data-act="q-del" data-i="${i}" title="삭제">✕</button></div></div>
+        ${text('질문', `questions.${i}.label`, { max: 45 })}${text('안내 문구 (선택)', `questions.${i}.placeholder`, { max: 100 })}
+        ${toggle('필수 입력', '비워두면 티켓을 열 수 없어요.', `questions.${i}.required`)}${toggle('긴 답변', '여러 줄로 길게 쓸 수 있어요.', `questions.${i}.long`)}</div>`).join('')}
+      ${p.questions.length < 5 ? '<button class="btn ghost" data-act="q-add">+ 질문 추가</button>' : '<div class="muted">질문은 최대 5개예요.</div>'}</div>`;
+  } else if (state.tab === 'perms') {
+    el.innerHTML = `<div class="cols"><div class="card"><h2>누가 볼 수 있나요?</h2>
+      <div class="field"><label>담당자 역할</label><div class="hint" style="margin:0 0 8px">티켓을 보고, 답변하고, 닫을 수 있어요.</div>${roleChips('perms.supportRoleIds')}</div>
+      <div class="field"><label>읽기 전용 역할</label><div class="hint" style="margin:0 0 8px">티켓을 볼 수만 있고 글은 쓸 수 없어요.</div>${roleChips('perms.viewRoleIds')}</div>
+      <div class="hint">선택하지 않은 사람은 티켓 소유자만 볼 수 있어요.</div></div>
+      <div class="card"><h2>티켓 소유자 권한</h2>
+      ${toggle('소유자가 직접 닫기', '티켓을 연 사람이 닫기 버튼을 쓸 수 있어요.', 'perms.ownerCanClose')}
+      ${toggle('파일 첨부', '티켓 소유자가 파일/이미지를 올릴 수 있어요.', 'perms.ownerAttach')}
+      ${toggle('링크 미리보기', '링크를 보내면 미리보기가 나와요.', 'perms.ownerEmbed')}
+      ${toggle('담당하기 버튼', '담당자가 "담당하기"를 눌러 티켓을 맡을 수 있어요.', 'perms.claimEnabled')}
+      ${toggle('티켓 열릴 때 담당자 멘션', '담당자 역할을 호출해 알려줘요.', 'ticket.mentionSupport')}</div></div>`;
+  } else {
+    el.innerHTML = `<div class="cols"><div class="card"><h2>티켓 채널</h2>
+      ${select('티켓이 만들어질 카테고리', 'ticket.categoryId', catOpts())}
+      ${text('채널 이름 형식', 'ticket.nameFormat', { max: 40, hint: '{number} 티켓 번호 · {username} 유저 이름 · 예) ticket-{number}' })}
+      <div class="field"><label>한 사람당 최대 티켓 수</label><input type="number" min="1" max="10" data-p="ticket.maxOpen" data-t="num" value="${esc(p.ticket.maxOpen)}"></div>
+      ${select('티켓 기록(로그) 채널', 'ticket.logChannelId', chanOpts('(기록 안 함)'), { hint: '티켓이 닫힐 때 대화 기록 파일을 이 채널에 남겨요.' })}</div>
+      <div class="card"><h2>티켓 환영 메시지</h2>
+      ${text('제목', 'ticket.welcomeTitle', { max: 200 })}
+      ${area('내용', 'ticket.welcomeMessage', { max: 2000, hint: '{user} 유저 멘션 · {username} 유저 이름 · {number} 번호 · {server} 서버 이름' })}</div></div>`;
+  }
+}
+
+function renderPreview() {
+  const el = $('#preview');
+  if (!el) return;
+  const p = curPanel();
+  const md = (s) => esc(s).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>');
+  const safeUrl = (u) => (/^https?:\/\//.test(u) ? esc(u) : '');
+  el.innerHTML = `<div class="dc"><div class="msg"><div class="av"></div><div><div class="nm">티켓 봇<span>봇</span></div>
+    <div class="emb" style="border-left-color:${/^#[0-9a-fA-F]{6}$/.test(p.embed.color) ? p.embed.color : '#7cc4ff'}">
+      ${p.embed.thumbnail && safeUrl(p.embed.thumbnail) ? `<img class="th" src="${safeUrl(p.embed.thumbnail)}" alt="">` : ''}
+      ${p.embed.title ? `<div class="t">${esc(p.embed.title)}</div>` : ''}
+      ${p.embed.description ? `<div class="d">${md(p.embed.description)}</div>` : ''}
+      ${p.embed.image && safeUrl(p.embed.image) ? `<img class="im" src="${safeUrl(p.embed.image)}" alt="">` : ''}
+      ${p.embed.footer ? `<div class="f">${esc(p.embed.footer)}</div>` : ''}</div>
+    <div class="b ${esc(p.button.style)}">${esc(p.button.emoji)} ${esc(p.button.label || '티켓 열기')}</div></div></div></div>`;
+}
+
+// ---------- 이벤트 ----------
+document.addEventListener('input', (e) => {
+  const t = e.target;
+  if (!t.dataset || !t.dataset.p || t.type === 'checkbox') return;
+  const p = curPanel(); if (!p) return;
+  let v = t.value;
+  if (t.dataset.t === 'num') v = Math.min(10, Math.max(1, parseInt(v, 10) || 1));
+  setP(p, t.dataset.p, v);
+  // 색상 입력 두 칸 맞추기
+  if (t.dataset.p === 'embed.color') document.querySelectorAll('[data-p="embed.color"]').forEach((x) => { if (x !== t && /^#[0-9a-fA-F]{6}$/.test(v)) x.value = v; });
+  markDirty();
+  if (state.tab === 'message') renderPreview();
+  if (t.dataset.p === 'name') { const h = document.querySelector('#main h1'); if (h) h.textContent = v; }
+});
+
+document.addEventListener('change', (e) => {
+  const t = e.target;
+  if (!t.dataset || !t.dataset.p) return;
+  const p = curPanel(); if (!p) return;
+  if (t.type === 'checkbox') setP(p, t.dataset.p, t.checked);
+  else if (t.tagName === 'SELECT') setP(p, t.dataset.p, t.value);
+  else return;
+  markDirty();
+  if (state.tab === 'message') renderPreview();
+});
+
+document.addEventListener('click', async (e) => {
+  const goEl = e.target.closest('[data-go]');
+  if (goEl) { e.preventDefault(); go(goEl.dataset.go); return; }
+  const el = e.target.closest('[data-act]');
+  if (!el) return;
+  const act = el.dataset.act;
+  const panels = state.data && state.data.config.panels;
+  const p = curPanel();
+
+  if (act === 'tab') { state.tab = el.dataset.tab; history.replaceState(null, '', `#/g/${state.gid}/p/${state.pid}/${state.tab}`); renderPanel($('#main')); return; }
+  if (act === 'new-panel') {
+    if (panels.length >= 10) return toast('패널은 최대 10개까지 만들 수 있어요.', true);
+    const np = JSON.parse(JSON.stringify(state.data.defaultPanel)); np.id = rid(); np.name = `패널 ${panels.length + 1}`;
+    panels.push(np); state.dirty = true; state.tab = 'message'; state.pid = np.id;
+    location.hash = `#/g/${state.gid}/p/${np.id}/message`; return;
+  }
+  if (act === 'del-panel') {
+    if (!confirm('이 패널을 삭제할까요? (이미 보낸 디스코드 메시지는 직접 지워야 해요)')) return;
+    const i = panels.findIndex((x) => x.id === el.dataset.id); if (i >= 0) panels.splice(i, 1);
+    await save(); renderMain(); return;
+  }
+  if (!p) return;
+  if (act === 'role') { const arr = getP(p, el.dataset.path); const i = arr.indexOf(el.dataset.id); if (i >= 0) arr.splice(i, 1); else arr.push(el.dataset.id); markDirty(); renderTab(); return; }
+  if (act === 'q-add') { if (p.questions.length < 5) p.questions.push({ label: '', placeholder: '', required: true, long: false }); markDirty(); renderTab(); return; }
+  if (act === 'q-del') { p.questions.splice(+el.dataset.i, 1); markDirty(); renderTab(); return; }
+  if (act === 'q-up' || act === 'q-down') {
+    const i = +el.dataset.i, j = act === 'q-up' ? i - 1 : i + 1;
+    if (j >= 0 && j < p.questions.length) { [p.questions[i], p.questions[j]] = [p.questions[j], p.questions[i]]; markDirty(); renderTab(); }
+    return;
+  }
+  if (act === 'save') { await save(); return; }
+  if (act === 'send') {
+    if (!p.channelId) return toast('패널을 보낼 채널을 먼저 선택해 주세요.', true);
+    if (!(await save())) return;
+    try {
+      const r = await api(`/api/guild/${state.gid}/panels/${state.pid}/send`, { method: 'POST', body: '{}' });
+      state.data.config = r.config;
+      toast(r.created ? '패널을 보냈어요!' : '패널 메시지를 업데이트했어요!');
+      if (state.tab === 'message') renderTab();
+    } catch (err) { toast(err.message, true); }
+  }
+});
+
+async function save() {
+  if (state.busy) return false;
+  state.busy = true;
+  try {
+    const r = await api(`/api/guild/${state.gid}/tickets`, { method: 'PUT', body: JSON.stringify({ panels: state.data.config.panels }) });
+    state.data.config = r.config;
+    state.dirty = false;
+    if (state.pid && !curPanel()) { location.hash = '#/g/' + state.gid; }
+    toast('저장했어요.');
+    return true;
+  } catch (err) {
+    toast(err.message, true);
+    return false;
+  } finally {
+    state.busy = false;
+    if (state.pid) renderBar();
+  }
+}
+
+route();
+</script>
+</body>
+</html>
