@@ -29,6 +29,8 @@ const {
  
 // TOKEN 또는 DISCORD_TOKEN 환경변수 모두 인식
 const store = require('./store');
+const tickets = require('./tickets');
+const web = require('./web');
 const { renderProfileCard, renderStatsCard, renderRankCard, ymd } = require('./infoCards');
 const { SERVER_ROLES, resolveGrade } = require('./roles');
  
@@ -197,9 +199,16 @@ client.once('ready', async () => {
     await client.application.commands.create(backupCommand);
     await client.application.commands.create(panelCommand);
     console.log('슬래시 명령어 등록 완료');
+ 
+    // 티켓 기능 + 웹 대시보드 시작
+    tickets.init(client);
+    web.start(client);
 });
  
 client.on('interactionCreate', async interaction => {
+ 
+    // 티켓 (패널 버튼 / 양식 / 닫기 / 담당하기) - 대시보드에서 설정한 대로 동작
+    if (await tickets.handleInteraction(interaction)) return;
  
     if (interaction.isButton()) {
  
