@@ -33,6 +33,29 @@ const STYLES = { Primary: ButtonStyle.Primary, Secondary: ButtonStyle.Secondary,
  
 let clientRef = null;
  
+// 티켓 소유자에게 줄 수 있는 채널 권한 (디스코드 채널 권한의 멤버 권한과 같아요)
+// 값: 'allow' 허용 / 'deny' 거부 / 'default' 기본값(@everyone 설정을 따라요)
+const OWNER_PERM_KEYS = [
+    'ViewChannel', 'SendMessages', 'SendMessagesInThreads', 'CreatePublicThreads', 'CreatePrivateThreads',
+    'EmbedLinks', 'AttachFiles', 'AddReactions', 'UseExternalEmojis', 'UseExternalStickers',
+    'MentionEveryone', 'ReadMessageHistory', 'SendTTSMessages', 'UseApplicationCommands', 'SendVoiceMessages', 'SendPolls',
+];
+const defaultOwnerPerms = () => {
+    const o = {};
+    for (const k of OWNER_PERM_KEYS) o[k] = 'default';
+    for (const k of ['ViewChannel', 'SendMessages', 'ReadMessageHistory', 'AttachFiles', 'EmbedLinks']) o[k] = 'allow';
+    return o;
+};
+const cleanOwnerPerms = (input) => {
+    const out = defaultOwnerPerms();
+    for (const k of OWNER_PERM_KEYS) {
+        const v = input && input[k];
+        if (v === 'allow' || v === 'deny' || v === 'default') out[k] = v;
+    }
+    out.ViewChannel = 'allow'; // 소유자가 자기 티켓을 못 보면 안 되니까 항상 허용
+    return out;
+};
+ 
 // ==================== 설정 기본값 / 검사 ====================
 const randomId = () => crypto.randomBytes(5).toString('hex');
  
@@ -92,8 +115,7 @@ function defaultPanel() {
             supportRoleIds: [],
             viewRoleIds: [],
             ownerCanClose: true,
-            ownerAttach: true,
-            ownerEmbed: true,
+            ownerPerms: defaultOwnerPerms(),
         },
     };
 }
@@ -183,6 +205,10 @@ function sanitizeConfig(input, guild, existing) {
                     description: str(o && o.description, 100).trim(),
                     emoji: str(o && o.emoji, 64).trim(),
                     categoryId: category(o && o.categoryId),
+                    nameFormat: str(o && o.nameFormat, 40).trim() ? fmt(o.nameFormat, '') : '',
+                    welcomeTitle: str(o && o.welcomeTitle, 200),
+                    welcomeMessage: str(o && o.welcomeMessage, 2000),
+                    supportRoleIds: roles(o && o.supportRoleIds),
                     questions: sanitizeQuestions(o && o.questions),
                 };
             })
@@ -225,12 +251,21 @@ function sanitizeConfig(input, guild, existing) {
                 supportRoleIds: roles(pm.supportRoleIds),
                 viewRoleIds: roles(pm.viewRoleIds),
                 ownerCanClose: bool(pm.ownerCanClose),
-                ownerAttach: bool(pm.ownerAttach),
-                ownerEmbed: bool(pm.ownerEmbed),
+                ownerPerms: cleanOwnerPerms(pm.ownerPerms),
             },
         });
     }
     return out;
+}
+ 
+// 예전 버전(파일 첨부/링크 미리보기 스위치)에서 저장한 값을 새 권한 표로 옮겨요
+function migratePerms(perms) {
+    const op = cleanOwnerPerms(perms.ownerPerms);
+    if (!perms.ownerPerms) {
+        if (perms.ownerAttach === false) op.AttachFiles = 'deny';
+        if (perms.ownerEmbed === false) op.EmbedLinks = 'deny';
+    }
+    return { ...perms, ownerPerms: op };
 }
  
 // 저장된 설정을 읽을 때 빠진 값을 기본값으로 채워요 (예전 버전에서 저장한 설정 호환)
@@ -246,10 +281,10 @@ function loadConfig(guildId) {
             embed: { ...d.embed, ...(p.embed || {}) },
             button: { ...d.button, ...(p.button || {}) },
             select: { ...d.select, ...(p.select || {}) },
-            options: p.options || [],
+            options: (p.options || []).map((o) => ({ nameFormat: '', welcomeTitle: '', welcomeMessage: '', supportRoleIds: [], questions: [], ...o })),
             questions: p.questions || [],
             ticket: { ...d.ticket, ...(p.ticket || {}) },
-            perms: { ...d.perms, ...(p.perms || {}) },
+            perms: migratePerms({ ...d.perms, ...(p.perms || {}) }),
         };
     });
     return cfg;
@@ -471,15 +506,18 @@ async function createTicket(interaction, cfg, panel, opt, answers) {
     const numStr = padNum(number, settings.padding);
     const typeName = opt ? opt.label : panel.name;
     const vars = { user: `<@${owner.id}>`, username: owner.username, number: numStr, count: numStr, server: guild.name, type: typeName };
-    const name = channelNameOf(panel.ticket.nameFormat, vars, `ticket-${numStr}`);
+    const name = channelNameOf((opt && opt.nameFormat) || panel.ticket.nameFormat, vars, `ticket-${numStr}`);
  
     const P = PermissionFlagsBits;
-    const ownerAllow = [P.ViewChannel, P.SendMessages, P.ReadMessageHistory];
+    const ownerAllow = [];
     const ownerDeny = [];
-    (panel.perms.ownerAttach ? ownerAllow : ownerDeny).push(P.AttachFiles);
-    (panel.perms.ownerEmbed ? ownerAllow : ownerDeny).push(P.EmbedLinks);
+    for (const [k, v] of Object.entries(panel.perms.ownerPerms)) {
+        if (P[k] === undefined) continue;
+        if (v === 'allow') ownerAllow.push(P[k]);
+        else if (v === 'deny') ownerDeny.push(P[k]);
+    }
  
-    const supportIds = [...new Set([...panel.perms.supportRoleIds, ...settings.supportRoleIds])].filter((id) => guild.roles.cache.has(id));
+    const supportIds = [...new Set([...panel.perms.supportRoleIds, ...settings.supportRoleIds, ...((opt && opt.supportRoleIds) || [])])].filter((id) => guild.roles.cache.has(id));
     const overwrites = [
         { id: guild.id, deny: [P.ViewChannel] },
         { id: owner.id, allow: ownerAllow, deny: ownerDeny },
@@ -537,8 +575,8 @@ async function createTicket(interaction, cfg, panel, opt, answers) {
     // 2) 환영 임베드 + 양식 답변
     const welcome = new EmbedBuilder()
         .setColor(parseInt(hex(panel.embed.color, DEFAULT_COLOR).slice(1), 16))
-        .setTitle(fillVars(panel.ticket.welcomeTitle, vars) || `티켓 #${numStr}`)
-        .setDescription(fillVars(panel.ticket.welcomeMessage, vars) || `<@${owner.id}>`);
+        .setTitle(fillVars((opt && opt.welcomeTitle) || panel.ticket.welcomeTitle, vars) || `티켓 #${numStr}`)
+        .setDescription(fillVars((opt && opt.welcomeMessage) || panel.ticket.welcomeMessage, vars) || `<@${owner.id}>`);
     for (const a of answers.slice(0, 5)) {
         welcome.addFields({ name: str(a.label, 256), value: str(a.value, 1024) || '-' });
     }
@@ -625,15 +663,17 @@ async function doReopen({ guild, channel, ticket, panel, cfg, user }) {
     const typeName = ticket.optionLabel || ticket.panelName || '';
     const vars = { user: `<@${ticket.ownerId}>`, username: ticket.ownerName, number: numStr, count: numStr, server: guild.name, type: typeName };
  
+    const opt0 = panel && ticket.optionId ? panel.options.find((o) => o.id === ticket.optionId) : null;
     const edit = {
-        name: channelNameOf(panel ? panel.ticket.nameFormat : 'ticket-{number}', vars, `ticket-${numStr}`),
+        name: channelNameOf((opt0 && opt0.nameFormat) || (panel ? panel.ticket.nameFormat : 'ticket-{number}'), vars, `ticket-${numStr}`),
         lockPermissions: false,
     };
     const opt = panel && ticket.optionId ? panel.options.find((o) => o.id === ticket.optionId) : null;
     const catId = (opt && opt.categoryId) || (panel && panel.ticket.categoryId);
     if (catId && guild.channels.cache.has(catId)) edit.parent = catId;
     const r = await withTimeout(channel.edit(edit).catch((e) => console.error('[티켓] 채널 이동/이름 변경 실패:', e.message)), 10000);
-    await channel.permissionOverwrites.edit(ticket.ownerId, { SendMessages: true }).catch(() => {});
+    const sendAllowed = !(panel && panel.perms.ownerPerms.SendMessages === 'deny');
+    await channel.permissionOverwrites.edit(ticket.ownerId, { SendMessages: sendAllowed }).catch(() => {});
  
     const embed = new EmbedBuilder()
         .setColor(GREEN)
@@ -942,6 +982,7 @@ function init(client) {
 }
  
 module.exports = {
+    OWNER_PERM_KEYS,
     init,
     handleInteraction,
     handleMessage,
