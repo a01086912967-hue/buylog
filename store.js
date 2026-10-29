@@ -15,7 +15,7 @@ const FILE = path.join(DATA_DIR, 'data.json');
 const onRailway = !!(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID || process.env.RAILWAY_SERVICE_ID);
 const persistent = !!(process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH) || !onRailway;
  
-let db = { users: {}, purchases: [], joins: [] };
+let db = { users: {}, purchases: [], joins: [], guilds: {}, tickets: [] };
  
 function load() {
     try {
@@ -30,6 +30,8 @@ function load() {
                 users: parsed.users || {},
                 purchases: Array.isArray(parsed.purchases) ? parsed.purchases : [],
                 joins: Array.isArray(parsed.joins) ? parsed.joins : [],
+                guilds: parsed.guilds && typeof parsed.guilds === 'object' ? parsed.guilds : {},
+                tickets: Array.isArray(parsed.tickets) ? parsed.tickets : [],
             };
             console.log(`[데이터] 불러오기 완료 (유저 ${Object.keys(db.users).length}명, 구매 ${db.purchases.length}건) - ${FILE}`);
         } catch (e) {
@@ -161,9 +163,78 @@ function periodStats(sinceTs) {
     return { from, robux, spent, count, topBuyer, joined, topInviter };
 }
  
+// ==================== 티켓 (대시보드 설정 + 기록) ====================
+const emptyTicketConfig = () => ({ counter: 0, panels: [] });
+ 
+// 서버의 티켓 설정 (복사본을 돌려줘요)
+function getTicketConfig(guildId) {
+    const g = db.guilds[guildId];
+    return JSON.parse(JSON.stringify(g && g.tickets ? g.tickets : emptyTicketConfig()));
+}
+ 
+function saveTicketConfig(guildId, cfg) {
+    if (!db.guilds[guildId]) db.guilds[guildId] = {};
+    db.guilds[guildId].tickets = cfg;
+    save();
+}
+ 
+// 티켓 번호 +1 (서버별)
+function nextTicketNumber(guildId) {
+    if (!db.guilds[guildId]) db.guilds[guildId] = {};
+    const g = db.guilds[guildId];
+    if (!g.tickets) g.tickets = emptyTicketConfig();
+    g.tickets.counter = (g.tickets.counter || 0) + 1;
+    save();
+    return g.tickets.counter;
+}
+ 
+function addTicket(t) {
+    db.tickets.push({ ...t, closed: false, claimedBy: null, closedBy: null, closedTs: null });
+    save();
+}
+ 
+function findTicket(channelId) {
+    return db.tickets.find((t) => t.channelId === channelId) || null;
+}
+ 
+function closeTicket(channelId, closedBy) {
+    const t = findTicket(channelId);
+    if (!t || t.closed) return null;
+    t.closed = true;
+    t.closedBy = closedBy || null;
+    t.closedTs = Date.now();
+    save();
+    return t;
+}
+ 
+function claimTicket(channelId, userId) {
+    const t = findTicket(channelId);
+    if (!t) return null;
+    t.claimedBy = userId;
+    save();
+    return t;
+}
+ 
+function getOpenTickets(guildId) {
+    return db.tickets.filter((t) => t.guildId === guildId && !t.closed);
+}
+ 
+function getRecentTickets(guildId, n = 20) {
+    return db.tickets.filter((t) => t.guildId === guildId).slice(-n).reverse();
+}
+ 
 load();
  
 module.exports = {
+    getTicketConfig,
+    saveTicketConfig,
+    nextTicketNumber,
+    addTicket,
+    findTicket,
+    closeTicket,
+    claimTicket,
+    getOpenTickets,
+    getRecentTickets,
     STATS_START_TS,
     DATA_DIR,
     FILE,
