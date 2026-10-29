@@ -578,7 +578,7 @@ async function createTicket(interaction, cfg, panel, opt, answers) {
         .setTitle(fillVars((opt && opt.welcomeTitle) || panel.ticket.welcomeTitle, vars) || `티켓 #${numStr}`)
         .setDescription(fillVars((opt && opt.welcomeMessage) || panel.ticket.welcomeMessage, vars) || `<@${owner.id}>`);
     for (const a of answers.slice(0, 5)) {
-        welcome.addFields({ name: str(a.label, 256), value: str(a.value, 1024) || '-' });
+        welcome.addFields({ name: str(a.label, 256), value: '```\n' + (str(a.value, 1000).replace(/`{3}/g, "'''").trim() || '-') + '\n```' });
     }
  
     const row = new ActionRowBuilder().addComponents(
@@ -974,6 +974,10 @@ async function handleInteraction(interaction) {
  
 function init(client) {
     clientRef = client;
+    // store.js가 예전 버전이면 티켓 열기/닫기가 꼬이므로 시작할 때 바로 알려줘요
+    for (const fn of ['closeTicket', 'reopenTicket', 'markTicketDeleted', 'findTicket']) {
+        if (typeof store[fn] !== 'function') console.error(`[티켓] store.js가 예전 버전이에요 (${fn} 없음). 새 store.js를 GitHub에 다시 올려 주세요.`);
+    }
     // 티켓 채널을 직접 지우면 기록도 삭제된 것으로 처리
     client.on('channelDelete', (channel) => {
         const t = store.findTicket(channel.id);
