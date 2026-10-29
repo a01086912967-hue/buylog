@@ -573,13 +573,16 @@ async function createTicket(interaction, cfg, panel, opt, answers) {
         .setFooter({ text: `티켓 #${numStr}${opt ? ` · ${opt.label}` : ''}` });
  
     // 2) 환영 임베드 + 양식 답변
+    const baseDesc = fillVars((opt && opt.welcomeMessage) || panel.ticket.welcomeMessage, vars) || `<@${owner.id}>`;
+    // 질문은 **굵게**, 답은 코드블록 박스로, 질문마다 한 줄 띄우기
+    const qa = answers
+        .slice(0, 5)
+        .map((a) => `**${str(a.label, 200).replace(/\*/g, '')}**\n` + '```\n' + (str(a.value, 700).replace(/`{3}/g, "'''").trim() || '-') + '\n```')
+        .join('\n\n');
     const welcome = new EmbedBuilder()
         .setColor(parseInt(hex(panel.embed.color, DEFAULT_COLOR).slice(1), 16))
         .setTitle(fillVars((opt && opt.welcomeTitle) || panel.ticket.welcomeTitle, vars) || `티켓 #${numStr}`)
-        .setDescription(fillVars((opt && opt.welcomeMessage) || panel.ticket.welcomeMessage, vars) || `<@${owner.id}>`);
-    for (const a of answers.slice(0, 5)) {
-        welcome.addFields({ name: str(a.label, 256), value: '```\n' + (str(a.value, 1000).replace(/`{3}/g, "'''").trim() || '-') + '\n```' });
-    }
+        .setDescription((baseDesc + (qa ? '\n\n' + qa : '')).slice(0, 4000));
  
     const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('tk_close').setLabel('닫기').setEmoji('🔒').setStyle(ButtonStyle.Secondary)
