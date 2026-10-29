@@ -30,6 +30,7 @@ const {
 // TOKEN 또는 DISCORD_TOKEN 환경변수 모두 인식
 const store = require('./store');
 const tickets = require('./tickets');
+const community = require('./community');
 const web = require('./web');
 const { renderProfileCard, renderStatsCard, renderRankCard, ymd } = require('./infoCards');
 const { SERVER_ROLES, resolveGrade } = require('./roles');
@@ -128,6 +129,8 @@ client.on('guildMemberAdd', async (member) => {
     }
     if (inviterId === member.id) inviterId = null;
     store.recordJoin(member.id, inviterId);
+    // 환영 메시지 / 자동 역할 (대시보드에서 설정)
+    community.onJoin(member, inviterId).catch((e) => console.error('[환영] 처리 실패:', e.message));
 });
  
 client.once('ready', async () => {
@@ -200,14 +203,15 @@ client.once('ready', async () => {
     await client.application.commands.create(panelCommand);
     console.log('슬래시 명령어 등록 완료');
  
-    // 티켓 기능 + 웹 대시보드 시작
+    // 티켓 / 퇴장 메시지 + 웹 대시보드 시작
     tickets.init(client);
+    community.init(client);
     web.start(client);
 });
  
 client.on('interactionCreate', async interaction => {
  
-    // 티켓 (패널 버튼 / 양식 / 닫기 / 담당하기) - 대시보드에서 설정한 대로 동작
+    // 티켓 (패널 버튼·선택기 / 양식 / 닫기 / 다시 열기 / 삭제) - 대시보드에서 설정한 대로 동작
     if (await tickets.handleInteraction(interaction)) return;
  
     if (interaction.isButton()) {
@@ -369,7 +373,7 @@ client.on('interactionCreate', async interaction => {
         // 구매 정보 저장 ($정보 / $통계 / $랭킹에 사용)
         let statWarn = '';
         try {
-            const rec = store.recordPurchase({ buyerId: buyer.id, kind, qty: count, price, sellerId: seller.id });
+            const rec = store.recordPurchase({ buyerId: buyer.id, kind, qty: count, price, sellerId: seller.id, item, guildId: interaction.guildId });
             if (rec.spent === 0 || (kind === 'robux' && rec.robux === 0)) {
                 statWarn = '⚠️ 금액/수량을 숫자로 읽지 못해 통계에 0으로 기록됐어요. /정보설정 으로 직접 고쳐주세요.';
             }
@@ -588,6 +592,10 @@ async function buildRankFile(message) {
 client.on('messageCreate', async message => {
  
     if (message.author.bot) return;
+ 
+    // 티켓 채널의 !close / !open / !delete, 그리고 대시보드에서 만든 자동응답
+    if (await tickets.handleMessage(message).catch((e) => { console.error('[티켓] 명령어 오류:', e); return false; })) return;
+    if (await community.handleMessage(message).catch((e) => { console.error('[자동응답] 오류:', e); return false; })) return;
  
     const args = message.content.trim().split(/\s+/);
     const command = args[0];
