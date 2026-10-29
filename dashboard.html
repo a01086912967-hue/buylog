@@ -4,19 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SODDU SHOP 대시보드</title>
+<meta name="theme-color" content="#4aa3f7">
+<meta name="description" content="티켓, 환영 메시지, 자동응답, 구매 통계를 한 곳에서 관리하는 릴리웨이 대시보드">
+<link rel="icon" type="image/svg+xml" href="/icon.svg">
+<link rel="icon" type="image/png" sizes="64x64" href="/favicon.ico">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.webmanifest">
 <style>
 :root {
-  --sky1: #a9d8ff;
-  --sky2: #cdeaff;
-  --sky3: #eaf6ff;
-  --blue: #3d9bf5;
-  --blue-d: #2f86e8;
-  --navy: #1d3a66;
-  --muted: #6a88aa;
-  --card: rgba(255, 255, 255, 0.78);
-  --line: rgba(120, 180, 240, 0.5);
-  --danger: #e0457f;
-  --ok: #12a86b;
+  --sky1: #a9d8ff; --sky2: #cdeaff; --sky3: #eaf6ff;
+  --blue: #3d9bf5; --blue-d: #2f86e8; --navy: #1d3a66; --muted: #6a88aa;
+  --card: rgba(255, 255, 255, 0.8); --line: rgba(120, 180, 240, 0.5);
+  --danger: #e0457f; --ok: #12a86b; --warn: #d97706;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; min-height: 100%; }
@@ -39,88 +38,104 @@ body::after  { width: 220px; height: 60px; right: 8%; top: 14%; opacity: .6; }
 button, input, select, textarea { font: inherit; color: inherit; }
 a { color: var(--blue-d); }
 
-.top {
-  position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 28px; background: rgba(255,255,255,.7); backdrop-filter: blur(10px);
-  border-bottom: 1px solid var(--line);
-}
-.brand { font-weight: 800; font-size: 20px; letter-spacing: .5px; display: flex; align-items: center; gap: 10px; }
-.brand small { font-weight: 600; color: var(--muted); font-size: 14px; letter-spacing: 0; }
-.logo { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; color: #fff;
-  background: linear-gradient(135deg, #7cc4ff, #3d9bf5); font-size: 18px; }
-.who { display: flex; align-items: center; gap: 10px; font-weight: 600; }
+/* 상단 */
+.top { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  padding: 10px 28px; background: rgba(255,255,255,.72); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
+.brand { font-weight: 800; font-size: 19px; letter-spacing: .4px; display: flex; align-items: center; gap: 10px; cursor: pointer; white-space: nowrap; }
+.brand img { width: 36px; height: 36px; border-radius: 10px; box-shadow: 0 3px 10px rgba(61,155,245,.35); }
+.brand small { font-weight: 600; color: var(--muted); font-size: 13px; letter-spacing: 0; }
+.toplinks { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.toplinks a, .toplinks button { text-decoration: none; color: var(--navy); font-weight: 600; font-size: 14px; padding: 8px 12px; border-radius: 10px; border: 0; background: transparent; cursor: pointer; white-space: nowrap; }
+.toplinks a:hover, .toplinks button:hover { background: rgba(61,155,245,.12); }
+.who { display: flex; align-items: center; gap: 8px; font-weight: 600; margin: 0 8px 0 14px; }
 .who img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid #fff; }
-.who a { color: var(--muted); font-size: 14px; font-weight: 500; white-space: nowrap; }
-.who span { white-space: nowrap; max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
-@media (max-width: 600px) { .brand small { display: none; } .top { padding: 12px 16px; } .who span { max-width: 80px; } .wrap { padding: 18px 14px 120px; } }
+.who span { white-space: nowrap; max-width: 130px; overflow: hidden; text-overflow: ellipsis; }
 
-.wrap { position: relative; z-index: 1; max-width: 1180px; margin: 0 auto; padding: 28px 22px 120px; }
-.shell { display: grid; grid-template-columns: 230px 1fr; gap: 22px; align-items: start; }
-@media (max-width: 860px) { .shell { grid-template-columns: 1fr; } }
+.wrap { position: relative; z-index: 1; max-width: 1180px; margin: 0 auto; padding: 28px 22px 130px; }
+.shell { display: grid; grid-template-columns: 236px minmax(0, 1fr); gap: 22px; align-items: start; }
+@media (max-width: 860px) {
+  .shell { grid-template-columns: 1fr; }
+  .top { padding: 10px 14px; } .toplinks .opt { display: none; } .brand small { display: none; }
+  .wrap { padding: 16px 12px 130px; } .who span { display: none; }
+  .side { position: static !important; padding: 12px; } .side .g { display: none; } .nav { flex-direction: row !important; flex-wrap: nowrap; overflow-x: auto; } .nav button { white-space: nowrap; padding: 9px 12px; } .nav .sec { display: none; }
+}
 
-.card { background: var(--card); border: 1px solid var(--line); border-radius: 22px; padding: 22px;
-  box-shadow: 0 8px 30px rgba(70, 130, 210, .12); backdrop-filter: blur(6px); }
-.side { position: sticky; top: 84px; }
-.side .g { display: flex; align-items: center; gap: 12px; padding-bottom: 16px; margin-bottom: 12px; border-bottom: 1px solid var(--line); }
-.gicon { width: 46px; height: 46px; border-radius: 14px; background: linear-gradient(135deg,#7cc4ff,#3d9bf5); color: #fff;
-  display: grid; place-items: center; font-weight: 800; overflow: hidden; flex: none; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 22px; padding: 22px; box-shadow: 0 8px 30px rgba(70, 130, 210, .12); backdrop-filter: blur(6px); }
+.card + .card { margin-top: 16px; }
+.side { position: sticky; top: 78px; }
+.side .g { display: flex; align-items: center; gap: 12px; padding-bottom: 14px; margin-bottom: 10px; border-bottom: 1px solid var(--line); }
+.gicon { width: 46px; height: 46px; border-radius: 14px; background: linear-gradient(135deg,#7cc4ff,#3d9bf5); color: #fff; display: grid; place-items: center; font-weight: 800; overflow: hidden; flex: none; }
 .gicon img { width: 100%; height: 100%; object-fit: cover; }
 .g b { display: block; line-height: 1.25; word-break: break-all; }
-.nav { display: flex; flex-direction: column; gap: 6px; }
-.nav button { text-align: left; border: 0; background: transparent; padding: 11px 14px; border-radius: 12px; cursor: pointer; font-weight: 600; color: var(--muted); }
+.nav { display: flex; flex-direction: column; gap: 4px; }
+.nav .sec { font-size: 12px; font-weight: 700; color: var(--muted); padding: 10px 14px 4px; }
+.nav button { text-align: left; border: 0; background: transparent; padding: 10px 14px; border-radius: 12px; cursor: pointer; font-weight: 600; color: var(--muted); }
 .nav button:hover { background: rgba(61,155,245,.1); }
 .nav button.on { background: linear-gradient(135deg,#7cc4ff,#3d9bf5); color: #fff; }
 
-h1 { margin: 0 0 4px; font-size: 30px; }
-h2 { margin: 0 0 4px; font-size: 22px; }
+h1 { margin: 0 0 4px; font-size: 28px; }
+h2 { margin: 0 0 6px; font-size: 21px; }
 h3 { margin: 0; font-size: 17px; }
 .muted { color: var(--muted); font-size: 14px; }
 .row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .between { justify-content: space-between; }
 .gap { margin-top: 18px; }
 
-.btn { border: 0; cursor: pointer; border-radius: 12px; padding: 10px 18px; font-weight: 700; color: #fff;
-  background: linear-gradient(135deg, #7cc4ff, #3d9bf5); box-shadow: 0 4px 14px rgba(61,155,245,.35); }
+.btn { border: 0; cursor: pointer; border-radius: 12px; padding: 10px 18px; font-weight: 700; color: #fff; background: linear-gradient(135deg, #7cc4ff, #3d9bf5); box-shadow: 0 4px 14px rgba(61,155,245,.35); text-decoration: none; display: inline-block; }
 .btn:hover { filter: brightness(1.05); }
 .btn:disabled { opacity: .55; cursor: default; }
 .btn.ghost { background: rgba(255,255,255,.85); color: var(--navy); box-shadow: none; border: 1px solid var(--line); }
 .btn.danger { color: var(--danger); }
+.btn.dc { background: #5865f2; box-shadow: 0 4px 14px rgba(88,101,242,.35); }
 .btn.sm { padding: 7px 13px; font-size: 14px; }
 .btn.big { padding: 14px 26px; font-size: 17px; }
 
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 16px; }
-.srv { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.grid.s { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
+.card.srv { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.card.srv + .card { margin-top: 0; }
 .srv .gicon { width: 72px; height: 72px; border-radius: 22px; font-size: 26px; }
 
 .pcard { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; margin-top: 14px; }
-.tag { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; background: rgba(61,155,245,.14); color: var(--blue-d); }
+.tag { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; background: rgba(61,155,245,.14); color: var(--blue-d); white-space: nowrap; }
 .tag.ok { background: rgba(18,168,107,.14); color: var(--ok); }
 .tag.off { background: rgba(106,136,170,.16); color: var(--muted); }
+.tag.warn { background: rgba(217,119,6,.14); color: var(--warn); }
+.tag.bad { background: rgba(224,69,127,.14); color: var(--danger); }
 
+.tw { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
-th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid rgba(120,180,240,.3); }
-th { color: var(--muted); font-weight: 600; }
+th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid rgba(120,180,240,.3); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; white-space: nowrap; }
+td.num, th.num { text-align: right; white-space: nowrap; }
+tr.click { cursor: pointer; } tr.click:hover td { background: rgba(61,155,245,.07); }
+.ua { max-width: 240px; color: var(--muted); font-size: 12px; word-break: break-all; }
+.mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
 
-.tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 16px 0 18px; border-bottom: 1px solid var(--line); }
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 14px 0 18px; border-bottom: 1px solid var(--line); }
 .tabs button { border: 0; background: transparent; padding: 11px 18px; font-weight: 700; color: var(--muted); cursor: pointer; border-bottom: 3px solid transparent; margin-bottom: -1px; }
 .tabs button.on { color: var(--blue-d); border-bottom-color: var(--blue); }
 
 .cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 22px; align-items: start; }
 @media (max-width: 980px) { .cols { grid-template-columns: 1fr; } }
+.cols .card + .card { margin-top: 0; }
 .field { margin-bottom: 16px; }
 .field > label { display: block; font-weight: 700; margin-bottom: 6px; font-size: 14px; }
-.field .hint { color: var(--muted); font-size: 12.5px; margin-top: 5px; }
-input[type=text], input[type=url], input[type=number], select, textarea {
-  width: 100%; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: rgba(255,255,255,.92); outline: none;
-}
+.field .hint, .hint { color: var(--muted); font-size: 12.5px; margin-top: 5px; line-height: 1.5; }
+input[type=text], input[type=url], input[type=number], input[type=password], input[type=search], select, textarea {
+  width: 100%; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: rgba(255,255,255,.92); outline: none; }
 input:focus, select:focus, textarea:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(61,155,245,.18); }
-textarea { min-height: 110px; resize: vertical; }
-input[type=color] { width: 46px; height: 42px; padding: 2px; border-radius: 10px; border: 1px solid var(--line); background: #fff; cursor: pointer; }
+textarea { min-height: 100px; resize: vertical; }
+input[type=color] { width: 46px; height: 42px; padding: 2px; border-radius: 10px; border: 1px solid var(--line); background: #fff; cursor: pointer; flex: none; }
 .inline { display: flex; gap: 10px; align-items: center; }
 .sw { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,.7); margin-bottom: 10px; cursor: pointer; }
 .sw input { width: 18px; height: 18px; accent-color: var(--blue); flex: none; }
 .sw b { display: block; font-size: 14px; }
 .sw span { color: var(--muted); font-size: 12.5px; }
+.seg { display: flex; gap: 8px; margin-bottom: 16px; }
+.seg label { flex: 1; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; cursor: pointer; background: rgba(255,255,255,.7); font-weight: 700; display: flex; align-items: center; gap: 8px; }
+.seg label.on { border-color: var(--blue); background: rgba(61,155,245,.12); color: var(--blue-d); }
+.seg input { accent-color: var(--blue); }
 
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip { border: 1px solid var(--line); background: rgba(255,255,255,.85); border-radius: 999px; padding: 6px 13px; font-size: 13.5px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 7px; }
@@ -128,36 +143,72 @@ input[type=color] { width: 46px; height: 42px; padding: 2px; border-radius: 10px
 .chip.on { background: linear-gradient(135deg,#7cc4ff,#3d9bf5); color: #fff; border-color: transparent; }
 
 .qcard { border: 1px solid var(--line); border-radius: 16px; padding: 14px; background: rgba(255,255,255,.7); margin-bottom: 12px; }
-.qcard .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; font-weight: 700; }
-.qcard .tools { display: flex; gap: 6px; }
+.qcard .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; font-weight: 700; gap: 8px; }
+.qcard .tools { display: flex; gap: 6px; flex: none; }
 .qcard .tools button { border: 1px solid var(--line); background: #fff; border-radius: 8px; width: 32px; height: 30px; cursor: pointer; }
+.qcard .qcard { background: rgba(234,246,255,.7); }
+
+.stat { padding: 16px 18px; }
+.stat .k { color: var(--muted); font-size: 13px; font-weight: 600; }
+.stat .v { font-size: 26px; font-weight: 800; margin-top: 4px; }
+.stat .s { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+.bars { display: flex; align-items: flex-end; gap: 6px; height: 170px; padding-top: 10px; }
+.bars .b { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; min-width: 0; }
+.bars .b i { display: block; width: 100%; max-width: 34px; border-radius: 8px 8px 3px 3px; background: linear-gradient(180deg,#7cc4ff,#3d9bf5); min-height: 3px; }
+.bars .b span { font-size: 11px; color: var(--muted); margin-top: 6px; white-space: nowrap; }
+.person { display: flex; align-items: center; gap: 10px; }
+.person img, .person .ph { width: 34px; height: 34px; border-radius: 50%; background: #cfe4fa; flex: none; object-fit: cover; }
 
 /* 디스코드 미리보기 */
 .dc { background: #313338; border-radius: 16px; padding: 18px; color: #dbdee1; font-family: "gg sans", "Noto Sans", "Malgun Gothic", sans-serif; }
+.dc + .dc { margin-top: 12px; }
 .dc .msg { display: flex; gap: 14px; }
 .dc .av { width: 42px; height: 42px; border-radius: 50%; background: linear-gradient(135deg,#7cc4ff,#3d9bf5); flex: none; }
 .dc .nm { font-weight: 600; color: #fff; margin-bottom: 4px; }
 .dc .nm span { background: #5865f2; font-size: 10px; padding: 1px 5px; border-radius: 4px; margin-left: 6px; vertical-align: 2px; }
-.dc .emb { background: #2b2d31; border-left: 4px solid var(--blue); border-radius: 6px; padding: 10px 14px 12px; max-width: 440px; position: relative; }
+.dc .ct { font-size: 14px; margin-bottom: 4px; word-break: break-word; }
+.dc .emb { background: #2b2d31; border-left: 4px solid var(--blue); border-radius: 6px; padding: 10px 14px 12px; max-width: 440px; position: relative; margin-bottom: 4px; }
 .dc .emb .t { font-weight: 700; color: #fff; margin-bottom: 6px; font-size: 16px; word-break: break-word; }
 .dc .emb .d { font-size: 14px; line-height: 1.4; word-break: break-word; }
+.dc .emb .fl { margin-top: 8px; font-size: 14px; } .dc .emb .fl b { display: block; color: #fff; }
 .dc .emb img.im { width: 100%; border-radius: 6px; margin-top: 10px; display: block; }
-.dc .emb img.th { position: absolute; right: 12px; top: 12px; width: 64px; height: 64px; border-radius: 6px; object-fit: cover; }
+.dc .emb img.th { position: absolute; right: 12px; top: 12px; width: 64px; height: 64px; border-radius: 50%; object-fit: cover; }
+.dc .emb.hasth { padding-right: 90px; }
 .dc .emb .f { font-size: 12px; color: #b5bac1; margin-top: 10px; }
-.dc .b { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; padding: 6px 16px; border-radius: 4px; font-weight: 600; font-size: 14px; color: #fff; background: #5865f2; }
+.dc .b { display: inline-flex; align-items: center; gap: 6px; margin: 6px 6px 0 0; padding: 6px 16px; border-radius: 4px; font-weight: 600; font-size: 14px; color: #fff; background: #5865f2; }
 .dc .b.Secondary { background: #4e5058; } .dc .b.Success { background: #248046; } .dc .b.Danger { background: #da373c; }
+.dc .sel { margin-top: 8px; background: #1e1f22; border: 1px solid #1e1f22; border-radius: 4px; padding: 9px 12px; display: flex; justify-content: space-between; max-width: 440px; color: #b5bac1; font-size: 14px; }
+.dc .opts { margin-top: 4px; background: #2b2d31; border: 1px solid #1e1f22; border-radius: 4px; max-width: 440px; padding: 4px; }
+.dc .opts div { padding: 7px 10px; border-radius: 4px; font-size: 14px; color: #fff; } .dc .opts small { display: block; color: #b5bac1; font-size: 12px; }
+.dc .opts div:hover { background: #35373c; }
 
 .savebar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; padding: 12px 22px; display: flex; justify-content: center; }
 .savebar .in { width: 100%; max-width: 1136px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
-  background: rgba(255,255,255,.92); border: 1px solid var(--line); border-radius: 18px; padding: 12px 18px; box-shadow: 0 10px 34px rgba(70,130,210,.25); }
+  background: rgba(255,255,255,.93); border: 1px solid var(--line); border-radius: 18px; padding: 12px 18px; box-shadow: 0 10px 34px rgba(70,130,210,.25); }
 .savebar .st { font-weight: 600; color: var(--muted); }
-.savebar.dirty .st { color: #d97706; }
-.toast { position: fixed; top: 76px; left: 50%; transform: translateX(-50%); z-index: 60; background: var(--navy); color: #fff; padding: 11px 20px; border-radius: 999px; font-weight: 600; box-shadow: 0 8px 24px rgba(0,0,0,.2); }
+.savebar.dirty .st { color: var(--warn); }
+.toast { position: fixed; top: 76px; left: 50%; transform: translateX(-50%); z-index: 60; background: var(--navy); color: #fff; padding: 11px 20px; border-radius: 999px; font-weight: 600; box-shadow: 0 8px 24px rgba(0,0,0,.2); max-width: 92vw; text-align: center; }
 .toast.err { background: var(--danger); }
-
-.hero { max-width: 520px; margin: 70px auto; text-align: center; }
-.hero h1 { font-size: 34px; margin-bottom: 10px; }
 .empty { text-align: center; color: var(--muted); padding: 26px 10px; }
+.notice { border: 1px solid rgba(217,119,6,.4); background: rgba(255,244,222,.85); border-radius: 14px; padding: 12px 16px; margin-bottom: 16px; font-size: 14px; }
+
+/* 첫 화면 */
+.hero { text-align: center; padding: 44px 10px 30px; }
+.hero .logo { width: 104px; height: 104px; border-radius: 28px; box-shadow: 0 14px 40px rgba(61,155,245,.4); }
+.hero h1 { font-size: 40px; margin: 22px 0 10px; line-height: 1.2; }
+.hero p.lead { font-size: 18px; color: var(--muted); max-width: 560px; margin: 0 auto 26px; line-height: 1.6; }
+.hero .cta { display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; }
+.landing { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 26px; align-items: start; margin-top: 10px; }
+@media (max-width: 900px) { .landing { grid-template-columns: 1fr; } .hero h1 { font-size: 30px; } }
+.feat { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; margin-top: 30px; }
+.feat .card { padding: 18px; } .feat .card + .card { margin-top: 0; }
+.feat .ic { font-size: 26px; } .feat b { display: block; margin: 8px 0 4px; } .feat span { color: var(--muted); font-size: 13.5px; line-height: 1.5; }
+.authcard h2 { margin-bottom: 14px; }
+.err { color: var(--danger); font-size: 13.5px; font-weight: 600; min-height: 20px; margin: 6px 0; }
+.sep { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 13px; margin: 16px 0; }
+.sep::before, .sep::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.foot { text-align: center; color: var(--muted); font-size: 13px; margin-top: 40px; line-height: 1.8; }
+.foot a { color: var(--muted); }
 </style>
 </head>
 <body>
@@ -172,12 +223,17 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const getP = (o, p) => p.split('.').reduce((a, k) => (a == null ? a : a[k]), o);
 const setP = (o, p, v) => { const ks = p.split('.'); const l = ks.pop(); ks.reduce((a, k) => a[k], o)[l] = v; };
 const rid = () => Array.from(crypto.getRandomValues(new Uint8Array(5)), (b) => b.toString(16).padStart(2, '0')).join('');
+const fmtN = (n) => Number(n || 0).toLocaleString('ko-KR');
+const fmtT = (ts) => (ts ? new Date(ts).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', year: '2-digit' }) : '-');
+const fmtD = (ts) => (ts ? new Date(ts).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: 'long', day: 'numeric' }) : '-');
+const safeUrl = (u) => (/^https?:\/\//.test(u || '') ? esc(u) : '');
+const ext = (u) => (u ? `href="${safeUrl(u)}" target="_blank" rel="noopener noreferrer"` : 'href="#" onclick="return false" style="opacity:.5"');
 
-const state = { me: null, guilds: [], gid: null, data: null, pid: null, tab: 'message', dirty: false, tickets: null, busy: false };
+const state = { pub: null, me: null, guilds: [], gid: null, data: null, page: 'home', pid: null, tab: 'message', wtab: 'welcome', dirty: false, busy: false, cache: {}, auth: 'login' };
 
 async function api(path, opts = {}) {
   const r = await fetch(path, { credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'dashboard' }, ...opts });
-  if (r.status === 401) { state.me = null; render(); throw new Error('login'); }
+  if (r.status === 401 && !path.startsWith('/api/auth/')) { state.me = null; state.data = null; render(); throw new Error('login'); }
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.error || '오류가 났어요.');
   return j;
@@ -187,134 +243,197 @@ let toastTimer;
 function toast(msg, err) {
   $('#toast').innerHTML = `<div class="toast ${err ? 'err' : ''}">${esc(msg)}</div>`;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => ($('#toast').innerHTML = ''), 3200);
+  toastTimer = setTimeout(() => ($('#toast').innerHTML = ''), 3400);
 }
 
 // ---------- 라우팅 ----------
 function go(hash) {
   if (state.dirty && !confirm('저장하지 않은 변경사항이 있어요. 그래도 이동할까요?')) return;
   state.dirty = false;
-  if (state.data && !hash.startsWith('#/g/' + state.gid)) state.data = null;
-  location.hash = hash;
+  if (location.hash === hash) route(); else location.hash = hash;
 }
 window.addEventListener('hashchange', route);
 window.addEventListener('beforeunload', (e) => { if (state.dirty) { e.preventDefault(); e.returnValue = ''; } });
 
 function route() {
-  const h = location.hash.replace(/^#\/?/, '').split('/');
-  state.gid = null; state.pid = null;
-  if (h[0] === 'g' && h[1]) {
+  const h = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
+  state.gid = null; state.pid = null; state.page = 'home';
+  if (h[0] === 'account') state.page = 'account';
+  else if (h[0] === 'admin') state.page = 'admin-' + (h[1] || 'logs');
+  else if (h[0] === 'g' && h[1]) {
     state.gid = h[1];
-    if (h[2] === 'p' && h[3]) { state.pid = h[3]; state.tab = h[4] || 'message'; }
+    const s = h[2] || '';
+    if (s === '') state.page = 'overview';
+    else if (s === 'tickets') state.page = h[3] === 'settings' ? 'tsettings' : 'tickets';
+    else if (s === 'p' && h[3]) { state.page = 'panel'; state.pid = h[3]; state.tab = h[4] || 'message'; }
+    else if (s === 'welcome') { state.page = 'welcome'; state.wtab = h[3] === 'leave' ? 'leave' : 'welcome'; }
+    else if (['stats', 'purchases', 'users', 'auto'].includes(s)) state.page = s;
+    else state.page = 'overview';
   }
   load();
 }
 
 async function load() {
+  if (!state.pub) { try { state.pub = await api('/api/public'); } catch (e) { state.pub = { links: {} }; } }
   if (!state.me) {
-    try { const j = await api('/api/me'); state.me = j.user; state.guilds = j.guilds; } catch (e) { state.me = null; }
+    try { const j = await api('/api/me'); state.me = j.account; state.guilds = j.guilds; state.pub.discordLogin = j.discordLogin; } catch (e) { state.me = null; }
   }
   if (state.me && state.gid && (!state.data || state.data.guild.id !== state.gid)) {
-    try { state.data = await api('/api/guild/' + state.gid); state.tickets = null; state.dirty = false; }
-    catch (e) { toast(e.message, true); state.gid = null; state.data = null; location.hash = '#/'; }
+    try { state.data = await api('/api/guild/' + state.gid); state.cache = {}; state.dirty = false; }
+    catch (e) { toast(e.message, true); state.gid = null; state.data = null; location.hash = '#/'; return; }
   }
   render();
-  if (state.me && state.gid && !state.pid && state.tickets === null) loadTickets();
 }
 
-async function loadTickets() {
-  try { state.tickets = (await api(`/api/guild/${state.gid}/tickets`)).tickets; } catch (e) { state.tickets = []; }
-  if (state.gid && !state.pid) renderMain();
-}
-
-// ---------- 화면 ----------
-const curPanel = () => state.data && state.data.config.panels.find((p) => p.id === state.pid);
+// ---------- 공통 화면 ----------
+const T = () => state.data && state.data.tickets;
+const C = () => state.data && state.data.community;
+const curPanel = () => T() && T().panels.find((p) => p.id === state.pid);
 const chName = (id) => { const c = state.data.channels.find((x) => x.id === id); return c ? '#' + c.name : ''; };
+const L = () => (state.pub && state.pub.links) || {};
 
 function renderTop() {
-  const me = state.me;
-  $('#top').innerHTML = `<header class="top"><div class="brand"><span class="logo">☁</span>SODDU SHOP <small>대시보드</small></div>
-    ${me ? `<div class="who">${me.avatar ? `<img src="${esc(me.avatar)}" alt="">` : ''}<span>${esc(me.name)}</span><a href="/logout">로그아웃</a></div>` : ''}</header>`;
+  const me = state.me, l = L();
+  const links = `<a class="opt" ${ext(l.supportUrl)}>공식 디스코드 서버</a><a class="opt" ${ext(l.contactUrl)}>문의하기</a><a ${ext(l.inviteUrl)}>봇 초대하기</a>`;
+  $('#top').innerHTML = `<header class="top"><div class="brand" data-go="#/"><img src="/icon.svg" alt="">SODDU SHOP <small>대시보드</small></div>
+    <div class="toplinks">${links}${me ? `<span class="who">${me.avatar ? `<img src="${esc(me.avatar)}" alt="">` : ''}<span>${esc(me.name)}</span></span><button data-go="#/account">내 계정</button><button data-act="logout">로그아웃</button>` : `<button data-act="auth-open" data-mode="login">로그인</button>`}</div></header>`;
 }
 
 function render() {
   renderTop();
   const app = $('#app');
-  if (!state.me) {
-    $('#bar').innerHTML = '';
-    app.innerHTML = `<div class="card hero"><h1>티켓 대시보드</h1>
-      <p class="muted">디스코드로 로그인해서 서버의 티켓 패널, 양식, 권한을 설정해 보세요.<br>서버 관리 권한이 있는 서버만 보여요.</p>
-      <p><a class="btn big" href="/login" style="display:inline-block;text-decoration:none">디스코드로 로그인</a></p></div>`;
-    return;
-  }
-  if (!state.gid) { $('#bar').innerHTML = ''; return renderServers(); }
-  if (!state.data) { app.innerHTML = '<div class="empty">불러오는 중...</div>'; return; }
-  const g = state.data.guild;
-  app.innerHTML = `<div class="shell">
-    <aside class="card side">
-      <div class="g"><div class="gicon">${g.icon ? `<img src="${esc(g.icon)}" alt="">` : esc(g.name.slice(0, 1))}</div><div><b>${esc(g.name)}</b><span class="muted">관리 중</span></div></div>
-      <nav class="nav"><button class="on" data-go="#/g/${esc(g.id)}">🎫 티켓</button><button data-go="#/">← 서버 목록</button></nav>
-    </aside>
-    <main id="main"></main></div>`;
+  if (!state.me) { $('#bar').innerHTML = ''; return renderLanding(app); }
+  const sideHtml = renderSide();
+  app.innerHTML = `<div class="shell"><aside class="card side">${sideHtml}</aside><main id="main"></main></div>`;
   renderMain();
 }
 
-function renderServers() {
-  const list = state.guilds;
-  $('#app').innerHTML = `<h1>서버 선택</h1><p class="muted">봇이 들어와 있고, 내가 "서버 관리" 권한을 가진 서버예요.</p>
-    ${list.length ? `<div class="grid gap">${list.map((g) => `<div class="card srv">
-      <div class="gicon">${g.icon ? `<img src="${esc(g.icon)}" alt="">` : esc(g.name.slice(0, 1))}</div>
-      <b>${esc(g.name)}</b><button class="btn" data-go="#/g/${esc(g.id)}">관리하기</button></div>`).join('')}</div>`
-      : `<div class="card empty gap">관리할 수 있는 서버가 없어요.<br>봇이 서버에 들어와 있는지, 내 계정에 "서버 관리" 권한이 있는지 확인해 주세요.</div>`}`;
+function renderSide() {
+  const me = state.me, p = state.page;
+  const nb = (hash, label, on) => `<button class="${on ? 'on' : ''}" data-go="${hash}">${label}</button>`;
+  let h = '';
+  if (state.gid && state.data) {
+    const g = state.data.guild, b = `#/g/${esc(g.id)}`;
+    h += `<div class="g"><div class="gicon">${g.icon ? `<img src="${esc(g.icon)}" alt="">` : esc(g.name.slice(0, 1))}</div><div><b>${esc(g.name)}</b><span class="muted">관리 중</span></div></div><nav class="nav">
+      ${nb(b, '🏠 개요', p === 'overview')}${nb(b + '/tickets', '🎫 티켓', ['tickets', 'tsettings', 'panel'].includes(p))}
+      ${nb(b + '/stats', '📊 서버 통계', p === 'stats')}${nb(b + '/purchases', '🧾 구매 로그', p === 'purchases')}${nb(b + '/users', '👤 유저 정보', p === 'users')}
+      ${nb(b + '/welcome', '👋 환영 / 퇴장', p === 'welcome')}${nb(b + '/auto', '💬 자동응답', p === 'auto')}
+      <div class="sec">기타</div>${nb('#/', '← 서버 목록', false)}`;
+  } else {
+    h += `<div class="g"><div class="gicon">${me.avatar ? `<img src="${esc(me.avatar)}" alt="">` : esc((me.name || '?').slice(0, 1))}</div><div><b>${esc(me.name)}</b><span class="muted">${me.isAdmin ? '관리자' : '내 계정'}</span></div></div><nav class="nav">
+      ${nb('#/', '🏠 서버 목록', p === 'home')}`;
+  }
+  h += `${nb('#/account', '⚙️ 내 계정', p === 'account')}`;
+  if (me.isAdmin) {
+    h += `<div class="sec">관리자 전용</div>${nb('#/admin/logs', '🛡️ 로그인 기록', p === 'admin-logs')}${nb('#/admin/accounts', '👥 계정 목록', p === 'admin-accounts')}${nb('#/admin/site', '🔗 첫 화면 링크', p === 'admin-site')}`;
+  }
+  return h + '</nav>';
 }
 
 function renderMain() {
-  const main = $('#main');
-  if (!main) return;
-  if (state.pid) {
-    if (!curPanel()) { state.pid = null; location.hash = '#/g/' + state.gid; return; }
-    renderPanel(main);
-  } else {
-    $('#bar').innerHTML = '';
-    renderPanelList(main);
-  }
+  const main = $('#main'); if (!main) return;
+  const p = state.page;
+  const needGuild = !['home', 'account'].includes(p) && !p.startsWith('admin-');
+  const showBar = ['panel', 'tsettings', 'welcome', 'auto'].includes(p);
+  if (needGuild && (!state.gid || !state.data)) { main.innerHTML = '<div class="empty">불러오는 중...</div>'; $('#bar').innerHTML = ''; return; }
+  if (showBar) renderBar(); else $('#bar').innerHTML = '';
+  const fn = { home: pgHome, account: pgAccount, overview: pgOverview, tickets: pgTickets, tsettings: pgTSettings, panel: pgPanel, stats: pgStats, purchases: pgPurchases, users: pgUsers, welcome: pgWelcome, auto: pgAuto,
+    'admin-logs': pgAdminLogs, 'admin-accounts': pgAdminAccounts, 'admin-site': pgAdminSite }[p];
+  if (!fn) { main.innerHTML = '<div class="empty">페이지를 찾을 수 없어요.</div>'; return; }
+  if (p === 'panel' && !curPanel()) { location.hash = `#/g/${state.gid}/tickets`; return; }
+  fn(main);
 }
 
-function renderPanelList(main) {
-  const panels = state.data.config.panels;
-  const tk = state.tickets;
-  main.innerHTML = `<div class="row between"><div><h1>티켓</h1><p class="muted">패널을 만들고 설정하면 서버 채널에 티켓 열기 버튼이 생겨요.</p></div>
-    <button class="btn" data-act="new-panel">+ 새 패널 만들기</button></div>
-    ${panels.length ? panels.map((p) => `<div class="card pcard"><div><h3>${esc(p.name)}</h3>
-      <div class="muted" style="margin-top:4px">${p.channelId ? esc(chName(p.channelId)) : '채널 미선택'} · 질문 ${p.questions.length}개
-      · ${p.messageId ? '<span class="tag ok">전송됨</span>' : '<span class="tag off">아직 안 보냄</span>'}</div></div>
-      <div class="row"><button class="btn" data-go="#/g/${esc(state.gid)}/p/${esc(p.id)}/message">설정하기</button>
-      <button class="btn ghost danger" data-act="del-panel" data-id="${esc(p.id)}">삭제</button></div></div>`).join('')
-      : `<div class="card empty gap">아직 패널이 없어요. "새 패널 만들기"를 눌러 시작해 보세요.</div>`}
-    <h2 class="gap" style="margin-top:30px">최근 티켓</h2>
-    <div class="card" style="margin-top:10px">${tk === null ? '<div class="empty">불러오는 중...</div>' : tk.length ? `<table><tr><th>#</th><th>소유자</th><th>패널</th><th>열린 시간</th><th>상태</th><th></th></tr>
-      ${tk.map((t) => `<tr><td>${String(t.number).padStart(4, '0')}</td><td>${esc(t.ownerName)}</td><td>${esc(t.panelName)}</td>
-      <td>${esc(new Date(t.ts).toLocaleString('ko-KR'))}</td><td>${t.closed ? '<span class="tag off">닫힘</span>' : '<span class="tag ok">열림</span>'}</td>
-      <td>${!t.closed && t.exists ? `<a href="https://discord.com/channels/${esc(state.gid)}/${esc(t.channelId)}" target="_blank" rel="noopener">열기</a>` : ''}</td></tr>`).join('')}</table>`
-      : '<div class="empty">아직 열린 티켓이 없어요.</div>'}</div>`;
+// ---------- 첫 화면 (로그인 전) ----------
+function renderLanding(app) {
+  const l = L(), pub = state.pub || {};
+  const login = state.auth === 'login';
+  app.innerHTML = `<section class="hero"><img class="logo" src="/icon.svg" alt="SODDU SHOP">
+    <h1>SODDU SHOP<br>봇 대시보드</h1>
+    <p class="lead">티켓, 환영·퇴장 메시지, 자동응답, 구매 로그와 서버 통계를<br>웹에서 쉽게 설정하고 확인해요.</p>
+    <div class="cta"><a class="btn big" ${ext(l.inviteUrl)}>봇 초대하기</a><a class="btn big ghost" ${ext(l.supportUrl)}>공식 디스코드 서버</a><a class="btn big ghost" ${ext(l.contactUrl)}>문의하기</a></div></section>
+    <div class="landing"><div class="feat" style="margin-top:0">
+      <div class="card"><div class="ic">🎫</div><b>티켓</b><span>패널·선택기·양식, 닫기/다시 열기/삭제까지 티켓툴처럼</span></div>
+      <div class="card"><div class="ic">📊</div><b>서버 통계</b><span>최근 7일과 전체 구매·가입 통계를 한눈에</span></div>
+      <div class="card"><div class="ic">🧾</div><b>구매 로그</b><span>누가 무엇을 샀는지 기록을 바로 확인</span></div>
+      <div class="card"><div class="ic">👤</div><b>유저 정보</b><span>등급, 구매 금액, 초대 수를 검색하고 수정</span></div>
+      <div class="card"><div class="ic">👋</div><b>환영 / 퇴장</b><span>들어오고 나갈 때 보낼 메시지와 자동 역할</span></div>
+      <div class="card"><div class="ic">💬</div><b>자동응답</b><span>명령어를 정해두면 봇이 알아서 답해요</span></div></div>
+      <div class="card authcard"><h2>${login ? '로그인' : '회원가입'}</h2>
+        <form id="authform" autocomplete="on">
+          <div class="field"><label>아이디</label><input type="text" name="username" autocomplete="username" maxlength="20" placeholder="영문 소문자, 숫자, _ (3~20자)"></div>
+          <div class="field"><label>비밀번호</label><input type="password" name="password" autocomplete="${login ? 'current-password' : 'new-password'}" maxlength="100" placeholder="${login ? '' : '8자 이상'}"></div>
+          ${login ? '' : `<label class="sw"><input type="checkbox" name="consent"><div><b>로그인 기록·IP 수집에 동의해요</b><span>보안을 위해 로그인 시간, IP 주소, 접속 기기 정보를 기록하고 관리자만 볼 수 있어요.</span></div></label>`}
+          <div class="err" id="autherr"></div>
+          <button class="btn big" style="width:100%" type="submit">${login ? '로그인' : '가입하기'}</button></form>
+        <div class="row" style="justify-content:center;margin-top:12px"><span class="muted">${login ? '처음이세요?' : '이미 계정이 있나요?'}</span><a href="#" data-act="auth-open" data-mode="${login ? 'signup' : 'login'}">${login ? '회원가입' : '로그인'}</a></div>
+        ${pub.discordLogin ? `<div class="sep">또는</div><a class="btn dc big" style="width:100%;text-align:center" href="/login">디스코드로 계속하기</a>` : ''}
+        <p class="hint" style="margin-top:14px">서버를 관리하려면 로그인 후 디스코드 계정을 한 번 연결해야 해요. 로그인할 때 접속 기록(시간·IP)이 남아요.</p></div></div>
+    <div class="foot"><a ${ext(l.supportUrl)}>공식 디스코드 서버</a> · <a ${ext(l.contactUrl)}>문의하기</a> · <a ${ext(l.inviteUrl)}>봇 초대하기</a><br>© SODDU SHOP</div>`;
+  const f = $('#authform');
+  f.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const d = Object.fromEntries(new FormData(f));
+    const body = { username: d.username, password: d.password };
+    if (!login) body.consent = !!d.consent;
+    const btn = f.querySelector('button[type=submit]'); btn.disabled = true;
+    try {
+      const r = await api(login ? '/api/auth/login' : '/api/auth/signup', { method: 'POST', body: JSON.stringify(body) });
+      state.me = null; state.guilds = [];
+      await load();
+      if (!login && !r.account.discordId) toast('가입 완료! 서버를 관리하려면 내 계정에서 디스코드를 연결해 주세요.');
+    } catch (err) { $('#autherr').textContent = err.message; btn.disabled = false; }
+  });
 }
 
-const TABS = [['message', '패널 메시지'], ['form', '양식'], ['perms', '권한'], ['settings', '티켓 설정']];
-
-function renderPanel(main) {
-  const p = curPanel();
-  main.innerHTML = `<div class="row between"><div><div class="muted"><a href="#/g/${esc(state.gid)}" data-go="#/g/${esc(state.gid)}">티켓</a> › 패널 설정</div>
-    <h1>${esc(p.name)}</h1></div></div>
-    <div class="tabs">${TABS.map(([k, n]) => `<button class="${state.tab === k ? 'on' : ''}" data-act="tab" data-tab="${k}">${n}</button>`).join('')}</div>
-    <div id="tab"></div>`;
-  renderTab();
-  renderBar();
+// ---------- 서버 목록 ----------
+function pgHome(main) {
+  const l = L();
+  const noDc = !state.me.discordId;
+  main.innerHTML = `<h1>서버 선택</h1><p class="muted">봇이 들어와 있고, 내가 "서버 관리" 권한을 가진 서버예요.</p>
+    ${noDc ? `<div class="notice gap"><b>디스코드 계정을 연결해 주세요.</b><br>서버 관리 권한은 디스코드 계정으로 확인해요. ${state.pub.discordLogin ? `<a class="btn sm dc" style="margin-top:8px" href="/link/discord">디스코드 계정 연결하기</a>` : '(관리자가 DISCORD_CLIENT_SECRET 을 설정하면 연결할 수 있어요)'}</div>` : ''}
+    ${state.guilds.length ? `<div class="grid gap">${state.guilds.map((g) => `<div class="card srv"><div class="gicon">${g.icon ? `<img src="${esc(g.icon)}" alt="">` : esc(g.name.slice(0, 1))}</div>
+      <div><b>${esc(g.name)}</b><div class="muted">멤버 ${fmtN(g.members)}명</div></div><button class="btn" data-go="#/g/${esc(g.id)}">관리하기</button></div>`).join('')}</div>`
+      : (noDc ? '' : `<div class="card empty gap">관리할 수 있는 서버가 없어요.<br>봇이 서버에 들어와 있는지, 내 계정에 "서버 관리" 권한이 있는지 확인해 주세요.<br><br><a class="btn" ${ext(l.inviteUrl)}>봇 초대하기</a></div>`)}`;
 }
 
-function renderBar() {
-  $('#bar').innerHTML = `<div class="savebar ${state.dirty ? 'dirty' : ''}" id="savebar"><div class="in"><span class="st" id="stxt">${state.dirty ? '저장하지 않은 변경사항이 있어요' : '모든 변경사항이 저장됐어요'}</span>
-    <div class="row"><button class="btn" data-act="save" ${state.busy ? 'disabled' : ''}>저장</button></div></div></div>`;
+// ---------- 내 계정 ----------
+function pgAccount(main) {
+  const me = state.me;
+  main.innerHTML = `<h1>내 계정</h1><p class="muted">로그인 방법과 디스코드 연결을 관리해요.</p>
+    <div class="cols gap"><div class="card"><h2>계정 정보</h2>
+      <div class="field"><label>아이디</label><div>${me.username ? esc(me.username) : '<span class="muted">(디스코드로만 만든 계정)</span>'}</div></div>
+      <div class="field"><label>디스코드 연결</label>${me.discordId ? `<span class="tag ok">연결됨</span> <span class="muted mono">${esc(me.discordId)}</span>` : `<span class="tag off">연결 안 됨</span>
+        <div class="hint">서버를 관리하려면 연결이 필요해요.</div>${state.pub.discordLogin ? `<a class="btn dc sm" style="margin-top:8px" href="/link/discord">디스코드 계정 연결하기</a>` : '<div class="hint">(DISCORD_CLIENT_SECRET 설정 필요)</div>'}`}</div>
+      ${me.isAdmin ? '<div class="field"><label>권한</label><span class="tag">관리자 (봇 주인)</span></div>' : ''}
+      <button class="btn ghost" data-act="logout">로그아웃</button></div>
+      <div class="card"><h2>비밀번호 변경</h2>${me.hasPassword ? `<form id="pwform"><div class="field"><label>현재 비밀번호</label><input type="password" name="current" autocomplete="current-password"></div>
+        <div class="field"><label>새 비밀번호</label><input type="password" name="next" autocomplete="new-password" placeholder="8자 이상"></div><div class="err" id="pwerr"></div><button class="btn" type="submit">변경하기</button></form>`
+        : '<div class="muted">디스코드로만 만든 계정이라 비밀번호가 없어요.</div>'}
+      <p class="hint" style="margin-top:14px">로그인 기록(시간·IP·기기)은 보안을 위해 수집되며 관리자만 볼 수 있어요.</p></div></div>`;
+  const f = $('#pwform');
+  if (f) f.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const d = Object.fromEntries(new FormData(f));
+    try { await api('/api/auth/password', { method: 'POST', body: JSON.stringify(d) }); toast('비밀번호를 바꿨어요.'); f.reset(); $('#pwerr').textContent = ''; }
+    catch (err) { $('#pwerr').textContent = err.message; }
+  });
 }
+
+// ---------- 입력 도우미 (scope: panel / tset / com) ----------
+const scopeObj = (s) => (s === 'panel' ? curPanel() : s === 'tset' ? T().settings : s === 'com' ? C() : null);
+const val = (s, path) => getP(scopeObj(s), path);
+const F = (s) => ({
+  text: (label, path, o = {}) => `<div class="field"><label>${label}</label><input type="${o.type || 'text'}" data-s="${s}" data-p="${path}" value="${esc(val(s, path))}" ${o.max ? `maxlength="${o.max}"` : ''} placeholder="${esc(o.ph || '')}">${o.hint ? `<div class="hint">${o.hint}</div>` : ''}</div>`,
+  area: (label, path, o = {}) => `<div class="field"><label>${label}</label><textarea data-s="${s}" data-p="${path}" ${o.max ? `maxlength="${o.max}"` : ''}>${esc(val(s, path))}</textarea>${o.hint ? `<div class="hint">${o.hint}</div>` : ''}</div>`,
+  select: (label, path, options, o = {}) => `<div class="field"><label>${label}</label><select data-s="${s}" data-p="${path}">${options.map(([v, n]) => `<option value="${esc(v)}" ${String(val(s, path)) === String(v) ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>${o.hint ? `<div class="hint">${o.hint}</div>` : ''}</div>`,
+  toggle: (title, desc, path) => `<label class="sw"><input type="checkbox" data-s="${s}" data-p="${path}" data-t="check" ${val(s, path) ? 'checked' : ''}><div><b>${title}</b><span>${desc}</span></div></label>`,
+  color: (label, path) => `<div class="field"><label>${label}</label><div class="inline"><input type="color" data-s="${s}" data-p="${path}" value="${esc(val(s, path))}"><input type="text" data-s="${s}" data-p="${path}" value="${esc(val(s, path))}" maxlength="7"></div></div>`,
+  chips: (path) => { const sel = val(s, path) || [];
+    return `<div class="chips">${state.data.roles.length ? state.data.roles.map((r) => `<button type="button" class="chip ${sel.includes(r.id) ? 'on' : ''}" data-act="role" data-s="${s}" data-path="${path}" data-id="${esc(r.id)}"><i style="${r.color ? `background:${esc(r.color)}` : ''}"></i>${esc(r.name)}</button>`).join('') : '<span class="muted">선택할 수 있는 역할이 없어요.</span>'}</div>`; },
+});
+const chanOpts = (empty) => [['', empty], ...state.data.channels.map((c) => [c.id, '#' + c.name])];
+const catOpts = (empty = '(카테고리 없음)') => [['', empty], ...state.data.categories.map((c) => [c.id, c.name])];
 
 function markDirty() {
   if (!state.dirty) {
@@ -323,139 +442,416 @@ function markDirty() {
     const t = $('#stxt'); if (t) t.textContent = '저장하지 않은 변경사항이 있어요';
   }
 }
+function renderBar() {
+  $('#bar').innerHTML = `<div class="savebar ${state.dirty ? 'dirty' : ''}" id="savebar"><div class="in"><span class="st" id="stxt">${state.dirty ? '저장하지 않은 변경사항이 있어요' : '모든 변경사항이 저장됐어요'}</span>
+    <div class="row"><button class="btn" data-act="save" ${state.busy ? 'disabled' : ''}>저장</button></div></div></div>`;
+}
 
-// ----- 입력 도우미 -----
-const val = (path) => getP(curPanel(), path);
-const text = (label, path, o = {}) => `<div class="field"><label>${label}</label><input type="${o.type || 'text'}" data-p="${path}" value="${esc(val(path))}" ${o.max ? `maxlength="${o.max}"` : ''} placeholder="${esc(o.ph || '')}">${o.hint ? `<div class="hint">${o.hint}</div>` : ''}</div>`;
-const area = (label, path, o = {}) => `<div class="field"><label>${label}</label><textarea data-p="${path}" ${o.max ? `maxlength="${o.max}"` : ''}>${esc(val(path))}</textarea>${o.hint ? `<div class="hint">${o.hint}</div>` : ''}</div>`;
-const select = (label, path, options, o = {}) => `<div class="field"><label>${label}</label><select data-p="${path}">${options.map(([v, n]) => `<option value="${esc(v)}" ${String(val(path)) === String(v) ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>${o.hint ? `<div class="hint">${o.hint}</div>` : ''}</div>`;
-const toggle = (title, desc, path) => `<label class="sw"><input type="checkbox" data-p="${path}" data-t="check" ${val(path) ? 'checked' : ''}><div><b>${title}</b><span>${desc}</span></div></label>`;
-const chanOpts = (empty) => [['', empty], ...state.data.channels.map((c) => [c.id, '#' + c.name])];
-const catOpts = () => [['', '(카테고리 없음)'], ...state.data.categories.map((c) => [c.id, c.name])];
-const roleChips = (path) => { const sel = val(path) || [];
-  return `<div class="chips">${state.data.roles.length ? state.data.roles.map((r) => `<button type="button" class="chip ${sel.includes(r.id) ? 'on' : ''}" data-act="role" data-path="${path}" data-id="${esc(r.id)}"><i style="${r.color ? `background:${esc(r.color)}` : ''}"></i>${esc(r.name)}</button>`).join('') : '<span class="muted">선택할 수 있는 역할이 없어요.</span>'}</div>`; };
+// 미리보기 도우미
+const md = (s) => esc(s).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/`(.+?)`/g, '<code>$1</code>').replace(/\n/g, '<br>');
+const sampleVars = () => ({ user: '@소두', username: '소두', server: state.data ? state.data.guild.name : '서버', count: state.data ? state.data.guild.members : 100, inviter: '@초대한사람',
+  number: '0001', closer: '@담당자', channel: '#ticket-0001', seconds: (T() && T().settings.deleteDelay) || 5, reason: '', type: '문의' });
+const fillV = (t) => String(t || '').replace(/\{(\w+)\}/g, (m, k) => { const v = sampleVars()[k]; return v === undefined ? m : v; });
+const embCol = (c) => (/^#[0-9a-fA-F]{6}$/.test(c) ? c : '#7cc4ff');
+function dcEmbed(o) {
+  return `<div class="emb ${o.thumb ? 'hasth' : ''}" style="border-left-color:${embCol(o.color)}">${o.thumb ? `<img class="th" src="${esc(o.thumb)}" alt="">` : ''}
+    ${o.title ? `<div class="t">${md(o.title)}</div>` : ''}${o.desc ? `<div class="d">${md(o.desc)}</div>` : ''}
+    ${(o.fields || []).map((f) => `<div class="fl"><b>${esc(f[0])}</b>${esc(f[1])}</div>`).join('')}
+    ${o.image && safeUrl(o.image) ? `<img class="im" src="${safeUrl(o.image)}" alt="">` : ''}${o.footer ? `<div class="f">${esc(o.footer)}</div>` : ''}</div>`;
+}
+const dcMsg = (inner, name = '릴리웨이') => `<div class="dc"><div class="msg"><div class="av"></div><div style="min-width:0"><div class="nm">${esc(name)}<span>봇</span></div>${inner}</div></div></div>`;
+const AVATAR = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" fill="#7cc4ff"/><circle cx="32" cy="25" r="11" fill="#fff"/><rect x="12" y="40" width="40" height="30" rx="15" fill="#fff"/></svg>');
 
-function renderTab() {
+// ---------- 개요 ----------
+async function pgOverview(main) {
+  main.innerHTML = `<h1>${esc(state.data.guild.name)}</h1><p class="muted">서버 한눈에 보기</p><div id="ov" class="gap"><div class="empty">불러오는 중...</div></div>`;
+  try {
+    const s = state.cache.stats || (state.cache.stats = await api(`/api/guild/${state.gid}/stats`));
+    if (state.page !== 'overview') return;
+    const b = `#/g/${state.gid}`;
+    $('#ov').innerHTML = `<div class="grid s">
+      <div class="card stat"><div class="k">멤버</div><div class="v">${fmtN(s.members)}명</div><div class="s">최근 7일 +${fmtN(s.week.joined)}</div></div>
+      <div class="card stat"><div class="k">열린 티켓</div><div class="v">${fmtN(s.openTickets)}개</div></div>
+      <div class="card stat"><div class="k">최근 7일 매출</div><div class="v">${fmtN(s.week.spent)}원</div><div class="s">거래 ${fmtN(s.week.count)}건</div></div>
+      <div class="card stat"><div class="k">최근 7일 로벅스</div><div class="v">${fmtN(s.week.robux)}</div></div></div>
+      <div class="grid gap">${[['🎫', '티켓', '패널·선택기·양식 설정', b + '/tickets'], ['📊', '서버 통계', '기간별 구매·가입 통계', b + '/stats'], ['🧾', '구매 로그', '최근 구매 기록', b + '/purchases'], ['👤', '유저 정보', '검색하고 수정', b + '/users'], ['👋', '환영 / 퇴장', '입장·퇴장 메시지', b + '/welcome'], ['💬', '자동응답', '명령어와 답변', b + '/auto']]
+        .map(([i, t, d, h]) => `<div class="card" style="cursor:pointer" data-go="${h}"><div style="font-size:26px">${i}</div><b>${t}</b><div class="muted">${d}</div></div>`).join('')}</div>`;
+  } catch (e) { if ($('#ov')) $('#ov').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+// ---------- 티켓: 목록 ----------
+async function pgTickets(main) {
+  const panels = T().panels;
+  main.innerHTML = `<div class="row between"><div><h1>티켓</h1><p class="muted">패널을 만들고 설정하면 서버 채널에 티켓 열기 버튼(또는 선택기)이 생겨요.</p></div>
+    <div class="row"><button class="btn ghost" data-go="#/g/${esc(state.gid)}/tickets/settings">⚙️ 일반 설정</button><button class="btn" data-act="new-panel">+ 새 패널 만들기</button></div></div>
+    ${panels.length ? panels.map((p) => `<div class="card pcard"><div><h3>${esc(p.name)} <span class="tag">${p.mode === 'select' ? '선택기' : '버튼'}</span></h3>
+      <div class="muted" style="margin-top:4px">${p.channelId ? esc(chName(p.channelId)) : '채널 미선택'} · ${p.mode === 'select' ? `항목 ${p.options.length}개` : `질문 ${p.questions.length}개`}
+      · ${p.messageId ? '<span class="tag ok">전송됨</span>' : '<span class="tag off">아직 안 보냄</span>'}</div></div>
+      <div class="row"><button class="btn" data-go="#/g/${esc(state.gid)}/p/${esc(p.id)}/message">설정하기</button>
+      <button class="btn ghost danger" data-act="del-panel" data-id="${esc(p.id)}">삭제</button></div></div>`).join('')
+      : `<div class="card empty gap">아직 패널이 없어요. "새 패널 만들기"를 눌러 시작해 보세요.</div>`}
+    <h2 style="margin-top:30px">최근 티켓</h2><div class="card" style="margin-top:10px" id="tlist"><div class="empty">불러오는 중...</div></div>`;
+  try {
+    const tk = (await api(`/api/guild/${state.gid}/tickets`)).tickets;
+    if (state.page !== 'tickets') return;
+    const st = (t) => (t.deleted ? '<span class="tag bad">삭제됨</span>' : t.closed ? '<span class="tag warn">닫힘</span>' : '<span class="tag ok">열림</span>');
+    $('#tlist').innerHTML = tk.length ? `<div class="tw"><table><tr><th>#</th><th>소유자</th><th>패널</th><th>열린 시간</th><th>상태</th><th></th></tr>
+      ${tk.map((t) => `<tr><td>${String(t.number).padStart(4, '0')}</td><td>${esc(t.ownerName)}</td><td>${esc(t.panelName)}${t.optionLabel ? ` · ${esc(t.optionLabel)}` : ''}</td><td>${fmtT(t.ts)}</td><td>${st(t)}</td>
+      <td>${!t.deleted && t.exists ? `<a href="https://discord.com/channels/${esc(state.gid)}/${esc(t.channelId)}" target="_blank" rel="noopener">열기</a>` : ''}</td></tr>`).join('')}</table></div>` : '<div class="empty">아직 열린 티켓이 없어요.</div>';
+  } catch (e) { if ($('#tlist')) $('#tlist').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+// ---------- 티켓: 일반 설정 ----------
+function pgTSettings(main) {
+  const f = F('tset');
+  main.innerHTML = `<div class="muted"><a href="#" data-go="#/g/${esc(state.gid)}/tickets">티켓</a> › 일반 설정</div><h1>티켓 일반 설정</h1>
+    <div class="cols gap"><div>
+      <div class="card"><h2>담당자 / 동작</h2>
+        <div class="field"><label>서포트 팀 역할 (모든 패널 공통)</label><div class="hint" style="margin:0 0 8px">티켓을 보고, 답변하고, 닫고, 삭제할 수 있어요.</div>${f.chips('supportRoleIds')}</div>
+        ${f.toggle('닫기 전에 한 번 더 확인', '닫기를 누르면 "정말 닫을까요?"를 한 번 더 물어봐요.', 'twoStepClose')}
+        ${f.toggle('환영 메시지 자동 고정', '티켓이 열릴 때 첫 메시지를 채널에 고정해요.', 'autoPin')}
+        ${f.select('티켓 번호 자릿수', 'padding', [[0, '없음 (1, 2, 3)'], [2, '2자리 (01)'], [3, '3자리 (001)'], [4, '4자리 (0001)'], [5, '5자리 (00001)'], [6, '6자리 (000001)']])}
+        <div class="field"><label>삭제 전 대기 시간 (초)</label><input type="number" min="1" max="60" data-s="tset" data-p="deleteDelay" data-t="num" value="${esc(T().settings.deleteDelay)}"></div></div>
+      <div class="card"><h2>카테고리 / 채널</h2>
+        ${f.select('닫힌 티켓 카테고리', 'closedCategoryId', catOpts('(이동하지 않음)'), { hint: '티켓을 닫으면 이 카테고리로 옮겨져요.' })}
+        ${f.text('닫힌 티켓 채널 이름', 'closedNameFormat', { max: 40, hint: '{number} 티켓 번호 · {username} 유저 이름 · 예) closed-{number}' })}
+        ${f.select('티켓 기록(로그) 채널', 'logChannelId', chanOpts('(기록 안 함)'), { hint: '닫힘·다시 열림·삭제될 때 기록을 남겨요. (패널마다 따로 정할 수도 있어요)' })}</div>
+      <div class="card"><h2>명령어</h2>
+        ${f.toggle('티켓 채널에서 명령어 사용', '!close 닫기 · !open 다시 열기 · !delete 삭제', 'commandsEnabled')}
+        ${f.text('명령어 앞 글자', 'prefix', { max: 3, hint: '기본값은 ! 예요.' })}</div></div>
+    <div><div class="card"><h2>메시지</h2><div class="hint" style="margin:0 0 12px">{user} 유저 · {closer} 닫은 사람 · {number} 번호 · {channel} 채널 · {seconds} 초 · {reason} 사유</div>
+      ${f.text('티켓을 열었을 때 (나만 보이는 안내)', 'messages.openedReply', { max: 300 })}
+      ${f.area('티켓 안: 열림 임베드 (초록)', 'messages.openedDescription', { max: 500 })}
+      ${f.text('닫힘 임베드 제목', 'messages.closeTitle', { max: 200 })}
+      ${f.area('닫힘 임베드 내용', 'messages.closeDescription', { max: 1000 })}
+      ${f.area('다시 열림 임베드 (초록)', 'messages.reopenDescription', { max: 500 })}
+      ${f.area('삭제 임베드 (빨강)', 'messages.deleteDescription', { max: 500 })}</div>
+      <div class="card"><h2>미리보기</h2><div id="tpreview" style="margin-top:10px"></div></div></div></div>`;
+  renderTPreview();
+}
+function renderTPreview() {
+  const el = $('#tpreview'); if (!el) return;
+  const m = T().settings.messages;
+  const row = (label, e) => `<div class="muted" style="margin:10px 0 6px;font-weight:700">${label}</div>${e}`;
+  el.innerHTML = row('티켓 열림', dcMsg(`<div class="ct">@소두</div>${dcEmbed({ color: '#2ecc71', desc: fillV(m.openedDescription), footer: '티켓 #0001' })}${dcEmbed({ color: '#7cc4ff', title: '티켓이 열렸어요', desc: '@소두 님, 문의 내용을 남겨주세요.', fields: [['질문 1', '답변 예시']] })}<span class="b Secondary">🔒 닫기</span>`))
+    + row('닫힘', dcMsg(`${dcEmbed({ color: '#f0b232', title: fillV(m.closeTitle), desc: fillV(m.closeDescription) })}<span class="b Success">🔓 다시 열기</span><span class="b Secondary">📄 기록</span><span class="b Danger">🗑️ 삭제</span>`))
+    + row('삭제', dcMsg(dcEmbed({ color: '#ed4245', desc: fillV(m.deleteDescription) })));
+}
+
+// ---------- 티켓: 패널 ----------
+const PTABS = () => { const p = curPanel(); return [['message', '패널 메시지'], ...(p.mode === 'select' ? [['options', '선택기 항목']] : []), ['form', '양식'], ['perms', '권한'], ['settings', '티켓 설정']]; };
+function pgPanel(main) {
   const p = curPanel();
-  const el = $('#tab');
+  if (state.tab === 'options' && p.mode !== 'select') state.tab = 'message';
+  main.innerHTML = `<div class="muted"><a href="#" data-go="#/g/${esc(state.gid)}/tickets">티켓</a> › 패널 설정</div><h1>${esc(p.name)}</h1>
+    <div class="tabs">${PTABS().map(([k, n]) => `<button class="${state.tab === k ? 'on' : ''}" data-act="tab" data-tab="${k}">${n}</button>`).join('')}</div><div id="tab"></div>`;
+  renderTab();
+}
+function qEditor(s, base, list, label) {
+  const f = F(s);
+  return `${list.map((q, i) => `<div class="qcard"><div class="head"><span>${label} ${i + 1}</span><div class="tools">
+    <button data-act="list-up" data-s="${s}" data-base="${base}" data-i="${i}">▲</button><button data-act="list-down" data-s="${s}" data-base="${base}" data-i="${i}">▼</button><button data-act="list-del" data-s="${s}" data-base="${base}" data-i="${i}">✕</button></div></div>
+    ${f.text('질문', `${base}.${i}.label`, { max: 45 })}${f.text('안내 문구 (선택)', `${base}.${i}.placeholder`, { max: 100 })}
+    ${f.toggle('필수 입력', '비워두면 티켓을 열 수 없어요.', `${base}.${i}.required`)}${f.toggle('긴 답변', '여러 줄로 길게 쓸 수 있어요.', `${base}.${i}.long`)}</div>`).join('')}
+    ${list.length < 5 ? `<button class="btn ghost" data-act="list-add" data-kind="question" data-s="${s}" data-base="${base}">+ 질문 추가</button>` : '<div class="muted">질문은 최대 5개예요.</div>'}`;
+}
+function renderTab() {
+  const p = curPanel(), el = $('#tab'), f = F('panel');
+  if (!el) return;
   if (state.tab === 'message') {
     el.innerHTML = `<div class="cols"><div class="card">
-      ${text('패널 이름 (관리용)', 'name', { max: 40 })}
-      ${text('제목', 'embed.title', { max: 256 })}
-      ${area('설명', 'embed.description', { max: 4000, hint: '**굵게** 처럼 디스코드 글씨 꾸미기를 쓸 수 있어요.' })}
-      <div class="field"><label>색상</label><div class="inline"><input type="color" data-p="embed.color" value="${esc(p.embed.color)}"><input type="text" data-p="embed.color" value="${esc(p.embed.color)}" maxlength="7"></div></div>
-      ${text('큰 이미지 주소 (선택)', 'embed.image', { type: 'url', ph: 'https://...' })}
-      ${text('작은 이미지 주소 (선택)', 'embed.thumbnail', { type: 'url', ph: 'https://...' })}
-      ${text('아래 작은 글씨 (선택)', 'embed.footer', { max: 200 })}
-      ${text('버튼 문구', 'button.label', { max: 80 })}
-      ${text('버튼 이모지 (선택)', 'button.emoji', { max: 64, ph: '🎫' })}
-      ${select('버튼 색', 'button.style', [['Primary', '파랑'], ['Secondary', '회색'], ['Success', '초록'], ['Danger', '빨강']])}
-      ${select('패널을 보낼 채널', 'channelId', chanOpts('(채널 선택)'))}
+      <div class="field"><label>패널 종류</label><div class="seg"><label class="${p.mode !== 'select' ? 'on' : ''}"><input type="radio" name="mode" data-act="mode" value="button" ${p.mode !== 'select' ? 'checked' : ''}>버튼</label>
+        <label class="${p.mode === 'select' ? 'on' : ''}"><input type="radio" name="mode" data-act="mode" value="select" ${p.mode === 'select' ? 'checked' : ''}>선택기 (드롭다운)</label></div>
+        <div class="hint">선택기를 쓰면 문의 종류별로 항목을 만들 수 있어요. (선택)</div></div>
+      ${f.text('패널 이름 (관리용)', 'name', { max: 40 })}${f.text('제목', 'embed.title', { max: 256 })}
+      ${f.area('설명', 'embed.description', { max: 4000, hint: '**굵게** 처럼 디스코드 글씨 꾸미기를 쓸 수 있어요.' })}
+      ${f.color('색상', 'embed.color')}${f.text('큰 이미지 주소 (선택)', 'embed.image', { type: 'url', ph: 'https://...' })}
+      ${f.text('작은 이미지 주소 (선택)', 'embed.thumbnail', { type: 'url', ph: 'https://...' })}${f.text('아래 작은 글씨 (선택)', 'embed.footer', { max: 200 })}
+      ${p.mode === 'select' ? `${f.text('선택기 안내 문구', 'select.placeholder', { max: 150 })}<div class="hint" style="margin:-8px 0 14px">항목은 "선택기 항목" 탭에서 추가해요.</div>`
+        : `${f.text('버튼 문구', 'button.label', { max: 80 })}${f.text('버튼 이모지 (선택)', 'button.emoji', { max: 64, ph: '🎫' })}${f.select('버튼 색', 'button.style', [['Primary', '파랑'], ['Secondary', '회색'], ['Success', '초록'], ['Danger', '빨강']])}`}
+      ${f.select('패널을 보낼 채널', 'channelId', chanOpts('(채널 선택)'))}
       <button class="btn" data-act="send">${p.messageId ? '패널 업데이트' : '패널 보내기'}</button>
       <div class="hint" style="margin-top:8px">누르면 먼저 저장한 뒤 선택한 채널에 패널을 보내요. 이미 보냈다면 그 메시지를 수정해요.</div>
     </div><div><div class="muted" style="margin-bottom:8px;font-weight:700">미리보기</div><div id="preview"></div></div></div>`;
     renderPreview();
+  } else if (state.tab === 'options') {
+    el.innerHTML = `<div class="card"><h2>선택기 항목</h2><p class="muted">드롭다운에 나올 항목이에요. 항목마다 카테고리와 질문을 따로 정할 수 있어요. (최대 25개)</p>
+      ${p.options.map((o, i) => `<div class="qcard"><div class="head"><span>항목 ${i + 1}</span><div class="tools">
+        <button data-act="list-up" data-s="panel" data-base="options" data-i="${i}">▲</button><button data-act="list-down" data-s="panel" data-base="options" data-i="${i}">▼</button><button data-act="list-del" data-s="panel" data-base="options" data-i="${i}">✕</button></div></div>
+        ${f.text('이름', `options.${i}.label`, { max: 100 })}${f.text('설명 (선택)', `options.${i}.description`, { max: 100 })}${f.text('이모지 (선택)', `options.${i}.emoji`, { max: 64, ph: '🎫' })}
+        ${f.select('이 항목의 티켓 카테고리', `options.${i}.categoryId`, catOpts('(패널 기본 카테고리)'))}
+        <details style="margin-top:6px"><summary style="cursor:pointer;font-weight:700">이 항목 전용 질문 (${(o.questions || []).length}개)</summary><div style="margin-top:10px">${qEditor('panel', `options.${i}.questions`, o.questions || [], '질문')}
+        <div class="hint">비워두면 "양식" 탭의 질문을 써요.</div></div></details></div>`).join('')}
+      ${p.options.length < 25 ? '<button class="btn ghost" data-act="list-add" data-kind="option" data-s="panel" data-base="options">+ 항목 추가</button>' : ''}</div>`;
   } else if (state.tab === 'form') {
-    el.innerHTML = `<div class="card"><h2>양식 질문</h2><p class="muted">티켓 열기 버튼을 누르면 이 질문들이 창으로 떠요. 질문이 없으면 바로 티켓이 열려요. (디스코드 제한: 최대 5개)</p>
-      ${p.questions.map((q, i) => `<div class="qcard"><div class="head"><span>질문 ${i + 1}</span><div class="tools">
-        <button data-act="q-up" data-i="${i}" title="위로">▲</button><button data-act="q-down" data-i="${i}" title="아래로">▼</button><button data-act="q-del" data-i="${i}" title="삭제">✕</button></div></div>
-        ${text('질문', `questions.${i}.label`, { max: 45 })}${text('안내 문구 (선택)', `questions.${i}.placeholder`, { max: 100 })}
-        ${toggle('필수 입력', '비워두면 티켓을 열 수 없어요.', `questions.${i}.required`)}${toggle('긴 답변', '여러 줄로 길게 쓸 수 있어요.', `questions.${i}.long`)}</div>`).join('')}
-      ${p.questions.length < 5 ? '<button class="btn ghost" data-act="q-add">+ 질문 추가</button>' : '<div class="muted">질문은 최대 5개예요.</div>'}</div>`;
+    el.innerHTML = `<div class="card"><h2>양식 질문</h2><p class="muted">티켓을 열 때 이 질문들이 창으로 떠요. 질문이 없으면 바로 티켓이 열려요. (디스코드 제한: 최대 5개)</p>${qEditor('panel', 'questions', p.questions, '질문')}</div>`;
   } else if (state.tab === 'perms') {
     el.innerHTML = `<div class="cols"><div class="card"><h2>누가 볼 수 있나요?</h2>
-      <div class="field"><label>담당자 역할</label><div class="hint" style="margin:0 0 8px">티켓을 보고, 답변하고, 닫을 수 있어요.</div>${roleChips('perms.supportRoleIds')}</div>
-      <div class="field"><label>읽기 전용 역할</label><div class="hint" style="margin:0 0 8px">티켓을 볼 수만 있고 글은 쓸 수 없어요.</div>${roleChips('perms.viewRoleIds')}</div>
+      <div class="field"><label>이 패널의 담당자 역할</label><div class="hint" style="margin:0 0 8px">"일반 설정"의 서포트 팀 역할에 더해 적용돼요.</div>${f.chips('perms.supportRoleIds')}</div>
+      <div class="field"><label>읽기 전용 역할</label><div class="hint" style="margin:0 0 8px">티켓을 볼 수만 있고 글은 쓸 수 없어요.</div>${f.chips('perms.viewRoleIds')}</div>
       <div class="hint">선택하지 않은 사람은 티켓 소유자만 볼 수 있어요.</div></div>
       <div class="card"><h2>티켓 소유자 권한</h2>
-      ${toggle('소유자가 직접 닫기', '티켓을 연 사람이 닫기 버튼을 쓸 수 있어요.', 'perms.ownerCanClose')}
-      ${toggle('파일 첨부', '티켓 소유자가 파일/이미지를 올릴 수 있어요.', 'perms.ownerAttach')}
-      ${toggle('링크 미리보기', '링크를 보내면 미리보기가 나와요.', 'perms.ownerEmbed')}
-      ${toggle('담당하기 버튼', '담당자가 "담당하기"를 눌러 티켓을 맡을 수 있어요.', 'perms.claimEnabled')}
-      ${toggle('티켓 열릴 때 담당자 멘션', '담당자 역할을 호출해 알려줘요.', 'ticket.mentionSupport')}</div></div>`;
+      ${f.toggle('소유자가 직접 닫기/다시 열기', '티켓을 연 사람이 닫기, 다시 열기를 쓸 수 있어요.', 'perms.ownerCanClose')}
+      ${f.toggle('파일 첨부', '티켓 소유자가 파일/이미지를 올릴 수 있어요.', 'perms.ownerAttach')}
+      ${f.toggle('링크 미리보기', '링크를 보내면 미리보기가 나와요.', 'perms.ownerEmbed')}
+      ${f.toggle('티켓 열릴 때 담당자 멘션', '담당자 역할을 호출해 알려줘요.', 'ticket.mentionSupport')}</div></div>`;
   } else {
     el.innerHTML = `<div class="cols"><div class="card"><h2>티켓 채널</h2>
-      ${select('티켓이 만들어질 카테고리', 'ticket.categoryId', catOpts())}
-      ${text('채널 이름 형식', 'ticket.nameFormat', { max: 40, hint: '{number} 티켓 번호 · {username} 유저 이름 · 예) ticket-{number}' })}
-      <div class="field"><label>한 사람당 최대 티켓 수</label><input type="number" min="1" max="10" data-p="ticket.maxOpen" data-t="num" value="${esc(p.ticket.maxOpen)}"></div>
-      ${select('티켓 기록(로그) 채널', 'ticket.logChannelId', chanOpts('(기록 안 함)'), { hint: '티켓이 닫힐 때 대화 기록 파일을 이 채널에 남겨요.' })}</div>
+      ${f.select('티켓이 만들어질 카테고리', 'ticket.categoryId', catOpts())}
+      ${f.text('채널 이름 형식', 'ticket.nameFormat', { max: 40, hint: '{number} 티켓 번호 · {username} 유저 이름 · {type} 선택기 항목 · 예) ticket-{number}' })}
+      <div class="field"><label>한 사람당 최대 티켓 수</label><input type="number" min="1" max="10" data-s="panel" data-p="ticket.maxOpen" data-t="num" value="${esc(p.ticket.maxOpen)}"></div>
+      ${f.select('이 패널의 기록(로그) 채널', 'ticket.logChannelId', chanOpts('(일반 설정을 따라요)'))}</div>
       <div class="card"><h2>티켓 환영 메시지</h2>
-      ${text('제목', 'ticket.welcomeTitle', { max: 200 })}
-      ${area('내용', 'ticket.welcomeMessage', { max: 2000, hint: '{user} 유저 멘션 · {username} 유저 이름 · {number} 번호 · {server} 서버 이름' })}</div></div>`;
+      ${f.text('제목', 'ticket.welcomeTitle', { max: 200 })}
+      ${f.area('내용', 'ticket.welcomeMessage', { max: 2000, hint: '{user} 유저 멘션 · {username} 유저 이름 · {number} 번호 · {server} 서버 이름' })}</div></div>`;
   }
 }
-
 function renderPreview() {
-  const el = $('#preview');
-  if (!el) return;
-  const p = curPanel();
-  const md = (s) => esc(s).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>');
-  const safeUrl = (u) => (/^https?:\/\//.test(u) ? esc(u) : '');
-  el.innerHTML = `<div class="dc"><div class="msg"><div class="av"></div><div><div class="nm">티켓 봇<span>봇</span></div>
-    <div class="emb" style="border-left-color:${/^#[0-9a-fA-F]{6}$/.test(p.embed.color) ? p.embed.color : '#7cc4ff'}">
-      ${p.embed.thumbnail && safeUrl(p.embed.thumbnail) ? `<img class="th" src="${safeUrl(p.embed.thumbnail)}" alt="">` : ''}
-      ${p.embed.title ? `<div class="t">${esc(p.embed.title)}</div>` : ''}
-      ${p.embed.description ? `<div class="d">${md(p.embed.description)}</div>` : ''}
-      ${p.embed.image && safeUrl(p.embed.image) ? `<img class="im" src="${safeUrl(p.embed.image)}" alt="">` : ''}
-      ${p.embed.footer ? `<div class="f">${esc(p.embed.footer)}</div>` : ''}</div>
-    <div class="b ${esc(p.button.style)}">${esc(p.button.emoji)} ${esc(p.button.label || '티켓 열기')}</div></div></div></div>`;
+  const el = $('#preview'); if (!el) return;
+  const p = curPanel(), e = p.embed;
+  const emb = dcEmbed({ color: e.color, title: e.title, desc: e.description, image: e.image, footer: e.footer, thumb: safeUrl(e.thumbnail) ? e.thumbnail : '' });
+  const ui = p.mode === 'select'
+    ? `<div class="sel"><span>${esc(p.select.placeholder || '문의 종류를 선택해 주세요')}</span><span>▾</span></div>${p.options.length ? `<div class="opts">${p.options.slice(0, 6).map((o) => `<div>${esc(o.emoji)} ${esc(o.label || '(이름 없음)')}${o.description ? `<small>${esc(o.description)}</small>` : ''}</div>`).join('')}</div>` : ''}`
+    : `<span class="b ${esc(p.button.style)}">${esc(p.button.emoji)} ${esc(p.button.label || '티켓 열기')}</span>`;
+  el.innerHTML = dcMsg(emb + ui, '티켓 봇');
+}
+
+// ---------- 서버 통계 ----------
+async function pgStats(main) {
+  main.innerHTML = `<h1>서버 통계</h1><p class="muted">모든 통계는 ${fmtD(Date.UTC(2026, 9, 27, 15))} 이후 기준이에요.</p><div id="st" class="gap"><div class="empty">불러오는 중...</div></div>`;
+  try {
+    const s = await api(`/api/guild/${state.gid}/stats`);
+    state.cache.stats = s;
+    if (state.page !== 'stats') return;
+    const panel = (title, d) => `<div class="card"><h2>${title}</h2><div class="grid s" style="margin-top:12px">
+      <div class="stat"><div class="k">구매 금액</div><div class="v">${fmtN(d.spent)}원</div></div><div class="stat"><div class="k">로벅스</div><div class="v">${fmtN(d.robux)}</div></div>
+      <div class="stat"><div class="k">거래 횟수</div><div class="v">${fmtN(d.count)}회</div></div><div class="stat"><div class="k">새로 가입</div><div class="v">${fmtN(d.joined)}명</div></div></div>
+      <div class="row" style="margin-top:12px;gap:24px">${person('최다 구매자', d.topBuyer, (x) => `${fmtN(x.spent)}원`)}${person('최다 초대', d.topInviter, (x) => `${fmtN(x.count)}명`)}</div></div>`;
+    const max = Math.max(1, ...s.daily.map((d) => d.spent));
+    $('#st').innerHTML = `<div class="cols">${panel('최근 7일', s.week)}${panel('전체 (10월 28일 이후)', s.all)}</div>
+      <div class="card gap"><h2>최근 14일 구매 금액</h2><div class="bars">${s.daily.map((d) => `<div class="b" title="${esc(fmtD(d.ts))}: ${fmtN(d.spent)}원 / ${d.count}건"><i style="height:${Math.round((d.spent / max) * 100)}%"></i><span>${new Date(d.ts + 9 * 3600e3).getUTCDate()}</span></div>`).join('')}</div>
+      <div class="hint">막대에 마우스를 올리면 금액과 건수가 보여요. 숫자는 날짜(일)예요.</div></div>
+      <div class="card gap"><h2>구매 랭킹 TOP 5</h2>${s.top.length ? `<div class="tw"><table><tr><th>순위</th><th>유저</th><th class="num">구매 금액</th><th class="num">로벅스</th><th class="num">거래</th></tr>
+      ${s.top.map((u, i) => `<tr class="click" data-go="#/g/${esc(state.gid)}/users" data-uid="${esc(u.id)}"><td>${i + 1}</td><td><div class="person"><img src="${esc(u.avatar || AVATAR)}" alt="">${esc(u.name)}</div></td><td class="num">${fmtN(u.spent)}원</td><td class="num">${fmtN(u.robux)}</td><td class="num">${fmtN(u.count)}회</td></tr>`).join('')}</table></div>` : '<div class="empty">아직 구매 기록이 없어요.</div>'}</div>`;
+  } catch (e) { if ($('#st')) $('#st').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+function person(label, x, fn) {
+  return `<div><div class="muted" style="margin-bottom:6px">${label}</div>${x ? `<div class="person"><img src="${esc(x.avatar || AVATAR)}" alt=""><div><b>${esc(x.name)}</b><div class="muted">${fn(x)}</div></div></div>` : '<span class="muted">아직 없어요</span>'}</div>`;
+}
+
+// ---------- 구매 로그 ----------
+const KIND = { robux: '로벅스', ingame: '인게임', etc: '기타' };
+async function pgPurchases(main) {
+  main.innerHTML = `<div class="row between"><div><h1>구매 로그</h1><p class="muted">/지급완료 로 기록된 최근 구매예요.</p></div><input type="search" id="pq" placeholder="구매자·상품 검색" style="max-width:240px"></div>
+    <div class="card gap" id="pl"><div class="empty">불러오는 중...</div></div>`;
+  try {
+    const r = await api(`/api/guild/${state.gid}/purchases?limit=300`);
+    state.cache.purchases = r.purchases;
+    if (state.page !== 'purchases') return;
+    drawPurchases('');
+    $('#pq').addEventListener('input', (e) => drawPurchases(e.target.value));
+  } catch (e) { if ($('#pl')) $('#pl').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+function drawPurchases(q) {
+  const n = q.trim().toLowerCase();
+  const list = (state.cache.purchases || []).filter((p) => !n || `${p.buyer.name} ${p.item} ${p.seller ? p.seller.name : ''}`.toLowerCase().includes(n));
+  const sum = list.reduce((a, p) => a + p.spent, 0);
+  $('#pl').innerHTML = list.length ? `<div class="muted" style="margin-bottom:8px">${fmtN(list.length)}건 · 합계 ${fmtN(sum)}원</div><div class="tw"><table><tr><th>시간</th><th>구매자</th><th>종류</th><th>상품</th><th class="num">수량</th><th class="num">금액</th><th>판매자</th></tr>
+    ${list.map((p) => `<tr><td>${fmtT(p.ts)}</td><td><div class="person"><img src="${esc(p.buyer.avatar || AVATAR)}" alt="">${esc(p.buyer.name)}</div></td><td><span class="tag">${KIND[p.kind] || esc(p.kind)}</span></td>
+    <td>${esc(p.item || '-')}</td><td class="num">${esc(p.qty || '-')}</td><td class="num">${fmtN(p.spent)}원</td><td>${p.seller ? esc(p.seller.name) : '-'}</td></tr>`).join('')}</table></div>` : '<div class="empty">기록이 없어요.</div>';
+}
+
+// ---------- 유저 정보 ----------
+async function pgUsers(main) {
+  main.innerHTML = `<h1>유저 정보</h1><p class="muted">이름이나 ID로 검색하면 등급, 구매 금액, 초대 수를 볼 수 있고 직접 고칠 수 있어요.</p>
+    <div class="cols gap"><div class="card"><input type="search" id="uq" placeholder="이름 또는 디스코드 ID 검색" autocomplete="off"><div id="ul" style="margin-top:14px"></div></div><div id="ud"><div class="card empty">왼쪽에서 유저를 선택해 주세요.</div></div></div>`;
+  $('#uq').addEventListener('input', debounce((e) => searchUsers(e.target.value), 350));
+  searchUsers('');
+  if (state.pendingUser) { const id = state.pendingUser; state.pendingUser = null; showUser(id); }
+}
+const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
+async function searchUsers(q) {
+  try {
+    const r = await api(`/api/guild/${state.gid}/users?q=${encodeURIComponent(q)}`);
+    if (state.page !== 'users' || !$('#ul')) return;
+    $('#ul').innerHTML = `<div class="muted" style="margin-bottom:6px">${esc(r.title)}</div>` + (r.users.length ? `<div class="tw"><table>${r.users.map((u) => `<tr class="click" data-act="user" data-id="${esc(u.id)}"><td><div class="person"><img src="${esc(u.avatar || AVATAR)}" alt="">${esc(u.name)}</div></td>
+      <td class="num">${u.rank ? `${u.rank}위` : '-'}</td><td class="num">${fmtN(u.spent)}원</td></tr>`).join('')}</table></div>` : '<div class="empty">결과가 없어요.</div>');
+  } catch (e) { if ($('#ul')) $('#ul').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+async function showUser(id) {
+  const box = $('#ud'); if (!box) return;
+  box.innerHTML = '<div class="card empty">불러오는 중...</div>';
+  try {
+    const r = await api(`/api/guild/${state.gid}/users/${id}`);
+    const u = r.user;
+    box.innerHTML = `<div class="card"><div class="person" style="gap:14px"><img src="${esc(u.avatar || AVATAR)}" style="width:64px;height:64px" alt=""><div><h2 style="margin:0">${esc(u.name)}</h2><div class="muted mono">${esc(u.id)}</div></div></div>
+      <div class="row" style="margin:14px 0">${u.tier ? `<span class="tag">${esc(u.tier)}</span>` : '<span class="tag off">구매 등급 없음</span>'}${u.serverRole ? `<span class="tag">${esc(u.serverRole)}</span>` : ''}<span class="tag ok">${u.rank ? `구매 ${u.rank}위 / ${u.rankTotal}명` : '랭킹 없음'}</span></div>
+      <div class="grid s"><div class="stat"><div class="k">서버 가입일</div><div class="v" style="font-size:17px">${fmtD(u.joinedTs)}</div></div><div class="stat"><div class="k">계정 생성일</div><div class="v" style="font-size:17px">${fmtD(u.createdTs)}</div></div></div>
+      <h3 style="margin:16px 0 10px">구매 정보 수정</h3><div class="grid s" id="uform" data-id="${esc(u.id)}">
+      ${[['robux', '구매 로벅스'], ['spent', '총 구매 금액(원)'], ['count', '거래 횟수'], ['invites', '초대한 사람 수']].map(([k, n]) => `<div class="field"><label>${n}</label><input type="number" min="0" data-u="${k}" value="${u[k] || 0}"></div>`).join('')}</div>
+      <button class="btn" data-act="user-save">저장</button></div>
+      <div class="card"><h3>최근 구매</h3>${r.purchases.length ? `<div class="tw"><table>${r.purchases.map((p) => `<tr><td>${fmtT(p.ts)}</td><td>${esc(p.item || KIND[p.kind] || '')}</td><td class="num">${fmtN(p.spent)}원</td></tr>`).join('')}</table></div>` : '<div class="empty">구매 기록이 없어요.</div>'}</div>`;
+  } catch (e) { box.innerHTML = `<div class="card empty">${esc(e.message)}</div>`; }
+}
+
+// ---------- 환영 / 퇴장 ----------
+function pgWelcome(main) {
+  const k = state.wtab, f = F('com'), welcome = k === 'welcome';
+  main.innerHTML = `<h1>환영 / 퇴장 메시지</h1><p class="muted">변수: {user} 멘션 · {username} 이름 · {server} 서버 이름 · {count} 멤버 수${welcome ? ' · {inviter} 초대한 사람' : ''}</p>
+    <div class="tabs"><button class="${welcome ? 'on' : ''}" data-act="wtab" data-tab="welcome">👋 환영</button><button class="${!welcome ? 'on' : ''}" data-act="wtab" data-tab="leave">🚪 퇴장</button></div>
+    <div class="cols"><div class="card">
+      ${f.toggle(welcome ? '환영 메시지 사용' : '퇴장 메시지 사용', welcome ? '새 멤버가 들어오면 메시지를 보내요.' : '멤버가 나가면 메시지를 보내요.', `${k}.enabled`)}
+      ${f.select('보낼 채널', `${k}.channelId`, chanOpts('(채널 선택)'))}
+      ${f.area('메시지 (임베드 위에 나오는 글)', `${k}.content`, { max: 1500, hint: '비워두면 임베드만 보내요.' })}
+      ${f.toggle('임베드 사용', '꾸민 상자 형태로 보내요.', `${k}.useEmbed`)}
+      ${f.text('임베드 제목', `${k}.embed.title`, { max: 256 })}${f.area('임베드 내용', `${k}.embed.description`, { max: 3000 })}
+      ${f.color('색상', `${k}.embed.color`)}${f.text('큰 이미지 주소 (선택)', `${k}.embed.image`, { type: 'url', ph: 'https://...' })}${f.text('아래 작은 글씨 (선택)', `${k}.embed.footer`, { max: 200 })}
+      ${f.toggle('멤버 프로필 사진 표시', '임베드 오른쪽 위에 그 멤버의 프로필 사진을 보여줘요.', `${k}.embed.showAvatar`)}
+      ${welcome ? `<h3 style="margin:18px 0 10px">자동 역할</h3><div class="hint" style="margin:0 0 8px">들어오면 바로 줄 역할이에요. (봇 역할이 이 역할들보다 위에 있어야 해요)</div>${f.chips('welcome.roleIds')}
+        <h3 style="margin:18px 0 10px">DM 환영</h3>${f.toggle('DM으로도 보내기', '들어온 멤버에게 개인 메시지를 보내요. (DM이 막혀 있으면 건너뛰어요)', 'welcome.dmEnabled')}${f.area('DM 내용', 'welcome.dmMessage', { max: 1500 })}` : ''}
+      <button class="btn ghost" data-act="wtest" style="margin-top:6px">테스트 보내기 (나에게 보내는 예시)</button>
+      <div class="hint" style="margin-top:8px">현재 입력한 내용으로 선택한 채널에 [테스트] 메시지를 보내요. 저장하지 않아도 돼요.</div>
+    </div><div><div class="muted" style="margin-bottom:8px;font-weight:700">미리보기</div><div id="wprev"></div></div></div>`;
+  renderWPreview();
+}
+function renderWPreview() {
+  const el = $('#wprev'); if (!el) return;
+  const m = C()[state.wtab], e = m.embed;
+  const inner = (m.content ? `<div class="ct">${md(fillV(m.content))}</div>` : '') + (m.useEmbed ? dcEmbed({ color: e.color, title: fillV(e.title), desc: fillV(e.description), image: e.image, footer: fillV(e.footer), thumb: e.showAvatar ? AVATAR : '' }) : '');
+  el.innerHTML = dcMsg(inner || '<div class="ct muted">(보낼 내용이 없어요)</div>');
+}
+
+// ---------- 자동응답 ----------
+function pgAuto(main) {
+  const list = C().responders, f = F('com');
+  main.innerHTML = `<div class="row between"><div><h1>자동응답</h1><p class="muted">명령어(또는 글)와 답변을 정해두면, 누가 그 글을 쓸 때 봇이 답해요. 변수: {user} {username} {server} {count}</p></div>
+    <button class="btn" data-act="list-add" data-kind="responder" data-s="com" data-base="responders">+ 자동응답 추가</button></div>
+    <div class="gap">${list.length ? list.map((r, i) => `<div class="qcard"><div class="head"><span>${esc(r.trigger || '(새 자동응답)')} ${r.enabled ? '' : '<span class="tag off">꺼짐</span>'}</span><div class="tools">
+      <button data-act="list-up" data-s="com" data-base="responders" data-i="${i}">▲</button><button data-act="list-down" data-s="com" data-base="responders" data-i="${i}">▼</button><button data-act="list-del" data-s="com" data-base="responders" data-i="${i}">✕</button></div></div>
+      <div class="cols"><div>${f.toggle('사용', '끄면 응답하지 않아요.', `responders.${i}.enabled`)}${f.text('명령어 / 글', `responders.${i}.trigger`, { max: 100, ph: '!규칙' })}
+        ${f.select('일치 방식', `responders.${i}.match`, [['exact', '똑같이 쓸 때'], ['startsWith', '이 글로 시작할 때'], ['contains', '이 글이 들어 있을 때']])}</div>
+      <div>${f.area('봇이 보낼 답변', `responders.${i}.response`, { max: 2000 })}</div></div>
+      <div class="cols"><div>${f.toggle('임베드로 보내기', '꾸민 상자 형태로 보내요.', `responders.${i}.embed`)}${f.color('임베드 색', `responders.${i}.color`)}</div>
+      <div>${f.toggle('답장으로 보내기', '쓴 글에 답장하는 형태로 보내요.', `responders.${i}.reply`)}${f.toggle('쓴 글 지우기', '답변을 보내고 쓴 글은 지워요. (봇에 메시지 관리 권한 필요)', `responders.${i}.deleteTrigger`)}</div></div></div>`).join('')
+      : '<div class="card empty">아직 자동응답이 없어요. "자동응답 추가"를 눌러 만들어 보세요.<br>예) 명령어 <b>!규칙</b> → 서버 규칙 안내</div>'}</div>`;
+}
+
+// ---------- 관리자 ----------
+const LTYPE = { signup: ['가입', ''], login: ['로그인', 'ok'], fail: ['실패', 'bad'], discord_login: ['디스코드 로그인', 'ok'], discord_link: ['디스코드 연결', ''], logout: ['로그아웃', 'off'], action: ['설정 변경', 'warn'] };
+async function pgAdminLogs(main) {
+  main.innerHTML = `<div class="row between"><div><h1>로그인 기록</h1><p class="muted">로그인·가입·설정 변경 기록과 접속 IP예요. 관리자(봇 주인)만 볼 수 있어요.</p></div>
+    <div class="row"><select id="ltype" style="width:auto"><option value="">전체</option>${Object.entries(LTYPE).map(([k, v]) => `<option value="${k}">${v[0]}</option>`).join('')}</select><input type="search" id="lq" placeholder="아이디·IP 검색" style="width:200px"></div></div>
+    <div class="card gap" id="ll"><div class="empty">불러오는 중...</div></div>`;
+  const run = async () => {
+    try {
+      const r = await api(`/api/admin/logs?limit=300&type=${encodeURIComponent($('#ltype').value)}&q=${encodeURIComponent($('#lq').value)}`);
+      if (state.page !== 'admin-logs') return;
+      $('#ll').innerHTML = r.logs.length ? `<div class="tw"><table><tr><th>시간</th><th>종류</th><th>계정</th><th>디스코드 ID</th><th>IP</th><th>기기</th><th>내용</th></tr>
+        ${r.logs.map((l) => { const t = LTYPE[l.type] || [l.type, '']; return `<tr><td style="white-space:nowrap">${fmtT(l.ts)}</td><td><span class="tag ${t[1]}">${t[0]}</span></td><td>${esc(l.username || l.name || '-')}</td><td class="mono">${esc(l.discordId || '-')}</td><td class="mono">${esc(l.ip || '-')}</td><td class="ua">${esc(l.ua || '')}</td><td>${esc(l.detail || '')}</td></tr>`; }).join('')}</table></div>` : '<div class="empty">기록이 없어요.</div>';
+    } catch (e) { if ($('#ll')) $('#ll').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+  };
+  $('#ltype').addEventListener('change', run);
+  $('#lq').addEventListener('input', debounce(run, 350));
+  run();
+}
+async function pgAdminAccounts(main) {
+  main.innerHTML = `<h1>계정 목록</h1><p class="muted">가입한 계정과 마지막 접속 IP예요.</p><div class="card gap" id="al"><div class="empty">불러오는 중...</div></div>`;
+  try {
+    const r = await api('/api/admin/accounts');
+    if (state.page !== 'admin-accounts') return;
+    $('#al').innerHTML = `<div class="tw"><table><tr><th>아이디</th><th>이름</th><th>디스코드</th><th>가입</th><th>마지막 로그인</th><th>마지막 IP</th><th></th></tr>
+      ${r.accounts.map((a) => `<tr><td>${esc(a.username || '-')}</td><td>${esc(a.name || '-')} ${a.isAdmin ? '<span class="tag">관리자</span>' : ''}</td><td class="mono">${esc(a.discordId || '-')}</td><td>${fmtT(a.createdTs)}</td><td>${fmtT(a.lastLoginTs)}</td><td class="mono">${esc(a.lastIp || '-')}</td>
+      <td>${a.id === state.me.id ? '' : `<button class="btn ghost danger sm" data-act="acc-del" data-id="${esc(a.id)}">삭제</button>`}</td></tr>`).join('')}</table></div>`;
+  } catch (e) { if ($('#al')) $('#al').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+async function pgAdminSite(main) {
+  main.innerHTML = `<h1>첫 화면 링크</h1><p class="muted">로그인 전 첫 화면과 상단에 보이는 링크예요. https:// 주소만 쓸 수 있어요.</p><div class="card gap" id="sf"><div class="empty">불러오는 중...</div></div>`;
+  try {
+    const r = await api('/api/admin/site');
+    if (state.page !== 'admin-site') return;
+    const row = (k, label, ph) => `<div class="field"><label>${label}</label><input type="url" data-site="${k}" value="${esc(r.site[k])}" placeholder="${ph}"><div class="hint">현재 적용 중: ${r.effective[k] ? esc(r.effective[k]) : '(없음)'}</div></div>`;
+    $('#sf').innerHTML = `${row('supportUrl', '공식 디스코드 서버 초대 링크', 'https://discord.gg/...')}${row('contactUrl', '문의하기 링크 (비우면 공식 서버로 연결)', 'https://discord.gg/... 또는 문의 채널 링크')}${row('inviteUrl', '봇 초대 링크 (비우면 자동으로 만들어줘요)', 'https://discord.com/oauth2/authorize?...')}
+      <button class="btn" data-act="site-save">저장</button>`;
+  } catch (e) { if ($('#sf')) $('#sf').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
 
 // ---------- 이벤트 ----------
 document.addEventListener('input', (e) => {
   const t = e.target;
-  if (!t.dataset || !t.dataset.p || t.type === 'checkbox') return;
-  const p = curPanel(); if (!p) return;
+  if (!t.dataset || !t.dataset.p || t.type === 'checkbox' || t.type === 'radio') return;
+  const o = scopeObj(t.dataset.s); if (!o) return;
   let v = t.value;
-  if (t.dataset.t === 'num') v = Math.min(10, Math.max(1, parseInt(v, 10) || 1));
-  setP(p, t.dataset.p, v);
-  // 색상 입력 두 칸 맞추기
-  if (t.dataset.p === 'embed.color') document.querySelectorAll('[data-p="embed.color"]').forEach((x) => { if (x !== t && /^#[0-9a-fA-F]{6}$/.test(v)) x.value = v; });
-  markDirty();
-  if (state.tab === 'message') renderPreview();
-  if (t.dataset.p === 'name') { const h = document.querySelector('#main h1'); if (h) h.textContent = v; }
+  if (t.dataset.t === 'num') v = Math.min(+t.max || 60, Math.max(+t.min || 1, parseInt(v, 10) || 1));
+  setP(o, t.dataset.p, v);
+  if (t.type === 'color' || /color$/i.test(t.dataset.p)) document.querySelectorAll(`[data-s="${t.dataset.s}"][data-p="${t.dataset.p}"]`).forEach((x) => { if (x !== t && /^#[0-9a-fA-F]{6}$/.test(v)) x.value = v; });
+  markDirty(); refreshPreview();
+  if (state.page === 'panel' && t.dataset.p === 'name') { const h = document.querySelector('#main h1'); if (h) h.textContent = v; }
 });
-
 document.addEventListener('change', (e) => {
   const t = e.target;
   if (!t.dataset || !t.dataset.p) return;
-  const p = curPanel(); if (!p) return;
-  if (t.type === 'checkbox') setP(p, t.dataset.p, t.checked);
-  else if (t.tagName === 'SELECT') setP(p, t.dataset.p, t.value);
+  const o = scopeObj(t.dataset.s); if (!o) return;
+  if (t.type === 'checkbox') setP(o, t.dataset.p, t.checked);
+  else if (t.tagName === 'SELECT') setP(o, t.dataset.p, t.dataset.p === 'padding' ? parseInt(t.value, 10) : t.value);
   else return;
-  markDirty();
-  if (state.tab === 'message') renderPreview();
+  markDirty(); refreshPreview();
 });
+function refreshPreview() {
+  if (state.page === 'panel' && state.tab === 'message') renderPreview();
+  if (state.page === 'tsettings') renderTPreview();
+  if (state.page === 'welcome') renderWPreview();
+}
+const TEMPLATES = {
+  question: () => ({ label: '', placeholder: '', required: true, long: false }),
+  option: () => ({ id: rid(), label: '', description: '', emoji: '', categoryId: '', questions: [] }),
+  responder: () => ({ ...state.data.defaultResponder, id: rid(), trigger: '', response: '' }),
+};
 
 document.addEventListener('click', async (e) => {
   const goEl = e.target.closest('[data-go]');
-  if (goEl) { e.preventDefault(); go(goEl.dataset.go); return; }
-  const el = e.target.closest('[data-act]');
-  if (!el) return;
+  const actEl = e.target.closest('[data-act]');
+  if (goEl && !actEl) {
+    e.preventDefault();
+    const row = e.target.closest('[data-uid]');
+    if (row) state.pendingUser = row.dataset.uid;
+    go(goEl.dataset.go); return;
+  }
+  const el = actEl; if (!el) return;
   const act = el.dataset.act;
-  const panels = state.data && state.data.config.panels;
-  const p = curPanel();
+  const T_ = T(), panels = T_ && T_.panels, p = state.pid ? curPanel() : null;
 
-  if (act === 'tab') { state.tab = el.dataset.tab; history.replaceState(null, '', `#/g/${state.gid}/p/${state.pid}/${state.tab}`); renderPanel($('#main')); return; }
+  if (act === 'auth-open') { e.preventDefault(); state.auth = el.dataset.mode; if (!state.me) renderLanding($('#app')); else go('#/'); window.scrollTo(0, 0); return; }
+  if (act === 'logout') { try { await api('/api/auth/logout', { method: 'POST', body: '{}' }); } catch (_) {} state.me = null; state.data = null; state.guilds = []; state.dirty = false; location.hash = '#/'; render(); return; }
+  if (act === 'tab') { state.tab = el.dataset.tab; history.replaceState(null, '', `#/g/${state.gid}/p/${state.pid}/${state.tab}`); renderMain(); return; }
+  if (act === 'wtab') { state.wtab = el.dataset.tab; history.replaceState(null, '', `#/g/${state.gid}/welcome/${state.wtab}`); renderMain(); return; }
+  if (act === 'mode') { if (p) { p.mode = el.value; markDirty(); renderTab(); const tabs = $('.tabs'); if (tabs) tabs.innerHTML = PTABS().map(([k, n]) => `<button class="${state.tab === k ? 'on' : ''}" data-act="tab" data-tab="${k}">${n}</button>`).join(''); } return; }
   if (act === 'new-panel') {
     if (panels.length >= 10) return toast('패널은 최대 10개까지 만들 수 있어요.', true);
     const np = JSON.parse(JSON.stringify(state.data.defaultPanel)); np.id = rid(); np.name = `패널 ${panels.length + 1}`;
-    panels.push(np); state.dirty = true; state.tab = 'message'; state.pid = np.id;
-    location.hash = `#/g/${state.gid}/p/${np.id}/message`; return;
+    panels.push(np); state.dirty = true; state.tab = 'message'; location.hash = `#/g/${state.gid}/p/${np.id}/message`; return;
   }
   if (act === 'del-panel') {
     if (!confirm('이 패널을 삭제할까요? (이미 보낸 디스코드 메시지는 직접 지워야 해요)')) return;
     const i = panels.findIndex((x) => x.id === el.dataset.id); if (i >= 0) panels.splice(i, 1);
     await save(); renderMain(); return;
   }
-  if (!p) return;
-  if (act === 'role') { const arr = getP(p, el.dataset.path); const i = arr.indexOf(el.dataset.id); if (i >= 0) arr.splice(i, 1); else arr.push(el.dataset.id); markDirty(); renderTab(); return; }
-  if (act === 'q-add') { if (p.questions.length < 5) p.questions.push({ label: '', placeholder: '', required: true, long: false }); markDirty(); renderTab(); return; }
-  if (act === 'q-del') { p.questions.splice(+el.dataset.i, 1); markDirty(); renderTab(); return; }
-  if (act === 'q-up' || act === 'q-down') {
-    const i = +el.dataset.i, j = act === 'q-up' ? i - 1 : i + 1;
-    if (j >= 0 && j < p.questions.length) { [p.questions[i], p.questions[j]] = [p.questions[j], p.questions[i]]; markDirty(); renderTab(); }
-    return;
+  if (act === 'role') {
+    const o = scopeObj(el.dataset.s); if (!o) return;
+    const arr = getP(o, el.dataset.path); const i = arr.indexOf(el.dataset.id); if (i >= 0) arr.splice(i, 1); else arr.push(el.dataset.id);
+    markDirty(); if (state.page === 'panel') renderTab(); else renderMain(); return;
+  }
+  if (act === 'list-add' || act === 'list-del' || act === 'list-up' || act === 'list-down') {
+    const o = scopeObj(el.dataset.s); if (!o) return;
+    const arr = getP(o, el.dataset.base); const i = +el.dataset.i;
+    if (act === 'list-add') {
+      const kind = el.dataset.kind;
+      if (kind === 'question' && arr.length >= 5) return;
+      if (kind === 'option' && arr.length >= 25) return;
+      if (kind === 'responder' && arr.length >= 50) return toast('자동응답은 최대 50개예요.', true);
+      arr.push(TEMPLATES[kind]());
+    } else if (act === 'list-del') arr.splice(i, 1);
+    else { const j = act === 'list-up' ? i - 1 : i + 1; if (j < 0 || j >= arr.length) return; [arr[i], arr[j]] = [arr[j], arr[i]]; }
+    markDirty(); if (state.page === 'panel') renderTab(); else renderMain(); return;
   }
   if (act === 'save') { await save(); return; }
   if (act === 'send') {
@@ -463,29 +859,58 @@ document.addEventListener('click', async (e) => {
     if (!(await save())) return;
     try {
       const r = await api(`/api/guild/${state.gid}/panels/${state.pid}/send`, { method: 'POST', body: '{}' });
-      state.data.config = r.config;
+      state.data.tickets = r.tickets;
       toast(r.created ? '패널을 보냈어요!' : '패널 메시지를 업데이트했어요!');
       if (state.tab === 'message') renderTab();
     } catch (err) { toast(err.message, true); }
+    return;
+  }
+  if (act === 'wtest') {
+    try { await api(`/api/guild/${state.gid}/community/preview`, { method: 'POST', body: JSON.stringify({ kind: state.wtab, draft: C()[state.wtab] }) }); toast('테스트 메시지를 보냈어요!'); }
+    catch (err) { toast(err.message, true); }
+    return;
+  }
+  if (act === 'user') { showUser(el.dataset.id); return; }
+  if (act === 'user-save') {
+    const box = $('#uform'); const body = {};
+    box.querySelectorAll('[data-u]').forEach((i) => { body[i.dataset.u] = Number(i.value || 0); });
+    try { await api(`/api/guild/${state.gid}/users/${box.dataset.id}`, { method: 'PUT', body: JSON.stringify(body) }); toast('저장했어요.'); state.cache = {}; showUser(box.dataset.id); }
+    catch (err) { toast(err.message, true); }
+    return;
+  }
+  if (act === 'acc-del') {
+    if (!confirm('이 계정을 삭제할까요?')) return;
+    try { await api(`/api/admin/accounts/${el.dataset.id}`, { method: 'DELETE' }); toast('삭제했어요.'); renderMain(); } catch (err) { toast(err.message, true); }
+    return;
+  }
+  if (act === 'site-save') {
+    const body = {}; document.querySelectorAll('[data-site]').forEach((i) => { body[i.dataset.site] = i.value.trim(); });
+    try { const r = await api('/api/admin/site', { method: 'PUT', body: JSON.stringify(body) }); state.pub.links = r.effective; toast('저장했어요.'); renderTop(); renderMain(); }
+    catch (err) { toast(err.message, true); }
   }
 });
 
 async function save() {
   if (state.busy) return false;
   state.busy = true;
+  const isTickets = ['panel', 'tsettings', 'tickets'].includes(state.page);
   try {
-    const r = await api(`/api/guild/${state.gid}/tickets`, { method: 'PUT', body: JSON.stringify({ panels: state.data.config.panels }) });
-    state.data.config = r.config;
+    if (isTickets) {
+      const r = await api(`/api/guild/${state.gid}/tickets`, { method: 'PUT', body: JSON.stringify({ settings: T().settings, panels: T().panels }) });
+      state.data.tickets = r.tickets;
+    } else {
+      const r = await api(`/api/guild/${state.gid}/community`, { method: 'PUT', body: JSON.stringify(C()) });
+      state.data.community = r.community;
+    }
     state.dirty = false;
-    if (state.pid && !curPanel()) { location.hash = '#/g/' + state.gid; }
+    state.cache = {};
+    if (state.pid && !curPanel()) location.hash = `#/g/${state.gid}/tickets`;
     toast('저장했어요.');
     return true;
-  } catch (err) {
-    toast(err.message, true);
-    return false;
-  } finally {
+  } catch (err) { toast(err.message, true); return false; }
+  finally {
     state.busy = false;
-    if (state.pid) renderBar();
+    if (['panel', 'tsettings', 'welcome', 'auto'].includes(state.page)) { renderBar(); if (state.page === 'auto') renderMain(); }
   }
 }
 
