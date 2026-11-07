@@ -378,10 +378,16 @@ client.on('interactionCreate', async interaction => {
             purchaseId = rec.id;
             // 티켓 채널에서 실행했다면 그 안의 대화 내용을 구매 기록에 같이 저장 (웹 대시보드 구매 로그에서 볼 수 있어요)
             try {
+                // 릴리웨이 티켓 + 티켓툴(TicketTool) 등 다른 봇이 만든 티켓 채널(이름에 ticket/티켓/closed 포함)도 저장
                 const tk = store.findTicket(interaction.channelId);
-                if (tk) {
+                const chName = String(interaction.channel.name || '');
+                if (tk || /ticket|티켓|closed/i.test(chName)) {
                     const messages = await tickets.collectChat(interaction.channel);
-                    store.attachChat(rec.id, { channelName: interaction.channel.name, ticketNumber: tk.number, messages });
+                    const num = tk ? tk.number : parseInt((chName.match(/\d+/) || [])[0], 10) || null;
+                    const saved = store.attachChat(rec.id, { channelName: chName, ticketNumber: num, messages });
+                    console.log(`[구매기록] ${store.purchaseCode(rec.id)} 대화 ${messages.length}줄 저장 (${chName}) ${saved ? '' : '실패'}`);
+                } else {
+                    console.log(`[구매기록] ${store.purchaseCode(rec.id)} 티켓 채널이 아니라 대화를 저장하지 않았어요 (${chName})`);
                 }
             } catch (e) {
                 console.error('티켓 대화 저장 실패:', e.message);
@@ -454,7 +460,10 @@ client.on('interactionCreate', async interaction => {
                 .setColor(SKY_COLOR)
                 .setDescription(`## ${titleName}님 ${summary} 구매 감사합니다 .ᐟ.ᐟ`.slice(0, 4000))
                 .setImage('attachment://purchase.png')
-                .setFooter(guildIcon ? { text: shopName, iconURL: guildIcon } : { text: shopName })
+                .setFooter((() => {
+                    const text = purchaseId ? `구매 ID ${store.purchaseCode(purchaseId)} · ${shopName}` : shopName;
+                    return guildIcon ? { text, iconURL: guildIcon } : { text };
+                })())
                 .setTimestamp();
 
             await logChannel.send({
@@ -472,6 +481,7 @@ client.on('interactionCreate', async interaction => {
                     `해당 관리 판매자: ${seller}`
                 )
                 .setImage(IMAGE_URL);
+            if (purchaseId) logEmbed.setFooter({ text: `구매 ID ${store.purchaseCode(purchaseId)}` });
 
             await logChannel.send({ content: `${buyer}`, embeds: [logEmbed] });
             warn = '⚠️ 구매 카드 이미지 생성에 실패해 기존 임베드로 전송했어요. (폰트 파일/패키지 설치를 확인해 주세요)';
