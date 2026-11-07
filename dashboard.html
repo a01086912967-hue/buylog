@@ -100,6 +100,15 @@ h3 { margin: 0; font-size: 17px; }
 .srv .gicon { width: 72px; height: 72px; border-radius: 22px; font-size: 26px; }
 
 .pcard { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; margin-top: 14px; }
+.ov { position: fixed; inset: 0; z-index: 70; background: rgba(15,40,80,.45); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.ovbox { width: min(720px, 100%); max-height: 86vh; display: flex; flex-direction: column; background: #fff; border-radius: 22px; box-shadow: 0 24px 60px rgba(0,0,0,.3); overflow: hidden; }
+.ovhead { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 20px; border-bottom: 1px solid #e3eefb; }
+.ovbody { padding: 14px 20px 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+.msg { display: flex; flex-direction: column; gap: 2px; padding: 9px 13px; border-radius: 14px; background: #eef5fd; max-width: 92%; word-break: break-word; white-space: pre-wrap; }
+.msg.bot { background: #f4f1fe; }
+.msg .mh { font-size: 12px; color: #6a7f99; font-weight: 700; }
+.msg a { color: var(--blue-d); }
+
 .tag { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; background: rgba(61,155,245,.14); color: var(--blue-d); white-space: nowrap; }
 .tag.ok { background: rgba(18,168,107,.14); color: var(--ok); }
 .tag.off { background: rgba(106,136,170,.16); color: var(--muted); }
@@ -701,7 +710,7 @@ function person(label, x, fn) {
 // ---------- 구매 로그 ----------
 const KIND = { robux: '로벅스', ingame: '인게임', etc: '기타' };
 async function pgPurchases(main) {
-  main.innerHTML = `<div class="row between"><div><h1>구매 로그</h1><p class="muted">/지급완료 로 기록된 최근 구매예요.</p></div><input type="search" id="pq" placeholder="구매자·상품 검색" style="max-width:240px"></div>
+  main.innerHTML = `<div class="row between"><div><h1>구매 로그</h1><p class="muted">/지급완료 로 기록된 최근 구매예요.</p></div><input type="search" id="pq" placeholder="구매 ID·구매자·상품 검색" style="max-width:240px"></div>
     <div class="card gap" id="pl"><div class="empty">불러오는 중...</div></div>`;
   try {
     const r = await api(`/api/guild/${state.gid}/purchases?limit=300`);
@@ -713,11 +722,26 @@ async function pgPurchases(main) {
 }
 function drawPurchases(q) {
   const n = q.trim().toLowerCase();
-  const list = (state.cache.purchases || []).filter((p) => !n || `${p.buyer ? p.buyer.name : ""} ${p.item} ${p.seller ? p.seller.name : ''}`.toLowerCase().includes(n));
+  const list = (state.cache.purchases || []).filter((p) => !n || `${p.code || ''} ${p.buyer ? p.buyer.name : ""} ${p.item} ${p.seller ? p.seller.name : ''}`.toLowerCase().includes(n));
   const sum = list.reduce((a, p) => a + p.spent, 0);
-  $('#pl').innerHTML = list.length ? `<div class="muted" style="margin-bottom:8px">${fmtN(list.length)}건 · 합계 ${fmtN(sum)}원</div><div class="tw"><table><tr><th>시간</th><th>구매자</th><th>종류</th><th>상품</th><th class="num">수량</th><th class="num">금액</th><th>판매자</th></tr>
-    ${list.map((p) => `<tr><td>${fmtT(p.ts)}</td><td><div class="person"><img src="${esc((p.buyer && p.buyer.avatar) || AVATAR)}" alt="">${esc(p.buyer ? p.buyer.name : '알 수 없음')}</div></td><td><span class="tag">${KIND[p.kind] || esc(p.kind)}</span></td>
-    <td>${esc(p.item || '-')}</td><td class="num">${esc(p.qty || '-')}</td><td class="num">${fmtN(p.spent)}원</td><td>${p.seller ? esc(p.seller.name) : '-'}</td></tr>`).join('')}</table></div>` : '<div class="empty">기록이 없어요.</div>';
+  $('#pl').innerHTML = list.length ? `<div class="muted" style="margin-bottom:8px">${fmtN(list.length)}건 · 합계 ${fmtN(sum)}원</div><div class="tw"><table><tr><th>구매 ID</th><th>시간</th><th>구매자</th><th>종류</th><th>상품</th><th class="num">수량</th><th class="num">금액</th><th>판매자</th><th>대화</th></tr>
+    ${list.map((p) => `<tr><td class="mono"><b>${esc(p.code || '-')}</b></td><td>${fmtT(p.ts)}</td><td><div class="person"><img src="${esc((p.buyer && p.buyer.avatar) || AVATAR)}" alt="">${esc(p.buyer ? p.buyer.name : '알 수 없음')}</div></td><td><span class="tag">${KIND[p.kind] || esc(p.kind)}</span></td>
+    <td>${esc(p.item || '-')}</td><td class="num">${esc(p.qty || '-')}</td><td class="num">${fmtN(p.spent)}원</td><td>${p.seller ? esc(p.seller.name) : '-'}</td>
+    <td>${p.chatCount ? `<button class="btn sm" data-act="chat" data-id="${esc(p.id)}">${ic('chat', 14)} ${fmtN(p.chatCount)}줄</button>` : '<span class="muted">-</span>'}</td></tr>`).join('')}</table></div>` : '<div class="empty">기록이 없어요.</div>';
+}
+
+async function showChat(id) {
+  const old = $('#ov'); if (old) old.remove();
+  const ov = document.createElement('div'); ov.className = 'ov'; ov.id = 'ov';
+  ov.innerHTML = `<div class="ovbox"><div class="ovhead"><b>티켓 대화 기록</b><button class="btn sm" data-act="ovclose">닫기</button></div><div class="ovbody" id="ovb"><div class="empty">불러오는 중...</div></div></div>`;
+  ov.addEventListener('click', (e) => { if (e.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
+  try {
+    const r = await api(`/api/guild/${state.gid}/purchases/${encodeURIComponent(id)}/chat`);
+    const c = r.chat;
+    const head = `<div class="muted" style="margin-bottom:4px">구매 ID <b>${esc(r.code)}</b> · ${esc(r.item || '-')} · ${r.buyer ? esc(r.buyer.name) : '알 수 없음'}${c && c.channelName ? ` · #${esc(c.channelName)}` : ''}</div>`;
+    $('#ovb').innerHTML = head + (c && c.messages.length ? c.messages.map((m) => `<div class="msg${m.bot ? ' bot' : ''}"><span class="mh">${esc(m.name)}${m.bot ? ' · 봇' : ''} · ${fmtT(m.ts)}</span>${esc(m.text)}${m.files.map((f) => `<a href="${esc(f.url)}" target="_blank" rel="noopener noreferrer">첨부: ${esc(f.name)}</a>`).join('')}</div>`).join('') : '<div class="empty">저장된 대화가 없어요. (티켓 채널에서 /지급완료 를 했을 때만 저장돼요)</div>');
+  } catch (e) { $('#ovb').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
 
 // ---------- 유저 정보 ----------
@@ -933,6 +957,8 @@ document.addEventListener('click', async (e) => {
     return;
   }
   if (act === 'user') { showUser(el.dataset.id); return; }
+  if (act === 'chat') { showChat(el.dataset.id); return; }
+  if (act === 'ovclose') { const o = $('#ov'); if (o) o.remove(); return; }
   if (act === 'user-save') {
     const box = $('#uform'); const body = {};
     box.querySelectorAll('[data-u]').forEach((i) => { body[i.dataset.u] = Number(i.value || 0); });
