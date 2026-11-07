@@ -2,21 +2,21 @@
 // - 저장 위치: DATA_DIR 환경변수 > Railway Volume(RAILWAY_VOLUME_MOUNT_PATH) > ./data
 // - Railway는 재배포/재시작하면 파일이 지워져요. 데이터를 유지하려면 Volume을 만들어서 연결해야 해요.
 //   (Railway 서비스 > Settings > Volumes > Mount Path: /data)
- 
+
 const fs = require('fs');
 const path = require('path');
- 
+
 // 모든 통계의 시작 시점: 2026-10-28 00:00 (한국 시간)
 const STATS_START_TS = Date.UTC(2026, 9, 27, 15, 0, 0);
- 
+
 const DATA_DIR = process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH || path.join(__dirname, 'data');
 const FILE = path.join(DATA_DIR, 'data.json');
- 
+
 const onRailway = !!(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID || process.env.RAILWAY_SERVICE_ID);
 const persistent = !!(process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH) || !onRailway;
- 
-let db = { users: {}, purchases: [], joins: [], guilds: {}, tickets: [], accounts: {}, loginLog: [], sessions: {}, site: {} };
- 
+
+let db = { users: {}, purchases: [], purchaseSeq: 0, joins: [], guilds: {}, tickets: [], accounts: {}, loginLog: [], sessions: {}, site: {} };
+
 function load() {
     try {
         fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -29,6 +29,7 @@ function load() {
             db = {
                 users: parsed.users || {},
                 purchases: Array.isArray(parsed.purchases) ? parsed.purchases : [],
+                purchaseSeq: Number(parsed.purchaseSeq) || 0,
                 joins: Array.isArray(parsed.joins) ? parsed.joins : [],
                 guilds: parsed.guilds && typeof parsed.guilds === 'object' ? parsed.guilds : {},
                 tickets: Array.isArray(parsed.tickets) ? parsed.tickets : [],
@@ -37,6 +38,9 @@ function load() {
                 sessions: parsed.sessions && typeof parsed.sessions === 'object' ? parsed.sessions : {},
                 site: parsed.site && typeof parsed.site === 'object' ? parsed.site : {},
             };
+            // 구매 아이디가 없는 예전 기록에 순서대로 번호 붙이기
+            for (const p of db.purchases) if (!p.id) p.id = ++db.purchaseSeq;
+            db.purchaseSeq = db.purchases.reduce((a, p) => Math.max(a, p.id || 0), db.purchaseSeq);
             console.log(`[데이터] 불러오기 완료 (유저 ${Object.keys(db.users).length}명, 구매 ${db.purchases.length}건) - ${FILE}`);
         } catch (e) {
             const bak = `${FILE}.corrupt-${Date.now()}`;
@@ -55,7 +59,7 @@ function load() {
         );
     }
 }
- 
+
 function save() {
     try {
         const tmp = `${FILE}.tmp`;
@@ -65,7 +69,7 @@ function save() {
         console.error('[데이터] 저장 실패:', e.message);
     }
 }
- 
+
 // "10,000원" / "1만" / "700 로벅스" -> 숫자
 function parseNumber(s) {
     const t = String(s ?? '').replace(/,/g, '');
@@ -74,25 +78,27 @@ function parseNumber(s) {
     const m = t.match(/\d+(?:\.\d+)?/);
     return m ? Math.round(Number(m[0])) : 0;
 }
- 
+
 function emptyUser() {
     return { robux: 0, spent: 0, count: 0, invites: 0 };
 }
- 
+
 function getUser(id) {
     return { ...emptyUser(), ...(db.users[id] || {}) };
 }
- 
+
 function ensureUser(id) {
     if (!db.users[id]) db.users[id] = emptyUser();
     return db.users[id];
 }
- 
+
 // 구매 1건 기록 (유저 누적 + 기간 통계용 기록)
 function recordPurchase({ buyerId, kind, qty, price, sellerId, item, guildId }) {
     const robux = kind === 'robux' ? parseNumber(qty) : 0;
     const spent = parseNumber(price);
+    const id = ++db.purchaseSeq;
     db.purchases.push({
+        id,
         ts: Date.now(),
         buyerId,
         kind,
@@ -108,9 +114,9 @@ function recordPurchase({ buyerId, kind, qty, price, sellerId, item, guildId }) 
     u.spent += spent;
     u.robux += robux;
     save();
-    return { robux, spent };
+    return { robux, spent, id };
 }
- 
+
 // 관리자가 직접 설정 (값을 준 항목만 덮어씀)
 function setUser(id, patch) {
     const u = ensureUser(id);
@@ -120,14 +126,14 @@ function setUser(id, patch) {
     save();
     return { ...u };
 }
- 
+
 // 서버 가입 기록 (초대한 사람이 있으면 초대 수 +1)
 function recordJoin(userId, inviterId) {
     db.joins.push({ ts: Date.now(), userId, inviterId: inviterId || null });
     if (inviterId) ensureUser(inviterId).invites += 1;
     save();
 }
- 
+
 // 구매 금액 순 랭킹 [{ id, ...user }]
 function ranking() {
     return Object.entries(db.users)
@@ -135,14 +141,14 @@ function ranking() {
         .filter((u) => u.spent > 0)
         .sort((a, b) => b.spent - a.spent || b.robux - a.robux || b.count - a.count);
 }
- 
+
 // 유저 순위 (구매 기록이 없으면 null)
 function rankOf(id) {
     const list = ranking();
     const i = list.findIndex((u) => u.id === id);
     return { rank: i === -1 ? null : i + 1, total: list.length };
 }
- 
+
 // sinceTs 이후 서버 통계
 function periodStats(sinceTs, guildId) {
     const from = Math.max(sinceTs, STATS_START_TS);
@@ -162,7 +168,7 @@ function periodStats(sinceTs, guildId) {
     for (const [id, amount] of Object.entries(byBuyer)) {
         if (!topBuyer || amount > topBuyer.spent) topBuyer = { id, spent: amount };
     }
- 
+
     let joined = 0;
     const byInviter = {};
     for (const j of db.joins) {
@@ -174,25 +180,25 @@ function periodStats(sinceTs, guildId) {
     for (const [id, n] of Object.entries(byInviter)) {
         if (!topInviter || n > topInviter.count) topInviter = { id, count: n };
     }
- 
+
     return { from, robux, spent, count, topBuyer, joined, topInviter };
 }
- 
+
 // ==================== 티켓 (대시보드 설정 + 기록) ====================
 const emptyTicketConfig = () => ({ counter: 0, panels: [] });
- 
+
 // 서버의 티켓 설정 (복사본을 돌려줘요)
 function getTicketConfig(guildId) {
     const g = db.guilds[guildId];
     return JSON.parse(JSON.stringify(g && g.tickets ? g.tickets : emptyTicketConfig()));
 }
- 
+
 function saveTicketConfig(guildId, cfg) {
     if (!db.guilds[guildId]) db.guilds[guildId] = {};
     db.guilds[guildId].tickets = cfg;
     save();
 }
- 
+
 // 티켓 번호 +1 (서버별)
 function nextTicketNumber(guildId) {
     if (!db.guilds[guildId]) db.guilds[guildId] = {};
@@ -202,16 +208,16 @@ function nextTicketNumber(guildId) {
     save();
     return g.tickets.counter;
 }
- 
+
 function addTicket(t) {
     db.tickets.push({ ...t, closed: false, deleted: false, claimedBy: null, closedBy: null, closedTs: null });
     save();
 }
- 
+
 function findTicket(channelId) {
     return db.tickets.find((t) => t.channelId === channelId) || null;
 }
- 
+
 function closeTicket(channelId, closedBy) {
     const t = findTicket(channelId);
     if (!t || t.closed || t.deleted) return null;
@@ -221,7 +227,7 @@ function closeTicket(channelId, closedBy) {
     save();
     return t;
 }
- 
+
 function reopenTicket(channelId) {
     const t = findTicket(channelId);
     if (!t || t.deleted || !t.closed) return null;
@@ -231,7 +237,7 @@ function reopenTicket(channelId) {
     save();
     return t;
 }
- 
+
 function markTicketDeleted(channelId, by) {
     const t = findTicket(channelId);
     if (!t) return null;
@@ -242,31 +248,56 @@ function markTicketDeleted(channelId, by) {
     save();
     return t;
 }
- 
+
 function getOpenTickets(guildId) {
     return db.tickets.filter((t) => t.guildId === guildId && !t.closed && !t.deleted);
 }
- 
+
 function getRecentTickets(guildId, n = 20) {
     return db.tickets.filter((t) => t.guildId === guildId).slice(-n).reverse();
 }
- 
- 
+
+
 // ==================== 서버별 커뮤니티 설정 (환영/퇴장/자동응답) ====================
 function getCommunity(guildId) {
     const g = db.guilds[guildId];
     return JSON.parse(JSON.stringify((g && g.community) || {}));
 }
- 
+
 function saveCommunity(guildId, cfg) {
     if (!db.guilds[guildId]) db.guilds[guildId] = {};
     db.guilds[guildId].community = cfg;
     save();
 }
- 
+
 // ==================== 구매 기록 조회 (대시보드) ====================
 const inGuild = (p, guildId) => !guildId || !p.guildId || p.guildId === guildId;
- 
+
+const purchaseCode = (id) => `#${String(id || 0).padStart(4, '0')}`;
+
+function getPurchase(id) {
+    return db.purchases.find((p) => p.id === id) || null;
+}
+
+// 티켓 안 대화 기록을 구매 기록에 붙여요 (최대 300줄)
+function attachChat(id, chat) {
+    const p = getPurchase(id);
+    if (!p || !chat || !Array.isArray(chat.messages)) return false;
+    p.chat = {
+        channelName: String(chat.channelName || '').slice(0, 100),
+        ticketNumber: chat.ticketNumber || null,
+        messages: chat.messages.slice(0, 300).map((m) => ({
+            ts: Number(m.ts) || 0,
+            name: String(m.name || '').slice(0, 60),
+            bot: !!m.bot,
+            text: String(m.text || '').slice(0, 600),
+            files: (Array.isArray(m.files) ? m.files : []).slice(0, 5).map((f) => ({ name: String(f.name || '').slice(0, 80), url: String(f.url || '').slice(0, 400) })),
+        })),
+    };
+    save();
+    return true;
+}
+
 function getPurchases(guildId, { limit = 100, buyerId = null } = {}) {
     const out = [];
     for (let i = db.purchases.length - 1; i >= 0 && out.length < limit; i--) {
@@ -277,7 +308,7 @@ function getPurchases(guildId, { limit = 100, buyerId = null } = {}) {
     }
     return out;
 }
- 
+
 // 최근 N일(한국 시간 기준 날짜) 일별 합계
 function dailySeries(guildId, days = 14) {
     const DAY = 24 * 60 * 60 * 1000;
@@ -296,19 +327,19 @@ function dailySeries(guildId, days = 14) {
     }
     return list;
 }
- 
+
 function allUsers() {
     return Object.entries(db.users).map(([id, u]) => ({ id, ...emptyUser(), ...u }));
 }
- 
+
 function countJoinsSince(guildId, sinceTs) {
     return db.joins.filter((j) => j.ts >= sinceTs).length;
 }
- 
+
 // ==================== 계정 / 로그인 기록 / 세션 ====================
 const newId = () => require('crypto').randomBytes(8).toString('hex');
 const sha = (s) => require('crypto').createHash('sha256').update(String(s)).digest('hex');
- 
+
 function getAccount(id) {
     return db.accounts[id] || null;
 }
@@ -350,7 +381,7 @@ function deleteAccount(id) {
 function allAccounts() {
     return Object.values(db.accounts);
 }
- 
+
 const LOG_MAX = 3000;
 function addLog(entry) {
     db.loginLog.push({ ts: Date.now(), ...entry });
@@ -387,7 +418,7 @@ function recentCount(type, ip, sinceTs) {
     }
     return n;
 }
- 
+
 const SESSION_MS = 7 * 24 * 60 * 60 * 1000;
 function createSession(accountId) {
     const sid = require('crypto').randomBytes(32).toString('hex');
@@ -425,7 +456,7 @@ function cleanSessions() {
     }
     if (changed) save();
 }
- 
+
 const SITE_KEYS = ['supportUrl', 'contactUrl', 'inviteUrl'];
 function getSite() {
     const out = {};
@@ -437,9 +468,9 @@ function setSite(patch) {
     save();
     return getSite();
 }
- 
+
 load();
- 
+
 module.exports = {
     getCommunity,
     saveCommunity,
@@ -481,10 +512,12 @@ module.exports = {
     parseNumber,
     getUser,
     recordPurchase,
+    purchaseCode,
+    getPurchase,
+    attachChat,
     setUser,
     recordJoin,
     ranking,
     rankOf,
     periodStats,
 };
- 
