@@ -7,7 +7,7 @@
 //   🔓 다시 열기 / !open -> 원래 카테고리로 돌아오고 이름이 ticket-번호 로 돌아옴 + 초록 임베드
 //   🗑 삭제 / !delete  -> 빨간 임베드 "N초 후 삭제됩니다" 후 채널 삭제 (기록은 로그 채널에 남아요)
 // 설정은 store.js(data.json)에 저장되고, 웹 대시보드(web.js)에서 바꿔요.
- 
+
 const crypto = require('crypto');
 const {
     ActionRowBuilder,
@@ -24,15 +24,15 @@ const {
     TextInputStyle,
 } = require('discord.js');
 const store = require('./store');
- 
+
 const DEFAULT_COLOR = '#7cc4ff';
 const GREEN = 0x2ecc71;
 const RED = 0xed4245;
 const AMBER = 0xf0b232;
 const STYLES = { Primary: ButtonStyle.Primary, Secondary: ButtonStyle.Secondary, Success: ButtonStyle.Success, Danger: ButtonStyle.Danger };
- 
+
 let clientRef = null;
- 
+
 // 티켓 소유자에게 줄 수 있는 채널 권한 (디스코드 채널 권한의 멤버 권한과 같아요)
 // 값: 'allow' 허용 / 'deny' 거부 / 'default' 기본값(@everyone 설정을 따라요)
 const OWNER_PERM_KEYS = [
@@ -55,10 +55,10 @@ const cleanOwnerPerms = (input) => {
     out.ViewChannel = 'allow'; // 소유자가 자기 티켓을 못 보면 안 되니까 항상 허용
     return out;
 };
- 
+
 // ==================== 설정 기본값 / 검사 ====================
 const randomId = () => crypto.randomBytes(5).toString('hex');
- 
+
 function defaultSettings() {
     return {
         supportRoleIds: [], // 모든 패널에 공통으로 적용되는 담당자(서포트 팀) 역할
@@ -81,7 +81,7 @@ function defaultSettings() {
         },
     };
 }
- 
+
 function defaultPanel() {
     return {
         id: randomId(),
@@ -119,13 +119,13 @@ function defaultPanel() {
         },
     };
 }
- 
+
 const str = (v, max) => String(v ?? '').slice(0, max);
 const bool = (v) => !!v;
 const hex = (v, d) => (/^#[0-9a-fA-F]{6}$/.test(String(v || '')) ? String(v) : d);
 const url = (v) => (/^https?:\/\/\S{3,500}$/.test(String(v || '')) ? String(v) : '');
 const fmt = (v, d) => str(v, 40).replace(/[^a-zA-Z0-9가-힣{}\-_ ]/g, '').trim() || d;
- 
+
 function sanitizeQuestions(arr) {
     return (Array.isArray(arr) ? arr : [])
         .slice(0, 5)
@@ -137,7 +137,7 @@ function sanitizeQuestions(arr) {
         }))
         .filter((q) => q.label);
 }
- 
+
 // 대시보드에서 받은 설정을 검사해서 안전한 형태로 만들어요.
 // guild: discord.js Guild (채널/역할이 이 서버에 있는지 확인), existing: 저장된 설정
 function sanitizeConfig(input, guild, existing) {
@@ -154,7 +154,7 @@ function sanitizeConfig(input, guild, existing) {
             .map(String)
             .filter((id) => id !== guild.id && guild.roles.cache.has(id))
             .slice(0, 25);
- 
+
     const ds = defaultSettings();
     const inp = (input && input.settings) || {};
     const im = inp.messages || {};
@@ -175,7 +175,7 @@ function sanitizeConfig(input, guild, existing) {
         const v = str(im[k], 1500);
         settings.messages[k] = v.trim() ? v : ds.messages[k];
     }
- 
+
     const out = { counter: existing.counter || 0, settings, panels: [] };
     const list = Array.isArray(input && input.panels) ? input.panels.slice(0, 10) : [];
     const seen = new Set();
@@ -191,7 +191,7 @@ function sanitizeConfig(input, guild, existing) {
         const t = p.ticket || {};
         const pm = p.perms || {};
         const sel = p.select || {};
- 
+
         const optSeen = new Set();
         const options = (Array.isArray(p.options) ? p.options : [])
             .slice(0, 25)
@@ -213,7 +213,7 @@ function sanitizeConfig(input, guild, existing) {
                 };
             })
             .filter((o) => o.label);
- 
+
         out.panels.push({
             id,
             name: str(p.name, 40).trim() || '패널',
@@ -257,7 +257,7 @@ function sanitizeConfig(input, guild, existing) {
     }
     return out;
 }
- 
+
 // 예전 버전(파일 첨부/링크 미리보기 스위치)에서 저장한 값을 새 권한 표로 옮겨요
 function migratePerms(perms) {
     const op = cleanOwnerPerms(perms.ownerPerms);
@@ -267,7 +267,7 @@ function migratePerms(perms) {
     }
     return { ...perms, ownerPerms: op };
 }
- 
+
 // 저장된 설정을 읽을 때 빠진 값을 기본값으로 채워요 (예전 버전에서 저장한 설정 호환)
 function loadConfig(guildId) {
     const cfg = store.getTicketConfig(guildId);
@@ -289,7 +289,7 @@ function loadConfig(guildId) {
     });
     return cfg;
 }
- 
+
 // ==================== 패널 메시지 ====================
 function buildPanelMessage(panel) {
     const e = panel.embed;
@@ -300,7 +300,7 @@ function buildPanelMessage(panel) {
     if (e.image) embed.setImage(e.image);
     if (e.thumbnail) embed.setThumbnail(e.thumbnail);
     if (e.footer) embed.setFooter({ text: e.footer });
- 
+
     if (panel.mode === 'select') {
         const menu = new StringSelectMenuBuilder()
             .setCustomId(`tk_sel:${panel.id}`)
@@ -321,7 +321,7 @@ function buildPanelMessage(panel) {
         }
         return { embeds: [embed], components: [new ActionRowBuilder().addComponents(menu)] };
     }
- 
+
     const btn = new ButtonBuilder()
         .setCustomId(`tk_open:${panel.id}`)
         .setLabel(panel.button.label || '티켓 열기')
@@ -335,7 +335,7 @@ function buildPanelMessage(panel) {
     }
     return { embeds: [embed], components: [new ActionRowBuilder().addComponents(btn)] };
 }
- 
+
 // 패널 메시지를 채널에 보내거나(처음) 수정해요(이미 보낸 경우). 보낸 메시지 ID를 돌려줘요.
 async function sendPanel(guild, panelId) {
     const cfg = loadConfig(guild.id);
@@ -345,10 +345,10 @@ async function sendPanel(guild, panelId) {
     if (panel.mode === 'select' && !panel.options.length) throw new Error('선택기에 항목을 한 개 이상 추가해 주세요.');
     const channel = guild.channels.cache.get(panel.channelId);
     if (!channel || !channel.isTextBased()) throw new Error('선택한 채널을 찾을 수 없어요.');
- 
+
     const payload = buildPanelMessage(panel);
     let msg = null;
- 
+
     if (panel.messageId && panel.sentChannelId === panel.channelId) {
         msg = await channel.messages.fetch(panel.messageId).catch(() => null);
         if (msg && clientRef && msg.author.id === clientRef.user.id) {
@@ -364,13 +364,13 @@ async function sendPanel(guild, panelId) {
             if (oldMsg && clientRef && oldMsg.author.id === clientRef.user.id) await oldMsg.delete().catch(() => {});
         }
     }
- 
+
     let created = false;
     if (!msg) {
         msg = await channel.send(payload);
         created = true;
     }
- 
+
     const fresh = store.getTicketConfig(guild.id);
     const target = (fresh.panels || []).find((p) => p.id === panelId);
     if (target) {
@@ -380,15 +380,15 @@ async function sendPanel(guild, panelId) {
     }
     return { messageId: msg.id, channelId: channel.id, created };
 }
- 
+
 // ==================== 공통 도구 ====================
 const getPanel = (cfg, panelId) => cfg.panels.find((p) => p.id === panelId) || null;
- 
+
 const fillVars = (text, vars) =>
     String(text || '').replace(/\{(user|username|number|count|server|type|closer|channel|seconds|reason)\}/g, (_, k) =>
         vars[k] !== undefined ? vars[k] : ''
     );
- 
+
 function channelNameOf(format, vars, fallback) {
     const raw = fillVars(format, vars)
         .toLowerCase()
@@ -398,9 +398,9 @@ function channelNameOf(format, vars, fallback) {
         .slice(0, 90);
     return raw || fallback;
 }
- 
+
 const padNum = (n, padding) => (padding > 0 ? String(n).padStart(padding, '0') : String(n));
- 
+
 const isStaff = (member, panel, settings) =>
     !!member &&
     (member.permissions.has(PermissionFlagsBits.Administrator) ||
@@ -408,16 +408,16 @@ const isStaff = (member, panel, settings) =>
         [...((panel && panel.perms && panel.perms.supportRoleIds) || []), ...((settings && settings.supportRoleIds) || [])].some((id) =>
             member.roles.cache.has(id)
         ));
- 
+
 const canCloseOrReopen = (member, ticket, panel, settings) =>
     isStaff(member, panel, settings) || (ticket.ownerId === member.id && (!panel || panel.perms.ownerCanClose));
- 
+
 const kst = (ts) => {
     const d = new Date(ts + 9 * 60 * 60 * 1000);
     const p = (n) => String(n).padStart(2, '0');
     return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
 };
- 
+
 // 느린 작업(채널 이름 변경은 디스코드에서 10분에 2번만 가능)이 길어져도 흐름이 멈추지 않게 해요.
 async function withTimeout(promise, ms) {
     let timer;
@@ -431,7 +431,35 @@ async function withTimeout(promise, ms) {
         clearTimeout(timer);
     }
 }
- 
+
+// 구매 로그에 붙일 대화 기록 (오래된 것 -> 최신 순, 최대 300줄)
+async function collectChat(channel) {
+    const all = [];
+    let before;
+    for (let i = 0; i < 3; i++) {
+        const batch = await channel.messages.fetch({ limit: 100, before }).catch(() => null);
+        if (!batch || !batch.size) break;
+        all.push(...batch.values());
+        before = batch.last().id;
+    }
+    all.reverse();
+    const messages = all.map((m) => {
+        let text = m.cleanContent || m.content || '';
+        if (!text && m.embeds.length) {
+            text = m.embeds.map((e) => [e.title, e.description].filter(Boolean).join(' - ')).filter(Boolean).join(' | ');
+            if (text) text = `[임베드] ${text}`;
+        }
+        return {
+            ts: m.createdTimestamp,
+            name: (m.member && m.member.displayName) || m.author.globalName || m.author.username,
+            bot: !!m.author.bot,
+            text,
+            files: [...m.attachments.values()].map((a) => ({ name: a.name, url: a.url })),
+        };
+    });
+    return messages.filter((m) => m.text || m.files.length);
+}
+
 async function buildTranscript(channel, ticket, padding) {
     const all = [];
     let before;
@@ -459,7 +487,7 @@ async function buildTranscript(channel, ticket, padding) {
     }
     return Buffer.from(lines.join('\n'), 'utf8');
 }
- 
+
 async function sendLog(guild, panel, settings, ticket, title, color, extraFields, withTranscript, channel) {
     try {
         const logId = (panel && panel.ticket.logChannelId) || settings.logChannelId;
@@ -485,29 +513,29 @@ async function sendLog(guild, panel, settings, ticket, title, color, extraFields
         console.error('[티켓] 로그 기록 실패:', err);
     }
 }
- 
+
 // ==================== 티켓 열기 ====================
 const questionsFor = (panel, optId) => {
     const opt = panel.mode === 'select' ? panel.options.find((o) => o.id === optId) : null;
     return opt && opt.questions.length ? opt.questions : panel.questions;
 };
- 
+
 async function createTicket(interaction, cfg, panel, opt, answers) {
     const guild = interaction.guild;
     const owner = interaction.user;
     const settings = cfg.settings;
- 
+
     const open = store.getOpenTickets(guild.id).filter((t) => t.ownerId === owner.id && t.panelId === panel.id);
     if (open.length >= panel.ticket.maxOpen) {
         return interaction.editReply({ content: `이미 열려 있는 티켓이 있어요: <#${open[0].channelId}>` });
     }
- 
+
     const number = store.nextTicketNumber(guild.id);
     const numStr = padNum(number, settings.padding);
     const typeName = opt ? opt.label : panel.name;
     const vars = { user: `<@${owner.id}>`, username: owner.username, number: numStr, count: numStr, server: guild.name, type: typeName };
     const name = channelNameOf((opt && opt.nameFormat) || panel.ticket.nameFormat, vars, `ticket-${numStr}`);
- 
+
     const P = PermissionFlagsBits;
     const ownerAllow = [];
     const ownerDeny = [];
@@ -516,7 +544,7 @@ async function createTicket(interaction, cfg, panel, opt, answers) {
         if (v === 'allow') ownerAllow.push(P[k]);
         else if (v === 'deny') ownerDeny.push(P[k]);
     }
- 
+
     const supportIds = [...new Set([...panel.perms.supportRoleIds, ...settings.supportRoleIds, ...((opt && opt.supportRoleIds) || [])])].filter((id) => guild.roles.cache.has(id));
     const overwrites = [
         { id: guild.id, deny: [P.ViewChannel] },
@@ -534,10 +562,10 @@ async function createTicket(interaction, cfg, panel, opt, answers) {
             overwrites.push({ id, allow: [P.ViewChannel, P.ReadMessageHistory], deny: [P.SendMessages] });
         }
     }
- 
+
     const catId = (opt && opt.categoryId) || panel.ticket.categoryId;
     const parent = catId && guild.channels.cache.has(catId) ? catId : undefined;
- 
+
     let channel;
     try {
         channel = await guild.channels.create({
@@ -551,7 +579,7 @@ async function createTicket(interaction, cfg, panel, opt, answers) {
         console.error('[티켓] 채널 생성 실패:', err);
         return interaction.editReply({ content: '❌ 티켓 채널을 만들지 못했어요. 봇에 "채널 관리" 권한이 있는지 확인해 주세요.' });
     }
- 
+
     store.addTicket({
         guildId: guild.id,
         channelId: channel.id,
@@ -565,13 +593,13 @@ async function createTicket(interaction, cfg, panel, opt, answers) {
         ts: Date.now(),
         answers,
     });
- 
+
     // 1) 초록 "티켓 열림" 임베드
     const opened = new EmbedBuilder()
         .setColor(GREEN)
         .setDescription(fillVars(settings.messages.openedDescription, vars) || `<@${owner.id}> 님이 티켓을 열었어요.`)
         .setFooter({ text: `티켓 #${numStr}${opt ? ` · ${opt.label}` : ''}` });
- 
+
     // 2) 환영 임베드 + 양식 답변
     const baseDesc = fillVars((opt && opt.welcomeMessage) || panel.ticket.welcomeMessage, vars) || `<@${owner.id}>`;
     // 질문은 **굵게**, 답은 코드블록 박스로, 질문마다 한 줄 띄우기
@@ -583,11 +611,11 @@ async function createTicket(interaction, cfg, panel, opt, answers) {
         .setColor(parseInt(hex(panel.embed.color, DEFAULT_COLOR).slice(1), 16))
         .setTitle(fillVars((opt && opt.welcomeTitle) || panel.ticket.welcomeTitle, vars) || `티켓 #${numStr}`)
         .setDescription((baseDesc + (qa ? '\n\n' + qa : '')).slice(0, 4000));
- 
+
     const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('tk_close').setLabel('닫기').setEmoji('🔒').setStyle(ButtonStyle.Secondary)
     );
- 
+
     const mentionRoles = panel.ticket.mentionSupport ? supportIds : [];
     const sent = await channel
         .send({
@@ -601,13 +629,13 @@ async function createTicket(interaction, cfg, panel, opt, answers) {
             return null;
         });
     if (sent && settings.autoPin) sent.pin().catch(() => {});
- 
+
     const reply = new EmbedBuilder()
         .setColor(GREEN)
         .setDescription(fillVars(settings.messages.openedReply, { ...vars, channel: `<#${channel.id}>` }) || `<#${channel.id}>`);
     return interaction.editReply({ content: '', embeds: [reply] });
 }
- 
+
 // ==================== 닫기 / 다시 열기 / 삭제 ====================
 const closedButtons = () =>
     new ActionRowBuilder().addComponents(
@@ -615,7 +643,7 @@ const closedButtons = () =>
         new ButtonBuilder().setCustomId('tk_transcript').setLabel('기록').setEmoji('📄').setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId('tk_delete').setLabel('삭제').setEmoji('🗑️').setStyle(ButtonStyle.Danger)
     );
- 
+
 async function doClose({ guild, channel, ticket, panel, cfg, closer, reason }) {
     const settings = cfg.settings;
     store.closeTicket(channel.id, closer.id);
@@ -628,15 +656,15 @@ async function doClose({ guild, channel, ticket, panel, cfg, closer, reason }) {
         server: guild.name,
         type: ticket.optionLabel || ticket.panelName || '',
     };
- 
+
     // 채널 이동 + 이름 변경 (한 번에)
     const edit = { name: channelNameOf(settings.closedNameFormat, vars, `closed-${numStr}`), lockPermissions: false };
     if (settings.closedCategoryId && guild.channels.cache.has(settings.closedCategoryId)) edit.parent = settings.closedCategoryId;
     const r = await withTimeout(channel.edit(edit).catch((e) => console.error('[티켓] 채널 이동/이름 변경 실패:', e.message)), 10000);
- 
+
     // 소유자는 볼 수만 있고 글은 못 쓰게
     await channel.permissionOverwrites.edit(ticket.ownerId, { SendMessages: false }).catch(() => {});
- 
+
     const why = reason ? `사유: ${str(reason, 300)}\n` : '';
     const embed = new EmbedBuilder()
         .setColor(AMBER)
@@ -645,7 +673,7 @@ async function doClose({ guild, channel, ticket, panel, cfg, closer, reason }) {
         .setFooter({ text: `티켓 #${numStr}` });
     if (r.timedOut) embed.addFields({ name: '알림', value: '채널 이름 변경은 디스코드 제한 때문에 조금 늦게 적용될 수 있어요.' });
     await channel.send({ embeds: [embed], components: [closedButtons()], allowedMentions: { parse: [] } }).catch(() => {});
- 
+
     await sendLog(
         guild,
         panel,
@@ -658,14 +686,14 @@ async function doClose({ guild, channel, ticket, panel, cfg, closer, reason }) {
         channel
     );
 }
- 
+
 async function doReopen({ guild, channel, ticket, panel, cfg, user }) {
     const settings = cfg.settings;
     store.reopenTicket(channel.id);
     const numStr = padNum(ticket.number, settings.padding);
     const typeName = ticket.optionLabel || ticket.panelName || '';
     const vars = { user: `<@${ticket.ownerId}>`, username: ticket.ownerName, number: numStr, count: numStr, server: guild.name, type: typeName };
- 
+
     const opt0 = panel && ticket.optionId ? panel.options.find((o) => o.id === ticket.optionId) : null;
     const edit = {
         name: channelNameOf((opt0 && opt0.nameFormat) || (panel ? panel.ticket.nameFormat : 'ticket-{number}'), vars, `ticket-${numStr}`),
@@ -677,7 +705,7 @@ async function doReopen({ guild, channel, ticket, panel, cfg, user }) {
     const r = await withTimeout(channel.edit(edit).catch((e) => console.error('[티켓] 채널 이동/이름 변경 실패:', e.message)), 10000);
     const sendAllowed = !(panel && panel.perms.ownerPerms.SendMessages === 'deny');
     await channel.permissionOverwrites.edit(ticket.ownerId, { SendMessages: sendAllowed }).catch(() => {});
- 
+
     const embed = new EmbedBuilder()
         .setColor(GREEN)
         .setDescription(fillVars(settings.messages.reopenDescription, vars) || `<@${ticket.ownerId}> 님이 티켓을 다시 열었어요.`)
@@ -695,10 +723,10 @@ async function doReopen({ guild, channel, ticket, panel, cfg, user }) {
             allowedMentions: { users: [ticket.ownerId] },
         })
         .catch(() => {});
- 
+
     await sendLog(guild, panel, settings, ticket, '다시 열림', GREEN, [{ name: '연 사람', value: `<@${user.id}>`, inline: true }], false, null);
 }
- 
+
 async function doDelete({ guild, channel, ticket, panel, cfg, user }) {
     const settings = cfg.settings;
     store.markTicketDeleted(channel.id, user.id);
@@ -707,22 +735,22 @@ async function doDelete({ guild, channel, ticket, panel, cfg, user }) {
         .setColor(RED)
         .setDescription(fillVars(settings.messages.deleteDescription, { seconds: String(secs), user: `<@${ticket.ownerId}>`, closer: `<@${user.id}>` }));
     await channel.send({ embeds: [embed], allowedMentions: { parse: [] } }).catch(() => {});
- 
+
     await sendLog(guild, panel, settings, ticket, '삭제됨', RED, [{ name: '삭제한 사람', value: `<@${user.id}>`, inline: true }], true, channel);
     setTimeout(() => channel.delete('티켓 삭제').catch((e) => console.error('[티켓] 채널 삭제 실패:', e.message)), secs * 1000);
 }
- 
+
 // ==================== !close / !open / !delete ====================
 const CMD_CLOSE = new Set(['close', '닫기']);
 const CMD_OPEN = new Set(['open', 'reopen', '열기']);
 const CMD_DELETE = new Set(['delete', 'del', '삭제']);
- 
+
 // true를 돌려주면 티켓 명령어로 처리한 거예요.
 async function handleMessage(message) {
     if (!message.guild || message.author.bot || !message.content) return false;
     const ticket = store.findTicket(message.channelId);
     if (!ticket || ticket.deleted) return false;
- 
+
     const cfg = loadConfig(message.guild.id);
     const settings = cfg.settings;
     if (!settings.commandsEnabled) return false;
@@ -734,12 +762,12 @@ async function handleMessage(message) {
     const isOpen = CMD_OPEN.has(cmd);
     const isDelete = CMD_DELETE.has(cmd);
     if (!isClose && !isOpen && !isDelete) return false;
- 
+
     const panel = getPanel(cfg, ticket.panelId);
     const member = message.member || (await message.guild.members.fetch(message.author.id).catch(() => null));
     if (!member) return true;
     const ctx = { guild: message.guild, channel: message.channel, ticket, panel, cfg };
- 
+
     try {
         if (isDelete) {
             if (!isStaff(member, panel, settings)) {
@@ -774,7 +802,7 @@ async function handleMessage(message) {
     }
     return true;
 }
- 
+
 // ==================== 상호작용 처리 ====================
 function buildModal(panel, optId, questions) {
     const opt = panel.mode === 'select' ? panel.options.find((o) => o.id === optId) : null;
@@ -793,9 +821,9 @@ function buildModal(panel, optId, questions) {
     });
     return modal;
 }
- 
+
 const ephemeral = (content) => ({ content, ephemeral: true });
- 
+
 // 이 함수가 true를 돌려주면 티켓 관련 상호작용이라 처리가 끝난 거예요.
 async function handleInteraction(interaction) {
     try {
@@ -808,10 +836,10 @@ async function handleInteraction(interaction) {
             await interaction.reply(ephemeral('서버 안에서만 쓸 수 있어요.'));
             return true;
         }
- 
+
         const cfg = loadConfig(interaction.guildId);
         const settings = cfg.settings;
- 
+
         // ----- 패널: 버튼 / 선택기 -----
         if ((interaction.isButton() && interaction.customId.startsWith('tk_open:')) || interaction.isStringSelectMenu()) {
             const isSel = interaction.isStringSelectMenu();
@@ -828,7 +856,7 @@ async function handleInteraction(interaction) {
             }
             // 선택기는 고른 항목이 계속 표시되니, 원래 상태로 되돌려요
             const resetMenu = () => interaction.message.edit(buildPanelMessage(panel)).catch(() => {});
- 
+
             const open = store.getOpenTickets(interaction.guildId).filter((t) => t.ownerId === interaction.user.id && t.panelId === panel.id);
             if (open.length >= panel.ticket.maxOpen) {
                 await interaction.reply(ephemeral(`이미 열려 있는 티켓이 있어요: <#${open[0].channelId}>`));
@@ -846,7 +874,7 @@ async function handleInteraction(interaction) {
             }
             return true;
         }
- 
+
         // ----- 양식 제출 -----
         if (interaction.isModalSubmit()) {
             const [, panelId, optId] = interaction.customId.split(':');
@@ -865,7 +893,7 @@ async function handleInteraction(interaction) {
             await createTicket(interaction, cfg, panel, opt, answers);
             return true;
         }
- 
+
         // ----- 티켓 채널 안의 버튼 -----
         const id = interaction.customId;
         const ticket = store.findTicket(interaction.channelId);
@@ -876,7 +904,7 @@ async function handleInteraction(interaction) {
         const panel = getPanel(cfg, ticket.panelId);
         const member = interaction.member;
         const ctx = { guild: interaction.guild, channel: interaction.channel, ticket, panel, cfg };
- 
+
         if (id === 'tk_close') {
             if (ticket.closed) {
                 await interaction.reply(ephemeral('이미 닫힌 티켓이에요.'));
@@ -903,12 +931,12 @@ async function handleInteraction(interaction) {
             await doClose({ ...ctx, closer: interaction.user, reason: '' });
             return true;
         }
- 
+
         if (id === 'tk_close_no') {
             await interaction.update({ content: '취소했어요.', components: [] });
             return true;
         }
- 
+
         if (id === 'tk_close_yes') {
             if (ticket.closed) {
                 await interaction.update({ content: '이미 닫힌 티켓이에요.', components: [] });
@@ -922,7 +950,7 @@ async function handleInteraction(interaction) {
             await doClose({ ...ctx, closer: interaction.user, reason: '' });
             return true;
         }
- 
+
         if (id === 'tk_reopen') {
             if (!ticket.closed) {
                 await interaction.reply(ephemeral('이미 열려 있는 티켓이에요.'));
@@ -937,7 +965,7 @@ async function handleInteraction(interaction) {
             await doReopen({ ...ctx, user: interaction.user });
             return true;
         }
- 
+
         if (id === 'tk_delete') {
             if (!isStaff(member, panel, settings)) {
                 await interaction.reply(ephemeral('티켓 삭제는 담당자만 할 수 있어요.'));
@@ -947,7 +975,7 @@ async function handleInteraction(interaction) {
             await doDelete({ ...ctx, user: interaction.user });
             return true;
         }
- 
+
         if (id === 'tk_transcript') {
             if (!isStaff(member, panel, settings)) {
                 await interaction.reply(ephemeral('기록은 담당자만 받을 수 있어요.'));
@@ -958,7 +986,7 @@ async function handleInteraction(interaction) {
             await interaction.editReply({ files: [new AttachmentBuilder(buf, { name: `ticket-${padNum(ticket.number, settings.padding)}.txt` })] });
             return true;
         }
- 
+
         // 예전 버전의 "담당하기" 버튼 등
         await interaction.reply(ephemeral('이 버튼은 더 이상 사용하지 않아요.'));
         return true;
@@ -974,7 +1002,7 @@ async function handleInteraction(interaction) {
         return true;
     }
 }
- 
+
 function init(client) {
     clientRef = client;
     // store.js가 예전 버전이면 티켓 열기/닫기가 꼬이므로 시작할 때 바로 알려줘요
@@ -987,8 +1015,9 @@ function init(client) {
         if (t && !t.deleted) store.markTicketDeleted(channel.id, null);
     });
 }
- 
+
 module.exports = {
+    collectChat,
     OWNER_PERM_KEYS,
     init,
     handleInteraction,
@@ -1000,4 +1029,3 @@ module.exports = {
     defaultSettings,
     buildPanelMessage,
 };
- 
