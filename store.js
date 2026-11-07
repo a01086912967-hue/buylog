@@ -17,6 +17,17 @@ const persistent = !!(process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_P
 
 let db = { users: {}, purchases: [], purchaseSeq: 0, joins: [], guilds: {}, tickets: [], accounts: {}, loginLog: [], sessions: {}, site: {} };
 
+// 13자리 랜덤 숫자 (겹치지 않게)
+function genPurchaseId(used) {
+    for (;;) {
+        const n = Number(String(1 + Math.floor(Math.random() * 9)) + String(Math.floor(Math.random() * 1e12)).padStart(12, '0'));
+        if (!used.has(n)) {
+            used.add(n);
+            return n;
+        }
+    }
+}
+
 function load() {
     try {
         fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -39,8 +50,16 @@ function load() {
                 site: parsed.site && typeof parsed.site === 'object' ? parsed.site : {},
             };
             // 구매 아이디가 없는 예전 기록에 순서대로 번호 붙이기
-            for (const p of db.purchases) if (!p.id) p.id = ++db.purchaseSeq;
-            db.purchaseSeq = db.purchases.reduce((a, p) => Math.max(a, p.id || 0), db.purchaseSeq);
+            // 구매 아이디는 13자리 긴 숫자 (예전 1,2,3.. 번호도 이때 긴 숫자로 바꿔요)
+            const used = new Set(db.purchases.filter((p) => p.id >= 1e12).map((p) => p.id));
+            let migrated = false;
+            for (const p of db.purchases) {
+                if (!(p.id >= 1e12)) {
+                    p.id = genPurchaseId(used);
+                    migrated = true;
+                }
+            }
+            if (migrated) setTimeout(save, 0);
             console.log(`[데이터] 불러오기 완료 (유저 ${Object.keys(db.users).length}명, 구매 ${db.purchases.length}건) - ${FILE}`);
         } catch (e) {
             const bak = `${FILE}.corrupt-${Date.now()}`;
@@ -96,7 +115,7 @@ function ensureUser(id) {
 function recordPurchase({ buyerId, kind, qty, price, sellerId, item, guildId }) {
     const robux = kind === 'robux' ? parseNumber(qty) : 0;
     const spent = parseNumber(price);
-    const id = ++db.purchaseSeq;
+    const id = genPurchaseId(new Set(db.purchases.map((x) => x.id)));
     db.purchases.push({
         id,
         ts: Date.now(),
@@ -273,7 +292,7 @@ function saveCommunity(guildId, cfg) {
 // ==================== 구매 기록 조회 (대시보드) ====================
 const inGuild = (p, guildId) => !guildId || !p.guildId || p.guildId === guildId;
 
-const purchaseCode = (id) => `#${String(id || 0).padStart(4, '0')}`;
+const purchaseCode = (id) => String(id || '');
 
 function getPurchase(id) {
     return db.purchases.find((p) => p.id === id) || null;
