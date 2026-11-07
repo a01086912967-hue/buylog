@@ -554,7 +554,7 @@ async function handleGuildApi(req, res, guild, account, sub) {
 
     // ----- 구매 1건의 티켓 대화 기록 -----
     {
-        const cm = sub.match(/^purchases\/(\d{1,12})\/chat$/);
+        const cm = sub.match(/^purchases\/(\d{1,16})\/chat$/);
         if (req.method === 'GET' && cm) {
             const p = store.getPurchase(Number(cm[1]));
             if (!p || !(p.guildId === guild.id || !p.guildId)) return send(res, 404, { error: '구매 기록을 찾을 수 없어요.' });
