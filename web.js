@@ -543,7 +543,7 @@ async function handleGuildApi(req, res, guild, account, sub) {
                 qty: p.qty || '',
                 robux: p.robux,
                 spent: p.spent,
-                buyer: names[p.buyerId],
+                buyer: names[p.buyerId] || { id: String(p.buyerId || ''), name: '알 수 없음', avatar: null },
                 seller: p.sellerId ? names[p.sellerId] : null,
             })),
         });
