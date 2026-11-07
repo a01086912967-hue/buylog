@@ -9,7 +9,7 @@
 //   (선택) PUBLIC_URL     : 사이트 주소를 직접 지정 (예: https://xxxx.up.railway.app)
 //   (선택) ADMIN_DISCORD_IDS : 관리자 디스코드 ID들 (쉼표로 구분). 없으면 봇 주인이 관리자예요.
 //   (선택) SUPPORT_URL / CONTACT_URL / INVITE_URL : 첫 화면 링크 기본값 (대시보드 관리자 화면에서도 바꿀 수 있어요)
- 
+
 const http = require('http');
 const crypto = require('crypto');
 const fs = require('fs');
@@ -19,7 +19,7 @@ const store = require('./store');
 const tickets = require('./tickets');
 const community = require('./community');
 const { resolveGrade } = require('./roles');
- 
+
 const oauthStates = new Map(); // state -> { mode, accountId, exp }
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const STATIC = {
@@ -30,10 +30,10 @@ const STATIC = {
     '/favicon.ico': ['favicon-64.png', 'image/png'],
     '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json'],
 };
- 
+
 let client = null;
 let ownerIds = new Set();
- 
+
 // ---------- 도구 ----------
 function parseCookies(req) {
     const out = {};
@@ -49,21 +49,21 @@ function parseCookies(req) {
     }
     return out;
 }
- 
+
 function baseUrl(req) {
     if (process.env.PUBLIC_URL) return process.env.PUBLIC_URL.replace(/\/+$/, '');
     if (process.env.RAILWAY_PUBLIC_DOMAIN) return `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
     const proto = String(req.headers['x-forwarded-proto'] || 'http').split(',')[0].trim();
     return `${proto}://${req.headers.host}`;
 }
- 
+
 // 접속자 IP (Railway 같은 프록시 뒤에서는 X-Forwarded-For 첫 번째 값)
 function getIp(req) {
     const xff = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
     const raw = xff || String(req.headers['x-real-ip'] || '').trim() || (req.socket && req.socket.remoteAddress) || '';
     return raw.replace(/^::ffff:/, '').slice(0, 64) || 'unknown';
 }
- 
+
 function send(res, code, body, headers = {}) {
     const isObj = body !== null && typeof body === 'object' && !Buffer.isBuffer(body);
     const data = isObj ? JSON.stringify(body) : body;
@@ -77,7 +77,7 @@ function send(res, code, body, headers = {}) {
     });
     res.end(data);
 }
- 
+
 function readJson(req, limit = 300 * 1024) {
     return new Promise((resolve, reject) => {
         let size = 0;
@@ -101,17 +101,17 @@ function readJson(req, limit = 300 * 1024) {
         req.on('error', reject);
     });
 }
- 
+
 const cookieAttrs = (req, extra = '') =>
     `Path=/; HttpOnly; SameSite=Lax${baseUrl(req).startsWith('https') ? '; Secure' : ''}${extra}`;
- 
+
 const setSidCookie = (req, sid) => `sid=${sid}; ${cookieAttrs(req, `; Max-Age=${7 * 24 * 60 * 60}`)}`;
 const clearSidCookie = (req) => `sid=; ${cookieAttrs(req, '; Max-Age=0')}`;
- 
+
 function sessionAccount(req) {
     return store.getSessionAccount(parseCookies(req).sid);
 }
- 
+
 function logEvent(req, type, account, extra = {}) {
     store.addLog({
         type,
@@ -124,7 +124,7 @@ function logEvent(req, type, account, extra = {}) {
         detail: extra.detail ? String(extra.detail).slice(0, 300) : undefined,
     });
 }
- 
+
 // ---------- 비밀번호 ----------
 function scryptAsync(password, salt) {
     return new Promise((resolve, reject) => {
@@ -144,7 +144,7 @@ async function checkPassword(password, pw) {
     const stored = Buffer.from(pw.hash, 'hex');
     return stored.length === key.length && crypto.timingSafeEqual(stored, key);
 }
- 
+
 // ---------- 관리자 / 서버 권한 ----------
 async function loadOwners() {
     try {
@@ -162,7 +162,7 @@ async function loadOwners() {
         console.error('[웹] 봇 주인을 확인하지 못했어요:', e.message);
     }
 }
- 
+
 function isAdmin(account) {
     if (!account || !account.discordId) return false;
     const env = String(process.env.ADMIN_DISCORD_IDS || '')
@@ -171,13 +171,13 @@ function isAdmin(account) {
         .filter(Boolean);
     return ownerIds.has(account.discordId) || env.includes(account.discordId);
 }
- 
+
 async function canManage(guild, userId) {
     if (guild.ownerId === userId) return true;
     const member = guild.members.cache.get(userId) || (await guild.members.fetch(userId).catch(() => null));
     return !!member && member.permissions.has(PermissionFlagsBits.ManageGuild);
 }
- 
+
 async function manageableGuilds(userId) {
     const out = [];
     for (const g of client.guilds.cache.values()) {
@@ -187,7 +187,7 @@ async function manageableGuilds(userId) {
     }
     return out;
 }
- 
+
 function guildPayload(guild) {
     const textChannels = [];
     const categories = [];
@@ -208,7 +208,7 @@ function guildPayload(guild) {
         roles,
     };
 }
- 
+
 // 유저 ID -> { id, name, avatar }
 async function resolveUsers(guild, ids) {
     const uniq = [...new Set(ids.filter(Boolean))].slice(0, 100);
@@ -224,7 +224,7 @@ async function resolveUsers(guild, ids) {
     }
     return out;
 }
- 
+
 function siteLinks() {
     const s = store.getSite();
     const perms = new PermissionsBitField([
@@ -250,9 +250,9 @@ function siteLinks() {
         inviteUrl: invite,
     };
 }
- 
+
 const httpsUrl = (v) => (/^https:\/\/\S{3,500}$/.test(String(v || '').trim()) ? String(v).trim() : '');
- 
+
 function accountView(a) {
     return {
         id: a.id,
@@ -264,7 +264,7 @@ function accountView(a) {
         isAdmin: isAdmin(a),
     };
 }
- 
+
 // ---------- 디스코드 OAuth ----------
 function startOAuth(req, res, mode, accountId) {
     const state = crypto.randomBytes(16).toString('hex');
@@ -278,10 +278,10 @@ function startOAuth(req, res, mode, accountId) {
     });
     return send(res, 302, '', { Location: `https://discord.com/oauth2/authorize?${q}` });
 }
- 
+
 const errorPage = (msg) =>
     `<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><body style="font-family:sans-serif;padding:40px;line-height:1.6">${msg}<p><a href="/">처음으로 돌아가기</a></p></body>`;
- 
+
 async function handleCallback(req, res, u) {
     const code = u.searchParams.get('code');
     const state = u.searchParams.get('state');
@@ -309,7 +309,7 @@ async function handleCallback(req, res, u) {
         if (!me.id) throw new Error('유저 정보를 가져오지 못했어요.');
         const discordName = me.global_name || me.username;
         const avatar = me.avatar ? `https://cdn.discordapp.com/avatars/${me.id}/${me.avatar}.png?size=64` : null;
- 
+
         if (st.mode === 'link') {
             const cur = sessionAccount(req);
             if (!cur || cur.id !== st.accountId) {
@@ -326,7 +326,7 @@ async function handleCallback(req, res, u) {
             logEvent(req, 'discord_link', acc);
             return send(res, 302, '', { Location: '/#/' });
         }
- 
+
         let acc = store.findAccountByDiscord(me.id);
         if (!acc) acc = store.createAccount({ discordId: me.id, name: discordName, avatar });
         acc = store.updateAccount(acc.id, { discordName, avatar, lastLoginTs: Date.now(), lastIp: getIp(req) });
@@ -342,7 +342,7 @@ async function handleCallback(req, res, u) {
         );
     }
 }
- 
+
 // ---------- 회원가입 / 로그인 ----------
 async function handleAuth(req, res, p) {
     if (req.method !== 'POST') return send(res, 405, { error: 'method' });
@@ -355,7 +355,7 @@ async function handleAuth(req, res, p) {
     }
     const ip = getIp(req);
     const now = Date.now();
- 
+
     if (p === '/api/auth/signup') {
         const username = String(body.username || '').trim().toLowerCase();
         const password = String(body.password || '');
@@ -373,7 +373,7 @@ async function handleAuth(req, res, p) {
         logEvent(req, 'signup', acc);
         return send(res, 200, { account: accountView(acc) }, { 'Set-Cookie': setSidCookie(req, sid) });
     }
- 
+
     if (p === '/api/auth/login') {
         const username = String(body.username || '').trim().toLowerCase().slice(0, 40);
         const password = String(body.password || '').slice(0, 200);
@@ -391,7 +391,7 @@ async function handleAuth(req, res, p) {
         logEvent(req, 'login', acc);
         return send(res, 200, { account: accountView(acc) }, { 'Set-Cookie': setSidCookie(req, sid) });
     }
- 
+
     if (p === '/api/auth/logout') {
         const sid = parseCookies(req).sid;
         const acc = sessionAccount(req);
@@ -399,7 +399,7 @@ async function handleAuth(req, res, p) {
         store.deleteSession(sid);
         return send(res, 200, { ok: true }, { 'Set-Cookie': clearSidCookie(req) });
     }
- 
+
     if (p === '/api/auth/password') {
         const acc = sessionAccount(req);
         if (!acc) return send(res, 401, { error: 'login' });
@@ -418,17 +418,17 @@ async function handleAuth(req, res, p) {
     }
     return send(res, 404, { error: 'not found' });
 }
- 
+
 // ---------- 서버(길드) API ----------
 const dayStartKst = (daysAgo) => {
     const DAY = 24 * 60 * 60 * 1000;
     const KST = 9 * 60 * 60 * 1000;
     return Math.floor((Date.now() + KST) / DAY) * DAY - KST - daysAgo * DAY;
 };
- 
+
 async function handleGuildApi(req, res, guild, account, sub) {
     const uid = account.discordId;
- 
+
     if (req.method === 'GET' && sub === '') {
         return send(res, 200, {
             ...guildPayload(guild),
@@ -438,7 +438,7 @@ async function handleGuildApi(req, res, guild, account, sub) {
             defaultResponder: community.defaultResponder(),
         });
     }
- 
+
     // ----- 티켓 -----
     if (req.method === 'GET' && sub === 'tickets') {
         const list = store.getRecentTickets(guild.id, 40).map((t) => ({
@@ -476,7 +476,7 @@ async function handleGuildApi(req, res, guild, account, sub) {
             return send(res, 400, { error: e.message || '패널을 보내지 못했어요. 봇 권한을 확인해 주세요.' });
         }
     }
- 
+
     // ----- 환영 / 퇴장 / 자동응답 -----
     if (req.method === 'PUT' && sub === 'community') {
         let body;
@@ -506,7 +506,7 @@ async function handleGuildApi(req, res, guild, account, sub) {
             return send(res, 400, { error: e.message || '테스트 메시지를 보내지 못했어요.' });
         }
     }
- 
+
     // ----- 통계 -----
     if (req.method === 'GET' && sub === 'stats') {
         const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
@@ -527,7 +527,7 @@ async function handleGuildApi(req, res, guild, account, sub) {
             top: rank.map((r) => ({ ...r, ...names[r.id] })),
         });
     }
- 
+
     // ----- 구매 로그 -----
     if (req.method === 'GET' && sub === 'purchases') {
         const u = new URL(req.url, 'http://localhost');
@@ -537,6 +537,9 @@ async function handleGuildApi(req, res, guild, account, sub) {
         const names = await resolveUsers(guild, list.flatMap((p) => [p.buyerId, p.sellerId]));
         return send(res, 200, {
             purchases: list.map((p) => ({
+                id: p.id,
+                code: store.purchaseCode(p.id),
+                chatCount: p.chat ? p.chat.messages.length : 0,
                 ts: p.ts,
                 kind: p.kind,
                 item: p.item || '',
@@ -548,7 +551,24 @@ async function handleGuildApi(req, res, guild, account, sub) {
             })),
         });
     }
- 
+
+    // ----- 구매 1건의 티켓 대화 기록 -----
+    {
+        const cm = sub.match(/^purchases\/(\d{1,12})\/chat$/);
+        if (req.method === 'GET' && cm) {
+            const p = store.getPurchase(Number(cm[1]));
+            if (!p || !(p.guildId === guild.id || !p.guildId)) return send(res, 404, { error: '구매 기록을 찾을 수 없어요.' });
+            const names = await resolveUsers(guild, [p.buyerId]);
+            return send(res, 200, {
+                id: p.id,
+                code: store.purchaseCode(p.id),
+                item: p.item || '',
+                buyer: names[p.buyerId] || null,
+                chat: p.chat || null,
+            });
+        }
+    }
+
     // ----- 유저 정보 -----
     if (req.method === 'GET' && sub === 'users') {
         const u = new URL(req.url, 'http://localhost');
@@ -625,12 +645,12 @@ async function handleGuildApi(req, res, guild, account, sub) {
     }
     return send(res, 404, { error: 'not found' });
 }
- 
+
 function pickStore(id) {
     const d = store.getUser(id);
     return { spent: d.spent, count: d.count, robux: d.robux, rank: store.rankOf(id).rank };
 }
- 
+
 // ---------- 관리자 API ----------
 async function handleAdminApi(req, res, account, sub) {
     if (req.method === 'GET' && sub === 'logs') {
@@ -687,14 +707,14 @@ async function handleAdminApi(req, res, account, sub) {
     }
     return send(res, 404, { error: 'not found' });
 }
- 
+
 // ---------- 라우터 ----------
 async function handle(req, res) {
     const u = new URL(req.url, 'http://localhost');
     const p = u.pathname;
- 
+
     if (p === '/health') return send(res, 200, 'ok');
- 
+
     // 화면 / 아이콘
     if (req.method === 'GET' && (p === '/' || p === '/index.html')) {
         const html = fs.readFileSync(path.join(__dirname, 'dashboard.html'));
@@ -712,7 +732,7 @@ async function handle(req, res) {
             return send(res, 404, 'not found');
         }
     }
- 
+
     // 디스코드 로그인 / 계정 연결
     if (p === '/login') {
         if (!process.env.DISCORD_CLIENT_SECRET) return send(res, 503, errorPage('디스코드 로그인은 아직 설정되지 않았어요. (DISCORD_CLIENT_SECRET 필요)'));
@@ -731,7 +751,7 @@ async function handle(req, res) {
         store.deleteSession(parseCookies(req).sid);
         return send(res, 302, '', { Location: '/', 'Set-Cookie': clearSidCookie(req) });
     }
- 
+
     // ----- API -----
     if (p === '/api/public' && req.method === 'GET') {
         const links = siteLinks();
@@ -744,25 +764,25 @@ async function handle(req, res) {
         });
     }
     if (p.startsWith('/api/auth/')) return handleAuth(req, res, p);
- 
+
     if (p.startsWith('/api/')) {
         const account = sessionAccount(req);
         if (!account) return send(res, 401, { error: 'login' });
         if (req.method !== 'GET' && req.headers['x-requested-with'] !== 'dashboard') {
             return send(res, 403, { error: 'forbidden' });
         }
- 
+
         if (p === '/api/me') {
             const guilds = account.discordId ? await manageableGuilds(account.discordId) : [];
             return send(res, 200, { account: accountView(account), guilds, discordLogin: !!process.env.DISCORD_CLIENT_SECRET });
         }
- 
+
         const am = p.match(/^\/api\/admin\/(.*)$/);
         if (am) {
             if (!isAdmin(account)) return send(res, 403, { error: '관리자만 볼 수 있어요.' });
             return handleAdminApi(req, res, account, am[1]);
         }
- 
+
         const m = p.match(/^\/api\/guild\/(\d{5,25})(?:\/(.*))?$/);
         if (m) {
             if (!account.discordId) return send(res, 403, { error: '디스코드 계정을 먼저 연결해 주세요.' });
@@ -772,10 +792,10 @@ async function handle(req, res) {
         }
         return send(res, 404, { error: 'not found' });
     }
- 
+
     return send(res, 404, errorPage('페이지를 찾을 수 없어요.'));
 }
- 
+
 function start(discordClient) {
     client = discordClient;
     loadOwners();
@@ -801,6 +821,5 @@ function start(discordClient) {
     }, 10 * 60 * 1000).unref();
     return server;
 }
- 
+
 module.exports = { start, __test: { handle, setOwners: (ids) => (ownerIds = new Set(ids)) } };
- 
