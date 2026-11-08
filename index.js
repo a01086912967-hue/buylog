@@ -32,7 +32,7 @@ const store = require('./store');
 const tickets = require('./tickets');
 const community = require('./community');
 const web = require('./web');
-const { renderProfileCard, renderStatsCard, renderRankCard, ymd } = require('./infoCards');
+const { renderProfileCard, renderStatsCard, renderRankCard, renderHistoryCard, ymd } = require('./infoCards');
 const { SERVER_ROLES, resolveGrade } = require('./roles');
 
 const BOT_TOKEN = (process.env.TOKEN || process.env.DISCORD_TOKEN || '').trim();
@@ -215,6 +215,32 @@ client.on('interactionCreate', async interaction => {
     if (await tickets.handleInteraction(interaction)) return;
 
     if (interaction.isButton()) {
+
+        // $정보 카드 아래 "내 거래 내역" 버튼 - 카드 주인 본인만 누를 수 있고, 결과는 본인에게만 보여요
+        if (interaction.customId.startsWith('hist:')) {
+            const ownerId = interaction.customId.slice(5);
+            if (interaction.user.id !== ownerId) {
+                return interaction.reply({ content: '본인의 거래 내역만 볼 수 있어요.', ephemeral: true }).catch(() => {});
+            }
+            await interaction.deferReply({ ephemeral: true }).catch(() => {});
+            try {
+                const member = interaction.guild ? await interaction.guild.members.fetch(ownerId).catch(() => null) : null;
+                const u = store.getUser(ownerId);
+                const { list } = store.purchasesOf(ownerId, 15);
+                const buf = await renderHistoryCard({
+                    name: interaction.user.username,
+                    avatarBuf: await avatarBufOf(member || interaction.user),
+                    guildName: interaction.guild ? shopNameOf(interaction.guild) : '',
+                    totals: { count: u.count, spent: u.spent, robux: u.robux },
+                    rows: list.map((p) => ({ ts: p.ts, kind: p.kind, item: p.item, qty: p.qty, robux: p.robux, spent: p.spent, id: p.id }))
+                });
+                await interaction.editReply({ files: [new AttachmentBuilder(buf, { name: 'history.png' })] });
+            } catch (e) {
+                console.error('거래 내역 이미지 생성 실패:', e);
+                await interaction.editReply({ content: '거래 내역을 만드는 중 오류가 났어요. 잠시 후 다시 시도해 주세요.' }).catch(() => {});
+            }
+            return;
+        }
 
         if (interaction.customId === 'notice_btn') {
             await interaction.reply({
@@ -643,7 +669,17 @@ client.on('messageCreate', async message => {
                     : command === '$통계'
                         ? await buildStatsFile(message)
                         : await buildRankFile(message);
-                return message.reply({ files: [file], allowedMentions: { repliedUser: false } });
+                const payload = { files: [file], allowedMentions: { repliedUser: false } };
+                if (command === '$정보') {
+                    // 카드 주인(멘션한 사람 또는 본인)의 아이디를 버튼에 담아요 -> 그 사람만 누를 수 있어요
+                    const t = message.mentions.users.first() || (args[1] && /^\d{15,25}$/.test(args[1]) ? { id: args[1] } : message.author);
+                    payload.components = [
+                        new ActionRowBuilder().addComponents(
+                            new ButtonBuilder().setCustomId(`hist:${t.id}`).setLabel('내 거래 내역').setStyle(ButtonStyle.Primary)
+                        )
+                    ];
+                }
+                return message.reply(payload);
             } catch (e) {
                 console.error(`${command} 이미지 생성 실패:`, e);
                 return message.reply('이미지를 만드는 중 오류가 났어요. 잠시 후 다시 시도해 주세요.');
