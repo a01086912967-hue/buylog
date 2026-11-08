@@ -209,6 +209,7 @@ client.once('ready', async () => {
     web.start(client);
 });
 
+const histCache = new Map(); // 거래 내역 이미지 임시 보관 (유저ID -> {sig, buf, at})
 client.on('interactionCreate', async interaction => {
 
     // 티켓 (패널 버튼·선택기 / 양식 / 닫기 / 다시 열기 / 삭제) - 대시보드에서 설정한 대로 동작
@@ -222,19 +223,33 @@ client.on('interactionCreate', async interaction => {
             if (interaction.user.id !== ownerId) {
                 return interaction.reply({ content: '본인의 거래 내역만 볼 수 있어요.', ephemeral: true }).catch(() => {});
             }
+            const t0 = Date.now();
             await interaction.deferReply({ ephemeral: true }).catch(() => {});
             try {
-                const member = interaction.guild ? await interaction.guild.members.fetch(ownerId).catch(() => null) : null;
                 const u = store.getUser(ownerId);
                 const { list } = store.purchasesOf(ownerId, 15);
-                const buf = await renderHistoryCard({
-                    name: interaction.user.username,
-                    avatarBuf: await avatarBufOf(member || interaction.user),
-                    guildName: interaction.guild ? shopNameOf(interaction.guild) : '',
-                    totals: { count: u.count, spent: u.spent, robux: u.robux },
-                    rows: list.map((p) => ({ ts: p.ts, kind: p.kind, item: p.item, qty: p.qty, robux: p.robux, spent: p.spent, id: p.id }))
-                });
+                // 같은 내용이면 1분 동안은 만들어 둔 이미지를 그대로 보내요 (빠르게)
+                const sig = `${u.count}:${u.spent}:${list.length ? list[0].id : 0}`;
+                const hit = histCache.get(ownerId);
+                let buf;
+                if (hit && hit.sig === sig && Date.now() - hit.at < 60000) {
+                    buf = hit.buf;
+                } else {
+                    // 멤버 조회(느릴 수 있음) 없이 버튼을 누른 사람 정보를 바로 쓰고, 프사는 3초 안에 못 받으면 생략
+                    const who = interaction.member && interaction.member.displayAvatarURL ? interaction.member : interaction.user;
+                    const avatarBuf = await fetchBuffer(who.displayAvatarURL({ extension: 'png', size: 128 }), 3000).catch(() => null);
+                    buf = await renderHistoryCard({
+                        name: interaction.user.username,
+                        avatarBuf,
+                        guildName: interaction.guild ? shopNameOf(interaction.guild) : '',
+                        totals: { count: u.count, spent: u.spent, robux: u.robux },
+                        rows: list.map((p) => ({ ts: p.ts, kind: p.kind, item: p.item, qty: p.qty, robux: p.robux, spent: p.spent, id: p.id }))
+                    });
+                    histCache.set(ownerId, { sig, buf, at: Date.now() });
+                }
+                const t1 = Date.now();
                 await interaction.editReply({ files: [new AttachmentBuilder(buf, { name: 'history.png' })] });
+                console.log(`[거래내역] 이미지 준비 ${t1 - t0}ms · 전송 ${Date.now() - t1}ms (${(buf.length / 1024).toFixed(0)}KB)`);
             } catch (e) {
                 console.error('거래 내역 이미지 생성 실패:', e);
                 await interaction.editReply({ content: '거래 내역을 만드는 중 오류가 났어요. 잠시 후 다시 시도해 주세요.' }).catch(() => {});
