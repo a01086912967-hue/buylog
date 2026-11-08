@@ -32,6 +32,7 @@ const store = require('./store');
 const tickets = require('./tickets');
 const community = require('./community');
 const web = require('./web');
+const weekly = require('./weekly');
 const { renderProfileCard, renderStatsCard, renderRankCard, renderHistoryCard, ymd } = require('./infoCards');
 const { SERVER_ROLES, resolveGrade } = require('./roles');
 
@@ -211,6 +212,7 @@ client.once('ready', async () => {
     tickets.init(client);
     community.init(client);
     web.start(client);
+    weekly.start(client);
 });
 
 client.on('interactionCreate', async interaction => {
@@ -219,6 +221,51 @@ client.on('interactionCreate', async interaction => {
     if (await tickets.handleInteraction(interaction)) return;
 
     if (interaction.isButton()) {
+
+        // $랭킹 [이전][다음]: 명령어를 친 사람 또는 관리자만
+        if (interaction.customId.startsWith('rank:')) {
+            const [, pageStr, uid] = interaction.customId.split(':');
+            if (interaction.user.id !== uid && !isAdmin(interaction.member)) {
+                return interaction.reply({ content: '명령어를 사용한 사람 또는 관리자만 누를 수 있어요.', flags: FLAG_EPHEMERAL }).catch(() => {});
+            }
+            await interaction.deferUpdate().catch(() => {});
+            try {
+                const r = await buildRankFile(interaction.guild, parseInt(pageStr, 10) || 0);
+                await interaction.editReply({
+                    flags: FLAG_V2,
+                    components: [rankCard(r.page, r.pages, uid, r.file.name)],
+                    files: [r.file],
+                    attachments: [],
+                    allowedMentions: { parse: [] }
+                });
+            } catch (e) {
+                console.error('랭킹 페이지 전환 실패:', e);
+                await interaction.followUp({ content: '랭킹을 불러오는 중 오류가 났어요.', flags: FLAG_EPHEMERAL }).catch(() => {});
+            }
+            return;
+        }
+
+        // $통계 [새로고침]: 관리자만
+        if (interaction.customId === 'stat:refresh') {
+            if (!isAdmin(interaction.member)) {
+                return interaction.reply({ content: '관리자만 누를 수 있어요.', flags: FLAG_EPHEMERAL }).catch(() => {});
+            }
+            await interaction.deferUpdate().catch(() => {});
+            try {
+                const file = await buildStatsFile(interaction.guild);
+                await interaction.editReply({
+                    flags: FLAG_V2,
+                    components: [statsCard(interaction.guild, file.name)],
+                    files: [file],
+                    attachments: [],
+                    allowedMentions: { parse: [] }
+                });
+            } catch (e) {
+                console.error('통계 새로고침 실패:', e);
+                await interaction.followUp({ content: '통계를 불러오는 중 오류가 났어요.', flags: FLAG_EPHEMERAL }).catch(() => {});
+            }
+            return;
+        }
 
         // $정보 아래 버튼: "내 거래 조회"(hist:) <-> "정보로 돌아가기"(prof:)
         // 같은 메시지의 사진이 정보 <-> 거래 내역으로 바뀌어요. 프로필 주인 본인 또는 관리자만 누를 수 있어요.
@@ -665,7 +712,7 @@ async function buildHistoryFileFor(guild, ownerId) {
     return new AttachmentBuilder(buf, { name: 'history.png' });
 }
 
-async function buildStatsFile(message) {
+async function buildStatsFile(guild) {
     const now = Date.now();
     const week = store.periodStats(now - 7 * 24 * 60 * 60 * 1000);
     const all = store.periodStats(store.STATS_START_TS);
@@ -679,17 +726,23 @@ async function buildStatsFile(message) {
             topInviterName: await usernameOf(stats.topInviter && stats.topInviter.id)
         });
     }
-    const buf = await renderStatsCard({ guildName: shopNameOf(message.guild), periods });
+    const buf = await renderStatsCard({ guildName: shopNameOf(guild), periods });
     return new AttachmentBuilder(buf, { name: 'stats.png' });
 }
 
-async function buildRankFile(message) {
-    const list = store.ranking().slice(0, 10);
+// 랭킹: 페이지당 10명 (page는 0부터)
+const RANK_PAGE = 10;
+async function buildRankFile(guild, page = 0) {
+    const all = store.ranking();
+    const pages = Math.max(1, Math.ceil(all.length / RANK_PAGE));
+    page = Math.min(Math.max(0, page), pages - 1);
+    const offset = page * RANK_PAGE;
+    const list = all.slice(offset, offset + RANK_PAGE);
     const entries = await Promise.all(list.map(async (u, i) => {
-        const member = await message.guild.members.fetch(u.id).catch(() => null);
+        const member = await guild.members.fetch(u.id).catch(() => null);
         const user = member ? member.user : await client.users.fetch(u.id).catch(() => null);
         return {
-            rank: i + 1,
+            rank: offset + i + 1,
             name: user ? user.username : '알 수 없음',
             avatarBuf: await avatarBufOf(member || user),
             grade: resolveGrade(member),
@@ -697,8 +750,45 @@ async function buildRankFile(message) {
             robux: u.robux
         };
     }));
-    const buf = await renderRankCard({ guildName: shopNameOf(message.guild), entries });
-    return new AttachmentBuilder(buf, { name: 'rank.png' });
+    const gn = String(shopNameOf(guild) || '').toUpperCase();
+    const sub = `${gn ? gn + '  ·  ' : ''}구매 금액 기준  ·  ${page + 1} / ${pages} 페이지${list.length ? ` (${offset + 1}~${offset + list.length}위)` : ''}`;
+    const buf = await renderRankCard({ guildName: shopNameOf(guild), entries, sub });
+    return { file: new AttachmentBuilder(buf, { name: 'rank.png' }), page, pages };
+}
+
+// 랭킹 카드: 사진 + 구분선 + [이전][다음] 버튼
+function rankCard(page, pages, uid, fileName) {
+    return {
+        type: 17,
+        accent_color: 0x7cc4ff,
+        components: [
+            { type: 12, items: [{ media: { url: `attachment://${fileName}` } }] },
+            { type: 14, divider: true, spacing: 2 },
+            {
+                type: 1,
+                components: [
+                    { type: 2, style: 2, label: '◀ 이전', custom_id: `rank:${page - 1}:${uid}`, disabled: page <= 0 },
+                    { type: 2, style: 1, label: '다음 ▶', custom_id: `rank:${page + 1}:${uid}`, disabled: page >= pages - 1 }
+                ]
+            }
+        ]
+    };
+}
+
+// 서버 통계 카드: 사진 + 구분선 + [새로고침] (+ 웹 대시보드 링크)
+function statsCard(guild, fileName) {
+    const buttons = [{ type: 2, style: 1, label: '새로고침', custom_id: 'stat:refresh' }];
+    const base = (process.env.PUBLIC_URL || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : '')).replace(/\/+$/, '');
+    if (/^https?:\/\//.test(base)) buttons.push({ type: 2, style: 5, label: '웹 대시보드', url: `${base}/#/g/${guild.id}` });
+    return {
+        type: 17,
+        accent_color: 0x7cc4ff,
+        components: [
+            { type: 12, items: [{ media: { url: `attachment://${fileName}` } }] },
+            { type: 14, divider: true, spacing: 2 },
+            { type: 1, components: buttons }
+        ]
+    };
 }
 
 // $가격 / $로벅스
@@ -722,22 +812,38 @@ client.on('messageCreate', async message => {
             if (!infoCooldownOk(message.author.id)) return;
             message.channel.sendTyping().catch(() => {});
             try {
-                const file = command === '$정보'
-                    ? await buildProfileFile(message, args)
-                    : command === '$통계'
-                        ? await buildStatsFile(message)
-                        : await buildRankFile(message);
-                const payload = { files: [file], allowedMentions: { repliedUser: false } };
+                const payload = { flags: FLAG_V2, allowedMentions: { repliedUser: false } };
                 if (command === '$정보') {
                     // 컴포넌트 V2: 컨테이너 안에 프로필 사진 + 구분선 + "내 거래 조회" 버튼
+                    const file = await buildProfileFile(message, args);
                     const t = message.mentions.users.first() || (args[1] && /^\d{15,25}$/.test(args[1]) ? { id: args[1] } : message.author);
-                    payload.flags = FLAG_V2;
+                    payload.files = [file];
                     payload.components = [v2Card(t.id, file.name, 'profile')];
+                } else if (command === '$통계') {
+                    const file = await buildStatsFile(message.guild);
+                    payload.files = [file];
+                    payload.components = [statsCard(message.guild, file.name)];
+                } else {
+                    const r = await buildRankFile(message.guild, 0);
+                    payload.files = [r.file];
+                    payload.components = [rankCard(r.page, r.pages, message.author.id, r.file.name)];
                 }
                 return message.reply(payload);
             } catch (e) {
                 console.error(`${command} 이미지 생성 실패:`, e);
                 return message.reply('이미지를 만드는 중 오류가 났어요. 잠시 후 다시 시도해 주세요.');
+            }
+        }
+
+        case '$주간갱신': {
+            if (!message.guild || !isAdmin(message.member)) return;
+            try {
+                const summary = await weekly.runGuild(message.guild);
+                store.setMeta('weekly', { ...(store.getMeta('weekly') || {}), [message.guild.id]: String(weekly.weekStart(Date.now())) });
+                return message.reply({ content: `**주간 TOP 갱신 완료**\n${summary}`, allowedMentions: { parse: [] } });
+            } catch (e) {
+                console.error('[주간] 수동 갱신 실패:', e);
+                return message.reply('주간 역할을 갱신하지 못했어요. 봇의 "역할 관리" 권한과 역할 순서를 확인해 주세요.');
             }
         }
 
