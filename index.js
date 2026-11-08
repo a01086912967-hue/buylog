@@ -245,6 +245,30 @@ client.on('interactionCreate', async interaction => {
             return;
         }
 
+        // $통계 [웹 대시보드]: 관리자만 / 누른 사람에게만 보이는 임베드로 기능 소개 + 링크
+        if (interaction.customId === 'stat:web') {
+            if (!isAdmin(interaction.member)) {
+                return interaction.reply({ content: '관리자만 누를 수 있어요.', flags: FLAG_EPHEMERAL }).catch(() => {});
+            }
+            const url = `${siteBase()}/#/g/${interaction.guildId}`;
+            const embed = new EmbedBuilder()
+                .setColor(SKY_COLOR)
+                .setTitle('웹 대시보드')
+                .setDescription(
+                    `디스코드 명령어 없이, 웹에서 서버를 한눈에 보고 설정할 수 있어요.\n\n` +
+                    `**서버 통계**\n-# 기간별 판매량·판매 금액·거래 횟수·가입·초대 현황\n\n` +
+                    `**구매 로그**\n-# 구매 ID로 검색, 티켓 안 대화 기록까지 확인\n\n` +
+                    `**유저 정보**\n-# 유저별 구매·초대·등급 조회와 수정\n\n` +
+                    `**티켓 설정**\n-# 패널·선택기(항목별 질문/카테고리)·양식·권한·닫기/삭제 문구\n\n` +
+                    `**환영 / 퇴장 메시지 · 자동응답**\n-# 환영·퇴장 임베드, 자동 역할, 명령어 + 글 자동응답\n\n` +
+                    `[웹 대시보드 열기](${url})`
+                );
+            const row = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setLabel('웹 대시보드 열기').setStyle(ButtonStyle.Link).setURL(url)
+            );
+            return interaction.reply({ embeds: [embed], components: [row], flags: FLAG_EPHEMERAL }).catch((e) => console.error('웹 대시보드 안내 실패:', e.message));
+        }
+
         // $통계 [새로고침]: 관리자만
         if (interaction.customId === 'stat:refresh') {
             if (!isAdmin(interaction.member)) {
@@ -775,11 +799,18 @@ function rankCard(page, pages, uid, fileName) {
     };
 }
 
-// 서버 통계 카드: 사진 + 구분선 + [새로고침] (+ 웹 대시보드 링크)
+// 웹 대시보드 주소 (PUBLIC_URL > Railway 도메인 > 기본 주소)
+function siteBase() {
+    const b = process.env.PUBLIC_URL || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : 'https://www.sodx.shop');
+    return b.replace(/\/+$/, '');
+}
+
+// 서버 통계 카드: 사진 + 구분선 + [새로고침] [웹 대시보드] (둘 다 관리자만 누를 수 있어요)
 function statsCard(guild, fileName) {
-    const buttons = [{ type: 2, style: 1, label: '새로고침', custom_id: 'stat:refresh' }];
-    const base = (process.env.PUBLIC_URL || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : '')).replace(/\/+$/, '');
-    if (/^https?:\/\//.test(base)) buttons.push({ type: 2, style: 5, label: '웹 대시보드', url: `${base}/#/g/${guild.id}` });
+    const buttons = [
+        { type: 2, style: 1, label: '새로고침', custom_id: 'stat:refresh' },
+        { type: 2, style: 2, label: '웹 대시보드', custom_id: 'stat:web' }
+    ];
     return {
         type: 17,
         accent_color: 0x7cc4ff,
@@ -809,6 +840,10 @@ client.on('messageCreate', async message => {
         case '$통계':
         case '$랭킹': {
             if (!message.guild) return;
+            // $통계는 관리자만 사용할 수 있어요
+            if (command === '$통계' && !isAdmin(message.member)) {
+                return message.reply({ content: '해당 명령어를 사용할 권한이 없습니다.', allowedMentions: { repliedUser: false } });
+            }
             if (!infoCooldownOk(message.author.id)) return;
             message.channel.sendTyping().catch(() => {});
             try {
