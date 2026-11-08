@@ -220,42 +220,29 @@ client.on('interactionCreate', async interaction => {
 
     if (interaction.isButton()) {
 
-        // $정보 아래 "내 거래 조회" 버튼 - 프로필 주인 본인 또는 관리자만 누를 수 있고, 결과는 누른 사람에게만 보여요
-        // (컴포넌트 V2 글자로 바로 보여줘서 이미지 만드는 시간이 없어요)
-        if (interaction.customId.startsWith('hist:')) {
+        // $정보 아래 버튼: "내 거래 조회"(hist:) <-> "정보로 돌아가기"(prof:)
+        // 같은 메시지의 사진이 정보 <-> 거래 내역으로 바뀌어요. 프로필 주인 본인 또는 관리자만 누를 수 있어요.
+        if (interaction.customId.startsWith('hist:') || interaction.customId.startsWith('prof:')) {
+            const toHistory = interaction.customId.startsWith('hist:');
             const ownerId = interaction.customId.slice(5);
             if (interaction.user.id !== ownerId && !isAdmin(interaction.member)) {
-                return interaction.reply({ content: '본인 또는 관리자만 볼 수 있어요.', flags: FLAG_EPHEMERAL }).catch(() => {});
+                return interaction.reply({ content: '본인 또는 관리자만 누를 수 있어요.', flags: FLAG_EPHEMERAL }).catch(() => {});
             }
+            await interaction.deferUpdate().catch(() => {});
             try {
-                const u = store.getUser(ownerId);
-                const { list } = store.purchasesOf(ownerId, 15);
-                const KIND_KO = { robux: '로벅스', ingame: '인게임', etc: '기타' };
-                const fmtN = (n) => Number(n || 0).toLocaleString('en-US');
-                const stamp = (ts) => {
-                    const d = new Date(ts + 9 * 3600 * 1000);
-                    const p2 = (n) => String(n).padStart(2, '0');
-                    return `${p2(d.getUTCMonth() + 1)}.${p2(d.getUTCDate())} ${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())}`;
-                };
-                const lines = list.map((p) => {
-                    const what = p.kind === 'robux' && p.robux ? `${fmtN(p.robux)} R$` : `${p.item || '-'}${p.qty ? ` × ${p.qty}` : ''}`;
-                    return `**${stamp(p.ts)}** · ${KIND_KO[p.kind] || '기타'} · ${what} · **${fmtN(p.spent)}원**\n-# 구매 ID ${p.id}`;
+                const file = toHistory
+                    ? await buildHistoryFileFor(interaction.guild, ownerId)
+                    : await buildProfileFileFor(interaction.guild, await client.users.fetch(ownerId));
+                await interaction.editReply({
+                    flags: FLAG_V2,
+                    components: [v2Card(ownerId, file.name, toHistory ? 'history' : 'profile')],
+                    files: [file],
+                    attachments: [],
+                    allowedMentions: { parse: [] }
                 });
-                const body = lines.length ? lines.join('\n\n').slice(0, 3500) : '아직 거래 내역이 없어요.';
-                const container = {
-                    type: 17,
-                    accent_color: 0x7cc4ff,
-                    components: [
-                        { type: 10, content: `## 거래 내역\n<@${ownerId}> · 총 **${fmtN(u.count)}회** · **${fmtN(u.spent)}원** · **${fmtN(u.robux)} R$**` },
-                        { type: 14, divider: true, spacing: 1 },
-                        { type: 10, content: body },
-                        ...(u.count > list.length ? [{ type: 10, content: `-# 최근 ${list.length}건만 표시 (전체 ${fmtN(u.count)}건)` }] : [])
-                    ]
-                };
-                await interaction.reply({ flags: FLAG_V2 | FLAG_EPHEMERAL, components: [container], allowedMentions: { parse: [] } });
             } catch (e) {
-                console.error('거래 조회 실패:', e);
-                await interaction.reply({ content: '거래 내역을 불러오는 중 오류가 났어요.', flags: FLAG_EPHEMERAL }).catch(() => {});
+                console.error('정보/거래 내역 전환 실패:', e);
+                await interaction.followUp({ content: '이미지를 바꾸는 중 오류가 났어요. 잠시 후 다시 시도해 주세요.', flags: FLAG_EPHEMERAL }).catch(() => {});
             }
             return;
         }
@@ -599,30 +586,83 @@ async function usernameOf(id) {
     }
 }
 
+// 컴포넌트 V2 카드: 컨테이너 안에 사진 + 구분선 + 버튼
+function v2Card(ownerId, fileName, mode) {
+    const button = mode === 'profile'
+        ? { type: 2, style: 1, label: '내 거래 조회', custom_id: `hist:${ownerId}` }
+        : { type: 2, style: 2, label: '정보로 돌아가기', custom_id: `prof:${ownerId}` };
+    return {
+        type: 17,
+        accent_color: 0x7cc4ff,
+        components: [
+            { type: 12, items: [{ media: { url: `attachment://${fileName}` } }] },
+            { type: 14, divider: true, spacing: 2 },
+            { type: 1, components: [button] }
+        ]
+    };
+}
+
+// 만들어 둔 이미지를 1분 동안 재사용 (버튼을 왔다 갔다 해도 빠르게)
+const imgCache = new Map();
+async function cached(key, sig, make) {
+    const hit = imgCache.get(key);
+    if (hit && hit.sig === sig && Date.now() - hit.at < 60000) return hit.buf;
+    const buf = await make();
+    imgCache.set(key, { sig, buf, at: Date.now() });
+    if (imgCache.size > 200) imgCache.delete(imgCache.keys().next().value);
+    return buf;
+}
+
+async function buildProfileFileFor(guild, target) {
+    const member = await guild.members.fetch(target.id).catch(() => null);
+    const u = store.getUser(target.id);
+    const { rank, total } = store.rankOf(target.id);
+    const sig = `${u.robux}:${u.spent}:${u.count}:${u.invites}:${rank}:${total}`;
+    const buf = await cached(`p${target.id}`, sig, async () =>
+        renderProfileCard({
+            name: target.username, // 서버 닉네임이 아닌 디스코드 아이디
+            avatarBuf: await avatarBufOf(member || target),
+            guildName: shopNameOf(guild),
+            grade: resolveGrade(member),
+            robux: u.robux,
+            spent: u.spent,
+            count: u.count,
+            rank,
+            rankTotal: total,
+            joinedTs: member ? member.joinedTimestamp : null,
+            invites: u.invites
+        })
+    );
+    return new AttachmentBuilder(buf, { name: 'profile.png' });
+}
+
 async function buildProfileFile(message, args) {
     let target = message.mentions.users.first() || null;
     if (!target && args[1] && /^\d{15,25}$/.test(args[1])) {
         target = await client.users.fetch(args[1]).catch(() => null);
     }
     if (!target) target = message.author;
+    return buildProfileFileFor(message.guild, target);
+}
 
-    const member = await message.guild.members.fetch(target.id).catch(() => null);
-    const u = store.getUser(target.id);
-    const { rank, total } = store.rankOf(target.id);
-    const buf = await renderProfileCard({
-        name: target.username, // 서버 닉네임이 아닌 디스코드 아이디
-        avatarBuf: await avatarBufOf(member || target),
-        guildName: shopNameOf(message.guild),
-        grade: resolveGrade(member),
-        robux: u.robux,
-        spent: u.spent,
-        count: u.count,
-        rank,
-        rankTotal: total,
-        joinedTs: member ? member.joinedTimestamp : null,
-        invites: u.invites
+// 거래 내역 사진 (최근 15건)
+async function buildHistoryFileFor(guild, ownerId) {
+    const user = await client.users.fetch(ownerId);
+    const u = store.getUser(ownerId);
+    const { list } = store.purchasesOf(ownerId, 15);
+    const sig = `${u.count}:${u.spent}:${u.robux}:${list.length ? list[0].id : 0}`;
+    const buf = await cached(`h${ownerId}`, sig, async () => {
+        const member = guild.members.cache.get(ownerId) || null;
+        const avatarBuf = await fetchBuffer((member || user).displayAvatarURL({ extension: 'png', size: 128 }), 3000).catch(() => null);
+        return renderHistoryCard({
+            name: user.username,
+            avatarBuf,
+            guildName: guild ? shopNameOf(guild) : '',
+            totals: { count: u.count, spent: u.spent, robux: u.robux },
+            rows: list.map((p) => ({ ts: p.ts, kind: p.kind, item: p.item, qty: p.qty, robux: p.robux, spent: p.spent, id: p.id }))
+        });
     });
-    return new AttachmentBuilder(buf, { name: 'profile.png' });
+    return new AttachmentBuilder(buf, { name: 'history.png' });
 }
 
 async function buildStatsFile(message) {
@@ -689,21 +729,10 @@ client.on('messageCreate', async message => {
                         : await buildRankFile(message);
                 const payload = { files: [file], allowedMentions: { repliedUser: false } };
                 if (command === '$정보') {
-                    // 컴포넌트 V2: 컨테이너 안에 프로필 사진 + 아래에 "내 거래 조회" 버튼
-                    // 버튼에는 프로필 주인 아이디가 들어 있어요 -> 주인 본인 또는 관리자만 누를 수 있어요
+                    // 컴포넌트 V2: 컨테이너 안에 프로필 사진 + 구분선 + "내 거래 조회" 버튼
                     const t = message.mentions.users.first() || (args[1] && /^\d{15,25}$/.test(args[1]) ? { id: args[1] } : message.author);
                     payload.flags = FLAG_V2;
-                    payload.components = [
-                        {
-                            type: 17,
-                            accent_color: 0x7cc4ff,
-                            components: [
-                                { type: 12, items: [{ media: { url: `attachment://${file.name}` } }] },
-                                { type: 14, divider: false, spacing: 1 },
-                                { type: 1, components: [{ type: 2, style: 1, label: '내 거래 조회', custom_id: `hist:${t.id}` }] }
-                            ]
-                        }
-                    ];
+                    payload.components = [v2Card(t.id, file.name, 'profile')];
                 }
                 return message.reply(payload);
             } catch (e) {
