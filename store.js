@@ -136,6 +136,12 @@ function recordPurchase({ buyerId, kind, qty, price, sellerId, item, guildId }) 
     return { robux, spent, id };
 }
 
+// 한 사람의 거래 내역 (최신순)
+function purchasesOf(userId, limit = 8) {
+    const all = db.purchases.filter((p) => p.buyerId === userId);
+    return { total: all.length, list: all.slice(-limit).reverse() };
+}
+
 // 관리자가 직접 설정 (값을 준 항목만 덮어씀)
 function setUser(id, patch) {
     const u = ensureUser(id);
@@ -531,6 +537,7 @@ module.exports = {
     parseNumber,
     getUser,
     recordPurchase,
+    purchasesOf,
     purchaseCode,
     getPurchase,
     attachChat,
