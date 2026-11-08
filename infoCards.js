@@ -419,7 +419,7 @@ async function renderRankCard(o) {
     ctx.font = '24px NSK';
     ctx.fillStyle = MUTED;
     const gn = clean(o.guildName, '').toUpperCase();
-    ctx.fillText(`${gn ? gn + '  ·  ' : ''}구매 금액 기준 TOP ${o.entries.length || 10}`, 62, 174);
+    ctx.fillText(o.sub || `${gn ? gn + '  ·  ' : ''}구매 금액 기준 TOP ${o.entries.length || 10}`, 62, 174);
 
     if (!o.entries.length) {
         glass(ctx, 60, top, W - 120, rowH + 20, 28, SKY_C2);
@@ -515,7 +515,7 @@ async function renderRankCard(o) {
 // o = {
 //   name, avatarBuf, guildName,
 //   totals: { count, spent, robux },
-//   rows: [ { ts, kind, item, qty, robux, spent, id } ]   // 최신순, 최대 8건
+//   rows: [ { ts, kind, item, qty, robux, spent, id } ]   // 최신순, 최대 15건
 // }
 // =====================================================
 const KIND_PILL = {
