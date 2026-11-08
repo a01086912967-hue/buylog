@@ -15,7 +15,7 @@ const FILE = path.join(DATA_DIR, 'data.json');
 const onRailway = !!(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID || process.env.RAILWAY_SERVICE_ID);
 const persistent = !!(process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH) || !onRailway;
 
-let db = { users: {}, purchases: [], purchaseSeq: 0, joins: [], guilds: {}, tickets: [], accounts: {}, loginLog: [], sessions: {}, site: {} };
+let db = { users: {}, purchases: [], purchaseSeq: 0, meta: {}, joins: [], guilds: {}, tickets: [], accounts: {}, loginLog: [], sessions: {}, site: {} };
 
 // 13자리 랜덤 숫자 (겹치지 않게)
 function genPurchaseId(used) {
@@ -41,6 +41,7 @@ function load() {
                 users: parsed.users || {},
                 purchases: Array.isArray(parsed.purchases) ? parsed.purchases : [],
                 purchaseSeq: Number(parsed.purchaseSeq) || 0,
+                meta: parsed.meta && typeof parsed.meta === 'object' ? parsed.meta : {},
                 joins: Array.isArray(parsed.joins) ? parsed.joins : [],
                 guilds: parsed.guilds && typeof parsed.guilds === 'object' ? parsed.guilds : {},
                 tickets: Array.isArray(parsed.tickets) ? parsed.tickets : [],
@@ -134,6 +135,34 @@ function recordPurchase({ buyerId, kind, qty, price, sellerId, item, guildId }) 
     u.robux += robux;
     save();
     return { robux, spent, id };
+}
+
+// 기간 안에서 구매 금액이 많은 순서 (주간 TOP용)
+function weeklyTop(guildId, fromTs, toTs) {
+    const m = new Map();
+    for (const p of db.purchases) {
+        if (p.ts < fromTs || p.ts >= toTs) continue;
+        if (p.guildId && guildId && p.guildId !== guildId) continue;
+        const e = m.get(p.buyerId) || { id: p.buyerId, spent: 0, robux: 0, count: 0 };
+        e.spent += p.spent || 0;
+        e.robux += p.robux || 0;
+        e.count += 1;
+        m.set(p.buyerId, e);
+    }
+    return [...m.values()].filter((e) => e.spent > 0).sort((a, b) => b.spent - a.spent || b.robux - a.robux || b.count - a.count);
+}
+
+function hasPurchases(guildId) {
+    return db.purchases.some((p) => !p.guildId || p.guildId === guildId);
+}
+
+function getMeta(key) {
+    return db.meta[key];
+}
+
+function setMeta(key, value) {
+    db.meta[key] = value;
+    save();
 }
 
 // 한 사람의 거래 내역 (최신순)
@@ -538,6 +567,10 @@ module.exports = {
     getUser,
     recordPurchase,
     purchasesOf,
+    weeklyTop,
+    hasPurchases,
+    getMeta,
+    setMeta,
     purchaseCode,
     getPurchase,
     attachChat,
