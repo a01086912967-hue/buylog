@@ -66,6 +66,10 @@ function isAdmin(member) {
     );
 }
 
+// 컴포넌트 V2 / 나만 보기 플래그 (discord.js 버전과 상관없이 숫자로 직접 사용)
+const FLAG_V2 = 1 << 15;
+const FLAG_EPHEMERAL = 1 << 6;
+
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // 서버 아이콘 이미지 (계산기 카드용, 실패 시 null)
@@ -209,7 +213,6 @@ client.once('ready', async () => {
     web.start(client);
 });
 
-const histCache = new Map(); // 거래 내역 이미지 임시 보관 (유저ID -> {sig, buf, at})
 client.on('interactionCreate', async interaction => {
 
     // 티켓 (패널 버튼·선택기 / 양식 / 닫기 / 다시 열기 / 삭제) - 대시보드에서 설정한 대로 동작
@@ -217,42 +220,42 @@ client.on('interactionCreate', async interaction => {
 
     if (interaction.isButton()) {
 
-        // $정보 카드 아래 "내 거래 내역" 버튼 - 카드 주인 본인만 누를 수 있고, 결과는 본인에게만 보여요
+        // $정보 아래 "내 거래 조회" 버튼 - 프로필 주인 본인 또는 관리자만 누를 수 있고, 결과는 누른 사람에게만 보여요
+        // (컴포넌트 V2 글자로 바로 보여줘서 이미지 만드는 시간이 없어요)
         if (interaction.customId.startsWith('hist:')) {
             const ownerId = interaction.customId.slice(5);
-            if (interaction.user.id !== ownerId) {
-                return interaction.reply({ content: '본인의 거래 내역만 볼 수 있어요.', ephemeral: true }).catch(() => {});
+            if (interaction.user.id !== ownerId && !isAdmin(interaction.member)) {
+                return interaction.reply({ content: '본인 또는 관리자만 볼 수 있어요.', flags: FLAG_EPHEMERAL }).catch(() => {});
             }
-            const t0 = Date.now();
-            await interaction.deferReply({ ephemeral: true }).catch(() => {});
             try {
                 const u = store.getUser(ownerId);
                 const { list } = store.purchasesOf(ownerId, 15);
-                // 같은 내용이면 1분 동안은 만들어 둔 이미지를 그대로 보내요 (빠르게)
-                const sig = `${u.count}:${u.spent}:${list.length ? list[0].id : 0}`;
-                const hit = histCache.get(ownerId);
-                let buf;
-                if (hit && hit.sig === sig && Date.now() - hit.at < 60000) {
-                    buf = hit.buf;
-                } else {
-                    // 멤버 조회(느릴 수 있음) 없이 버튼을 누른 사람 정보를 바로 쓰고, 프사는 3초 안에 못 받으면 생략
-                    const who = interaction.member && interaction.member.displayAvatarURL ? interaction.member : interaction.user;
-                    const avatarBuf = await fetchBuffer(who.displayAvatarURL({ extension: 'png', size: 128 }), 3000).catch(() => null);
-                    buf = await renderHistoryCard({
-                        name: interaction.user.username,
-                        avatarBuf,
-                        guildName: interaction.guild ? shopNameOf(interaction.guild) : '',
-                        totals: { count: u.count, spent: u.spent, robux: u.robux },
-                        rows: list.map((p) => ({ ts: p.ts, kind: p.kind, item: p.item, qty: p.qty, robux: p.robux, spent: p.spent, id: p.id }))
-                    });
-                    histCache.set(ownerId, { sig, buf, at: Date.now() });
-                }
-                const t1 = Date.now();
-                await interaction.editReply({ files: [new AttachmentBuilder(buf, { name: 'history.png' })] });
-                console.log(`[거래내역] 이미지 준비 ${t1 - t0}ms · 전송 ${Date.now() - t1}ms (${(buf.length / 1024).toFixed(0)}KB)`);
+                const KIND_KO = { robux: '로벅스', ingame: '인게임', etc: '기타' };
+                const fmtN = (n) => Number(n || 0).toLocaleString('en-US');
+                const stamp = (ts) => {
+                    const d = new Date(ts + 9 * 3600 * 1000);
+                    const p2 = (n) => String(n).padStart(2, '0');
+                    return `${p2(d.getUTCMonth() + 1)}.${p2(d.getUTCDate())} ${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())}`;
+                };
+                const lines = list.map((p) => {
+                    const what = p.kind === 'robux' && p.robux ? `${fmtN(p.robux)} R$` : `${p.item || '-'}${p.qty ? ` × ${p.qty}` : ''}`;
+                    return `**${stamp(p.ts)}** · ${KIND_KO[p.kind] || '기타'} · ${what} · **${fmtN(p.spent)}원**\n-# 구매 ID ${p.id}`;
+                });
+                const body = lines.length ? lines.join('\n\n').slice(0, 3500) : '아직 거래 내역이 없어요.';
+                const container = {
+                    type: 17,
+                    accent_color: 0x7cc4ff,
+                    components: [
+                        { type: 10, content: `## 거래 내역\n<@${ownerId}> · 총 **${fmtN(u.count)}회** · **${fmtN(u.spent)}원** · **${fmtN(u.robux)} R$**` },
+                        { type: 14, divider: true, spacing: 1 },
+                        { type: 10, content: body },
+                        ...(u.count > list.length ? [{ type: 10, content: `-# 최근 ${list.length}건만 표시 (전체 ${fmtN(u.count)}건)` }] : [])
+                    ]
+                };
+                await interaction.reply({ flags: FLAG_V2 | FLAG_EPHEMERAL, components: [container], allowedMentions: { parse: [] } });
             } catch (e) {
-                console.error('거래 내역 이미지 생성 실패:', e);
-                await interaction.editReply({ content: '거래 내역을 만드는 중 오류가 났어요. 잠시 후 다시 시도해 주세요.' }).catch(() => {});
+                console.error('거래 조회 실패:', e);
+                await interaction.reply({ content: '거래 내역을 불러오는 중 오류가 났어요.', flags: FLAG_EPHEMERAL }).catch(() => {});
             }
             return;
         }
@@ -686,12 +689,20 @@ client.on('messageCreate', async message => {
                         : await buildRankFile(message);
                 const payload = { files: [file], allowedMentions: { repliedUser: false } };
                 if (command === '$정보') {
-                    // 카드 주인(멘션한 사람 또는 본인)의 아이디를 버튼에 담아요 -> 그 사람만 누를 수 있어요
+                    // 컴포넌트 V2: 컨테이너 안에 프로필 사진 + 아래에 "내 거래 조회" 버튼
+                    // 버튼에는 프로필 주인 아이디가 들어 있어요 -> 주인 본인 또는 관리자만 누를 수 있어요
                     const t = message.mentions.users.first() || (args[1] && /^\d{15,25}$/.test(args[1]) ? { id: args[1] } : message.author);
+                    payload.flags = FLAG_V2;
                     payload.components = [
-                        new ActionRowBuilder().addComponents(
-                            new ButtonBuilder().setCustomId(`hist:${t.id}`).setLabel('내 거래 내역').setStyle(ButtonStyle.Primary)
-                        )
+                        {
+                            type: 17,
+                            accent_color: 0x7cc4ff,
+                            components: [
+                                { type: 12, items: [{ media: { url: `attachment://${file.name}` } }] },
+                                { type: 14, divider: false, spacing: 1 },
+                                { type: 1, components: [{ type: 2, style: 1, label: '내 거래 조회', custom_id: `hist:${t.id}` }] }
+                            ]
+                        }
                     ];
                 }
                 return message.reply(payload);
