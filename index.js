@@ -215,6 +215,10 @@ client.once('ready', async () => {
     await client.application.commands.create(infoSetCommand);
     await client.application.commands.create(backupCommand);
     await client.application.commands.create(panelCommand);
+    // 빼빼로데이 11.11초 이벤트 슬래시 명령어 (/이벤트패널 /이벤트로그 /이벤트현황 /이벤트초기화 /이벤트테스트)
+    for (const cmd of pepero.commands()) {
+        await client.application.commands.create(cmd).catch((e) => console.error('[빼빼로] 명령어 등록 실패:', e.message));
+    }
     console.log('슬래시 명령어 등록 완료');
 
     // 티켓 / 퇴장 메시지 + 웹 대시보드 시작
