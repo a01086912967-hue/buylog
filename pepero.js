@@ -122,9 +122,8 @@ function buildPanel(g) {
         .setAccentColor(closed ? GRAY : COLOR)
         .addTextDisplayComponents(text('## 11.11초 맞히기'))
         .addTextDisplayComponents(text(
-            '**도전하기**를 누르고 속으로 시간을 세다가\n' +
-            '정확히 **11.11초**에 **멈추기**를 누르세요.\n' +
-            '타이머는 보이지 않아요.'
+            '**도전하기** → **시작하기**를 누르면 타이머가 시작돼요.\n' +
+            '정확히 **11.11초**에 **멈추기**를 누르세요.'
         ))
         .addSeparatorComponents(line(true))
         .addTextDisplayComponents(text(
@@ -212,18 +211,83 @@ function resultBox(a, winnerNo, test = false) {
     return box(test ? '[테스트] 실패' : '실패', `${rec}\n${test ? '`/이벤트테스트`로 다시 해볼 수 있어요.' : '도전 기회를 모두 사용했어요.'}`, RED);
 }
 
-function stopBox(test) {
+// ───────── 준비 / 타이머 화면 ─────────
+function readyBox(test) {
+    const goBtn = new ButtonBuilder()
+        .setCustomId(test ? 'pp_tgo' : 'pp_go')
+        .setLabel('시작하기')
+        .setStyle(ButtonStyle.Success);
+    return new ContainerBuilder()
+        .setAccentColor(COLOR)
+        .addTextDisplayComponents(text(test ? '## [테스트] 준비' : '## 준비'))
+        .addTextDisplayComponents(text(
+            '**시작하기**를 누르면 바로 타이머가 시작돼요.\n' +
+            '타이머를 보면서 정확히 **11.11초**에 **멈추기**를 누르세요.'
+        ))
+        .addSeparatorComponents(line())
+        .addTextDisplayComponents(text(
+            test
+                ? '-# 테스트는 기록에 남지 않고 몇 번이든 할 수 있어요'
+                : '-# 시작하기를 누르는 순간 도전 기회 1번이 사용돼요'
+        ))
+        .addActionRowComponents(new ActionRowBuilder().addComponents(goBtn));
+}
+
+function timerBox(test, elapsedMs) {
     const stopBtn = new ButtonBuilder()
         .setCustomId(test ? 'pp_tstop' : 'pp_stop')
         .setLabel('멈추기')
         .setStyle(ButtonStyle.Danger);
     return new ContainerBuilder()
         .setAccentColor(COLOR)
-        .addTextDisplayComponents(text(test ? '## [테스트] 시작' : '## 시작'))
-        .addTextDisplayComponents(text('속으로 세다가 **11.11초**에 멈추기를 누르세요.'))
+        .addTextDisplayComponents(text(test ? '## [테스트] 진행 중' : '## 진행 중'))
+        .addTextDisplayComponents(text(`# ${(Math.max(0, elapsedMs) / 1000).toFixed(2)}초`))
         .addSeparatorComponents(line())
-        .addTextDisplayComponents(text(`-# ${TIMEOUT_SEC}초 안에 안 누르면 실패 처리돼요${test ? ' · 테스트는 기록에 남지 않아요' : ''}`))
+        .addTextDisplayComponents(text('**11.11초**에 멈추기를 누르세요.'))
+        .addTextDisplayComponents(text(`-# 타이머는 1초마다 갱신돼요 · ${TIMEOUT_SEC}초가 지나면 실패`))
         .addActionRowComponents(new ActionRowBuilder().addComponents(stopBtn));
+}
+
+// ───────── 타이머 진행 ─────────
+// 시작 시각은 디스코드가 "시작하기" 클릭을 받은 시각, 기록은 "멈추기" 클릭을 받은 시각으로 계산해요.
+// 화면 숫자는 1초마다 실제 시간 기준으로 다시 계산해서 보여줘요. (수정이 밀리면 그 회차는 건너뛰어서 느려지지 않음)
+// 인터랙션 메시지 수정은 봇 전체 속도 제한에 포함되지 않아서, 여러 명이 동시에 해도 서로 밀리지 않아요.
+const TICK_MS = 1000;
+const runs = new Map(); // `${guildId}:${userId}:r|t` → { start, timer, busy, current, stopped }
+const runKey = (guildId, uid, test) => `${guildId}:${uid}:${test ? 't' : 'r'}`;
+
+function startRun(key, ia, start, test, onTimeout) {
+    const old = runs.get(key);
+    if (old) finishRun(key);
+    const run = { start, timer: null, busy: false, current: Promise.resolve(), stopped: false };
+    runs.set(key, run);
+    const tick = () => {
+        if (run.stopped) return;
+        const elapsed = Date.now() - start;
+        if (elapsed >= TIMEOUT_SEC * 1000) {
+            finishRun(key);
+            onTimeout(run);
+            return;
+        }
+        if (!run.busy) {
+            run.busy = true;
+            run.current = ia.editReply(v2(timerBox(test, elapsed)))
+                .catch(() => {})
+                .finally(() => { run.busy = false; });
+        }
+        run.timer = setTimeout(tick, TICK_MS - ((Date.now() - start) % TICK_MS));
+    };
+    run.timer = setTimeout(tick, TICK_MS - ((Date.now() - start) % TICK_MS));
+    return run;
+}
+
+function finishRun(key) {
+    const run = runs.get(key);
+    if (!run) return null;
+    run.stopped = true;
+    clearTimeout(run.timer);
+    runs.delete(key);
+    return run;
 }
 
 // ───────── 카드 ─────────
@@ -277,7 +341,7 @@ function buildCardResult(uid, order, picked, test = false) {
 }
 
 // ───────── 슬래시 명령어 ─────────
-const SLASH = ['이벤트패널', '이벤트로그', '이벤트현황', '이벤트초기화', '이벤트테스트'];
+const SLASH = ['이벤트패널', '이벤트로그', '이벤트현황', '이벤트초기화', '이벤트테스트', '당첨지정', '당첨제거'];
 
 function commands() {
     const admin = (b) => b.setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
@@ -290,7 +354,12 @@ function commands() {
                 .addChannelTypes(ChannelType.GuildText).setRequired(true))),
         admin(new SlashCommandBuilder().setName('이벤트현황').setDescription('11.11초 이벤트 당첨자와 보상을 확인합니다.')),
         admin(new SlashCommandBuilder().setName('이벤트초기화').setDescription('11.11초 이벤트 기록을 전부 지웁니다. (로그 채널 설정은 유지)')),
-        admin(new SlashCommandBuilder().setName('이벤트테스트').setDescription('기록에 안 남는 연습 도전을 합니다. (몇 번이든 가능)'))
+        admin(new SlashCommandBuilder().setName('이벤트테스트').setDescription('기록에 안 남는 연습 도전을 합니다. (몇 번이든 가능)')),
+        admin(new SlashCommandBuilder().setName('당첨지정').setDescription('특정 유저를 11.11초 성공자로 지정합니다. ($보상받기 사용 가능)')
+            .addUserOption((o) => o.setName('유저').setDescription('성공 처리할 유저').setRequired(true))),
+        admin(new SlashCommandBuilder().setName('당첨제거').setDescription('특정 유저의 당첨을 취소합니다. (받은 보상 기록도 지워져요)')
+            .addUserOption((o) => o.setName('유저').setDescription('당첨을 취소할 유저').setRequired(true))
+            .addBooleanOption((o) => o.setName('기회돌려주기').setDescription('도전 기회도 다시 줄까요? (기본: 아니요)').setRequired(false)))
     ];
 }
 
@@ -330,7 +399,7 @@ async function handleSlash(interaction) {
         const lines = g.winners.map((uid, i) => {
             const a = g.attempts[uid];
             const r = g.rewards[uid];
-            return `**${i + 1}.** <@${uid}> · ${a && a.ms != null ? fmt(a.ms) : '-'} · ${r ? rewardOf(r.id).label : '카드 미선택'}`;
+            return `**${i + 1}.** <@${uid}> · ${a && a.manual ? '관리자 지정' : a && a.ms != null ? fmt(a.ms) : '-'} · ${r ? rewardOf(r.id).label : '카드 미선택'}`;
         });
         await interaction.reply(v2e(box(
             '이벤트 현황',
@@ -342,11 +411,8 @@ async function handleSlash(interaction) {
 
     if (name === '이벤트초기화') {
         Object.assign(g, { attempts: {}, winners: [], cards: {}, rewards: {} });
-        for (const [key, t] of pending) {
-            if (key.startsWith(`${guildId}:`)) {
-                clearTimeout(t);
-                pending.delete(key);
-            }
+        for (const key of [...runs.keys()]) {
+            if (key.startsWith(`${guildId}:`) && key.endsWith(':r')) finishRun(key);
         }
         persist();
         refreshPanel(guildId);
@@ -354,16 +420,76 @@ async function handleSlash(interaction) {
         return;
     }
 
+    if (name === '당첨지정') {
+        const target = interaction.options.getUser('유저');
+        if (target.bot) {
+            await interaction.reply(v2e(box('지정할 수 없어요', '봇은 당첨자로 지정할 수 없어요.', RED)));
+            return;
+        }
+        if (g.winners.includes(target.id)) {
+            await interaction.reply(v2e(box('이미 당첨자예요', `${target}님은 이미 성공자 목록에 있어요.`, GRAY)));
+            return;
+        }
+        // 진행 중인 도전이 있으면 끝내고 성공자로 등록 (선착순 인원이 다 찼어도 관리자 지정은 추가돼요)
+        finishRun(runKey(guildId, target.id, false));
+        const a = g.attempts[target.id] || { start: null, ms: null };
+        Object.assign(a, { success: true, done: true, lateFull: false, manual: true });
+        g.attempts[target.id] = a;
+        g.winners.push(target.id);
+        persist();
+        refreshPanel(guildId);
+        await interaction.reply(v2e(box(
+            '당첨 지정 완료',
+            `${target}님을 성공자로 지정했어요. (${g.winners.length}번째)\n이제 \`$보상받기\`를 사용할 수 있어요.`,
+            GREEN
+        )));
+        sendLog(guildId, box(
+            '당첨 지정',
+            `유저 ${target} (\`${target.id}\`)\n처리한 관리자 ${interaction.user}\n결과 **관리자 지정 성공 (${g.winners.length}번째)**\n-# ${nowTag()}`,
+            GREEN
+        ));
+        return;
+    }
+
+    if (name === '당첨제거') {
+        const target = interaction.options.getUser('유저');
+        const giveBack = interaction.options.getBoolean('기회돌려주기') === true;
+        const idx = g.winners.indexOf(target.id);
+        if (idx === -1 && !(giveBack && g.attempts[target.id])) {
+            await interaction.reply(v2e(box('당첨자가 아니에요', `${target}님은 성공자 목록에 없어요.`, GRAY)));
+            return;
+        }
+        const hadReward = g.rewards[target.id] ? rewardOf(g.rewards[target.id].id).label : null;
+        if (idx !== -1) g.winners.splice(idx, 1);
+        delete g.cards[target.id];
+        delete g.rewards[target.id];
+        if (giveBack) {
+            finishRun(runKey(guildId, target.id, false));
+            delete g.attempts[target.id];
+        } else if (g.attempts[target.id]) {
+            g.attempts[target.id].success = false;
+            g.attempts[target.id].removed = true;
+        }
+        persist();
+        refreshPanel(guildId);
+        const body =
+            `${target}님의 당첨을 취소했어요.\n` +
+            (hadReward ? `받았던 보상 **${hadReward}** 기록도 지웠어요.\n` : '') +
+            (giveBack ? '도전 기회를 다시 줬어요.' : '도전 기회는 돌려주지 않았어요.');
+        await interaction.reply(v2e(box('당첨 제거 완료', body, RED)));
+        sendLog(guildId, box(
+            '당첨 제거',
+            `유저 ${target} (\`${target.id}\`)\n처리한 관리자 ${interaction.user}\n` +
+            (hadReward ? `취소된 보상 **${hadReward}**\n` : '') +
+            `도전 기회 **${giveBack ? '돌려줌' : '그대로'}**\n-# ${nowTag()}`,
+            RED
+        ));
+        return;
+    }
+
     if (name === '이벤트테스트') {
-        // 기록·당첨자·패널에 영향 없음. 메모리에만 잠깐 기록
-        const key = `${guildId}:${interaction.user.id}`;
-        testStarts.set(key, interaction.createdTimestamp);
-        await interaction.reply(v2e(stopBox(true)));
-        setTimeout(() => {
-            if (testStarts.get(key) !== interaction.createdTimestamp) return;
-            testStarts.delete(key);
-            interaction.editReply(v2(resultBox({ ms: null }, null, true))).catch(() => {});
-        }, TIMEOUT_SEC * 1000 + 500);
+        // 기록·당첨자·패널에 영향 없음. 시작하기를 누르면 타이머 시작
+        await interaction.reply(v2e(readyBox(true)));
     }
 }
 
@@ -409,8 +535,17 @@ async function handleMessage(message) {
 }
 
 // ───────── 버튼 / 슬래시 처리 ─────────
-const pending = new Map();    // `${guildId}:${userId}` → 시간 초과 타이머 (실제 도전)
-const testStarts = new Map(); // `${guildId}:${userId}` → 테스트 시작 시각
+
+// 도전할 수 없는 상태면 안내 박스, 가능하면 null
+function checkBlocked(g, uid) {
+    if (g.winners.length >= MAX_WINNERS) return box('마감', '선착순 인원이 모두 찼어요.', GRAY);
+    const prev = g.attempts[uid];
+    if (prev) {
+        const t = prev.manual ? '관리자 지정' : prev.ms != null ? fmt(prev.ms) : prev.done ? '시간 초과' : '진행 중';
+        return box('이미 도전했어요', `도전 기회는 1번뿐이에요.\n내 기록: **${t}**`, RED);
+    }
+    return null;
+}
 
 async function handleInteraction(interaction) {
     const isOurSlash = interaction.isChatInputCommand() && SLASH.includes(interaction.commandName);
@@ -429,53 +564,49 @@ async function handleInteraction(interaction) {
         const uid = interaction.user.id;
         const id = interaction.customId;
 
-        // ── 도전하기 ──
+        // ── 패널의 도전하기 → 준비 화면 (아직 기회 안 씀) ──
         if (id === 'pp_start') {
-            if (g.winners.length >= MAX_WINNERS) {
-                await interaction.reply(v2e(box('마감', '선착순 인원이 모두 찼어요.', GRAY))).catch(() => {});
-                return true;
-            }
-            const prev = g.attempts[uid];
-            if (prev) {
-                const t = prev.ms != null ? fmt(prev.ms) : prev.done ? '시간 초과' : '진행 중';
-                await interaction.reply(v2e(box('이미 도전했어요', `도전 기회는 1번뿐이에요.\n내 기록: **${t}**`, RED))).catch(() => {});
-                return true;
-            }
+            const blocked = checkBlocked(g, uid);
+            await interaction.reply(v2e(blocked || readyBox(false))).catch(() => {});
+            return true;
+        }
 
+        // ── 시작하기 → 기회 사용 + 타이머 시작 ──
+        if (id === 'pp_go') {
+            const blocked = checkBlocked(g, uid);
+            if (blocked) {
+                await interaction.update(v2(blocked)).catch(() => {});
+                return true;
+            }
             // await 전에 바로 기록 → 연타해도 기회는 1번만 쓰임
-            // 시간은 디스코드가 클릭을 받은 시각 기준 → 사람마다 핑 차이 최소화
-            g.attempts[uid] = { start: interaction.createdTimestamp, ms: null, success: false, done: false };
+            const start = interaction.createdTimestamp;
+            g.attempts[uid] = { start, ms: null, success: false, done: false };
             persist();
             refreshPanel(guildId);
 
-            await interaction.reply(v2e(stopBox(false))).catch((e) => console.error('[빼빼로] 시작 응답 실패:', e.message));
-
-            const key = `${guildId}:${uid}`;
-            pending.set(key, setTimeout(() => {
-                pending.delete(key);
+            await interaction.update(v2(timerBox(false, 0))).catch((e) => console.error('[빼빼로] 시작 응답 실패:', e.message));
+            startRun(runKey(guildId, uid, false), interaction, start, false, async (run) => {
                 const a = g.attempts[uid];
                 if (!a || a.done) return;
                 a.done = true;
                 persist();
+                await run.current;
                 interaction.editReply(v2(resultBox(a))).catch(() => {});
                 sendLog(guildId, attemptLog(uid, a));
-            }, TIMEOUT_SEC * 1000 + 500));
+            });
             return true;
         }
 
         // ── 멈추기 ──
         if (id === 'pp_stop') {
             const a = g.attempts[uid];
-            if (!a || a.done) {
+            if (!a || a.done || a.start == null) {
                 await interaction.update(v2(box('끝난 도전', '이미 종료된 도전이에요.', GRAY))).catch(() => {});
                 return true;
             }
             // 여기서부터 await 전까지 한 번에 처리 → 동시에 눌러도 당첨자가 10명을 넘지 않음
             a.done = true;
-            const key = `${guildId}:${uid}`;
-            clearTimeout(pending.get(key));
-            pending.delete(key);
-
+            const run = finishRun(runKey(guildId, uid, false));
             const ms = interaction.createdTimestamp - a.start;
             let winnerNo = null;
             if (ms <= TIMEOUT_SEC * 1000) {
@@ -491,26 +622,41 @@ async function handleInteraction(interaction) {
             persist();
             refreshPanel(guildId);
 
-            await interaction.update(v2(resultBox(a, winnerNo))).catch((e) => console.error('[빼빼로] 결과 응답 실패:', e.message));
+            // 타이머 수정이 결과를 덮어쓰지 않게, 진행 중인 수정이 끝난 뒤 결과 표시
+            await interaction.deferUpdate().catch(() => {});
+            if (run) await run.current;
+            await interaction.editReply(v2(resultBox(a, winnerNo))).catch((e) => console.error('[빼빼로] 결과 응답 실패:', e.message));
             sendLog(guildId, attemptLog(uid, a, winnerNo));
+            return true;
+        }
+
+        // ── 테스트 시작하기 ──
+        if (id === 'pp_tgo') {
+            const start = interaction.createdTimestamp;
+            const key = runKey(guildId, uid, true);
+            await interaction.update(v2(timerBox(true, 0))).catch(() => {});
+            startRun(key, interaction, start, true, async (run) => {
+                await run.current;
+                interaction.editReply(v2(resultBox({ ms: null }, null, true))).catch(() => {});
+            });
             return true;
         }
 
         // ── 테스트 멈추기 ──
         if (id === 'pp_tstop') {
-            const key = `${guildId}:${uid}`;
-            const start = testStarts.get(key);
-            if (start == null) {
+            const run = finishRun(runKey(guildId, uid, true));
+            if (!run) {
                 await interaction.update(v2(box('끝난 테스트', '`/이벤트테스트`로 다시 시작해 주세요.', GRAY))).catch(() => {});
                 return true;
             }
-            testStarts.delete(key);
-            const ms = interaction.createdTimestamp - start;
+            const ms = interaction.createdTimestamp - run.start;
             const a = ms <= TIMEOUT_SEC * 1000 ? { ms, success: isHit(ms) } : { ms: null, success: false };
 
+            await interaction.deferUpdate().catch(() => {});
+            await run.current;
             const payload = v2(resultBox(a, null, true));
             if (a.success) payload.components.push(buildCards(uid, true));
-            await interaction.update(payload).catch((e) => console.error('[빼빼로] 테스트 응답 실패:', e.message));
+            await interaction.editReply(payload).catch((e) => console.error('[빼빼로] 테스트 응답 실패:', e.message));
             sendLog(guildId, attemptLog(uid, a, null, true)); // 로그 채널이 잘 되는지도 같이 확인
             return true;
         }
