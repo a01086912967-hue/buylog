@@ -252,10 +252,10 @@ function timerBox(test, elapsedMs) {
     return new ContainerBuilder()
         .setAccentColor(COLOR)
         .addTextDisplayComponents(text(test ? '## [테스트] 진행 중' : '## 진행 중'))
-        .addTextDisplayComponents(text(`# ${(Math.max(0, elapsedMs) / 1000).toFixed(2)}초`))
+        .addTextDisplayComponents(text(`# ${Math.max(0, Math.floor(elapsedMs / 1000))}초`))
         .addSeparatorComponents(line())
         .addTextDisplayComponents(text('**11.11초**에 멈추기를 누르세요.'))
-        .addTextDisplayComponents(text(`-# 타이머는 1초마다 갱신돼요 · ${TIMEOUT_SEC}초가 지나면 실패`))
+        .addTextDisplayComponents(text(`-# 화면은 1초 단위 · 소수점은 감으로 맞혀야 해요 · ${TIMEOUT_SEC}초가 지나면 실패`))
         .addActionRowComponents(new ActionRowBuilder().addComponents(stopBtn));
 }
 
@@ -263,15 +263,27 @@ function timerBox(test, elapsedMs) {
 // 시작 시각은 디스코드가 "시작하기" 클릭을 받은 시각, 기록은 "멈추기" 클릭을 받은 시각으로 계산해요.
 // 화면 숫자는 1초마다 실제 시간 기준으로 다시 계산해서 보여줘요. (수정이 밀리면 그 회차는 건너뛰어서 느려지지 않음)
 // 인터랙션 메시지 수정은 봇 전체 속도 제한에 포함되지 않아서, 여러 명이 동시에 해도 서로 밀리지 않아요.
-const TICK_MS = 1000;
 const runs = new Map(); // `${guildId}:${userId}:r|t` → { start, timer, busy, current, stopped }
 const runKey = (guildId, uid, test) => `${guildId}:${uid}:${test ? 't' : 'r'}`;
 
+// 디스코드는 메시지를 고치면 화면에 보이기까지 0.1~0.5초 정도 걸려요.
+// 그래서 수정 왕복 시간을 재서 그만큼 "미리" 보내고, 화면에 보일 때의 초를 계산해서 표시해요.
+// 늦어진 회차는 건너뛰고 항상 실제 시간 기준 숫자를 보내서, 숫자가 느려지거나 밀리지 않게 해요.
 function startRun(key, ia, start, test, onTimeout) {
     const old = runs.get(key);
     if (old) finishRun(key);
-    const run = { start, timer: null, busy: false, current: Promise.resolve(), stopped: false };
+    const run = { start, timer: null, busy: false, current: Promise.resolve(), stopped: false, lead: 250, next: 1 };
     runs.set(key, run);
+
+    const schedule = () => {
+        if (run.stopped) return;
+        // 다음에 보여줄 초: 지금 보내면 화면에 보일 시각 기준
+        const showAt = Date.now() - start + run.lead;
+        if (run.next * 1000 < showAt - 300) run.next = Math.floor(showAt / 1000) + 1; // 많이 밀렸으면 건너뛰기
+        const sendAt = start + run.next * 1000 - run.lead;
+        run.timer = setTimeout(tick, Math.max(0, sendAt - Date.now()));
+    };
+
     const tick = () => {
         if (run.stopped) return;
         const elapsed = Date.now() - start;
@@ -282,13 +294,22 @@ function startRun(key, ia, start, test, onTimeout) {
         }
         if (!run.busy) {
             run.busy = true;
-            run.current = ia.editReply(v2(timerBox(test, elapsed)))
+            const sentAt = Date.now();
+            const shown = run.next;
+            run.current = ia.editReply(v2(timerBox(test, shown * 1000)))
+                .then(() => {
+                    // 왕복 시간의 60% 정도를 "화면에 보이기까지 걸리는 시간"으로 보고 조금씩 맞춰가요
+                    const rtt = Date.now() - sentAt;
+                    run.lead = Math.min(600, Math.max(100, run.lead * 0.6 + rtt * 0.6 * 0.4));
+                })
                 .catch(() => {})
                 .finally(() => { run.busy = false; });
         }
-        run.timer = setTimeout(tick, TICK_MS - ((Date.now() - start) % TICK_MS));
+        run.next += 1;
+        schedule();
     };
-    run.timer = setTimeout(tick, TICK_MS - ((Date.now() - start) % TICK_MS));
+
+    schedule();
     return run;
 }
 
