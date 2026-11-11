@@ -33,6 +33,7 @@ const tickets = require('./tickets');
 const community = require('./community');
 const web = require('./web');
 const weekly = require('./weekly');
+const pepero = require('./pepero'); // 빼빼로데이 11.11초 이벤트
 const { renderProfileCard, renderStatsCard, renderRankCard, renderHistoryCard, ymd } = require('./infoCards');
 const { SERVER_ROLES, resolveGrade } = require('./roles');
 
@@ -70,6 +71,14 @@ function isAdmin(member) {
 // 컴포넌트 V2 / 나만 보기 플래그 (discord.js 버전과 상관없이 숫자로 직접 사용)
 const FLAG_V2 = 1 << 15;
 const FLAG_EPHEMERAL = 1 << 6;
+
+// 빼빼로데이 11.11초 이벤트 (패널/로그/보상 카드)
+pepero.init(client, { isAdmin });
+
+// 에러가 나도 봇이 꺼지지 않게
+process.on('unhandledRejection', (e) => console.error('[에러] 처리되지 않은 Promise:', e));
+process.on('uncaughtException', (e) => console.error('[에러] 처리되지 않은 예외:', e));
+client.on('error', (e) => console.error('[에러] 디스코드 클라이언트:', e.message));
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -219,6 +228,9 @@ client.on('interactionCreate', async interaction => {
 
     // 티켓 (패널 버튼·선택기 / 양식 / 닫기 / 다시 열기 / 삭제) - 대시보드에서 설정한 대로 동작
     if (await tickets.handleInteraction(interaction)) return;
+
+    // 빼빼로데이 이벤트 버튼 (pp_ 로 시작)
+    if (await pepero.handleInteraction(interaction)) return;
 
     if (interaction.isButton()) {
 
@@ -829,6 +841,7 @@ client.on('messageCreate', async message => {
 
     // 티켓 채널의 !close / !open / !delete, 그리고 대시보드에서 만든 자동응답
     if (await tickets.handleMessage(message).catch((e) => { console.error('[티켓] 명령어 오류:', e); return false; })) return;
+    if (await pepero.handleMessage(message).catch((e) => { console.error('[빼빼로] 오류:', e); return false; })) return;
     if (await community.handleMessage(message).catch((e) => { console.error('[자동응답] 오류:', e); return false; })) return;
 
     const args = message.content.trim().split(/\s+/);
