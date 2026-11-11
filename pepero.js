@@ -29,8 +29,12 @@ const {
     SeparatorSpacingSize,
     ActionRowBuilder,
     ButtonBuilder,
-    ButtonStyle
+    ButtonStyle,
+    MediaGalleryBuilder,
+    MediaGalleryItemBuilder,
+    AttachmentBuilder
 } = require('discord.js');
+const path = require('path');
 const store = require('./store');
 
 // ───────── 설정 ─────────
@@ -42,6 +46,13 @@ const GREEN = 0x3ba55d;
 const RED = 0xed4245;
 const GRAY = 0x5c5c5c;
 const YELLOW = 0xfee75c;
+
+// 당첨 보상 수령 티켓 채널
+const TICKET_CHANNEL_ID = '1457035868819951911';
+// 카드 이미지 / 패널 제목 이모지 (event 폴더)
+const EVENT_DIR = path.join(__dirname, 'event');
+const EMOJI_NAME = 'pepero_day';
+let panelEmoji = process.env.PEPERO_EMOJI || ''; // 비워두면 봇이 자동으로 애플리케이션 이모지를 만들어서 사용
 
 const REWARDS = [
     { id: 'pepero', label: '빼빼로', desc: '빼빼로 당첨! 관리자가 곧 지급해 드릴게요.' },
@@ -120,7 +131,7 @@ function buildPanel(g) {
 
     return new ContainerBuilder()
         .setAccentColor(closed ? GRAY : COLOR)
-        .addTextDisplayComponents(text('## 11.11초 맞히기'))
+        .addTextDisplayComponents(text(`## ${panelEmoji ? `${panelEmoji} ` : ''}11.11초 맞히기`))
         .addTextDisplayComponents(text(
             '**도전하기** → **시작하기**를 누르면 타이머가 시작돼요.\n' +
             '정확히 **11.11초**에 **멈추기**를 누르세요.'
@@ -300,6 +311,14 @@ function shuffle(arr) {
     return a;
 }
 
+// 카드 이미지 (event/cards.png, event/cards_pick1~3.png) - 보상은 이미지/버튼 어디에도 안 보여요
+const cardFile = (picked) => {
+    const name = picked == null ? 'cards.png' : `cards_pick${picked + 1}.png`;
+    return new AttachmentBuilder(path.join(EVENT_DIR, name), { name });
+};
+const gallery = (name) =>
+    new MediaGalleryBuilder().addItems(new MediaGalleryItemBuilder().setURL(`attachment://${name}`));
+
 function buildCards(uid, test = false) {
     const row = new ActionRowBuilder().addComponents(
         [0, 1, 2].map((i) =>
@@ -311,33 +330,48 @@ function buildCards(uid, test = false) {
     );
     return new ContainerBuilder()
         .setAccentColor(COLOR)
-        .addTextDisplayComponents(text(test ? '## [테스트] 보상 카드 뽑기' : '## 보상 카드 뽑기'))
-        .addTextDisplayComponents(text(`<@${uid}>님, 세 장 중 **한 장만** 고를 수 있어요.`))
-        .addSeparatorComponents(line(true))
-        .addTextDisplayComponents(text('빼빼로 · 계좌 1,100원 · 꽝'))
+        .addTextDisplayComponents(text(test ? '## [테스트] 보상 카드' : '## 보상 카드'))
+        .addTextDisplayComponents(text(`<@${uid}>님, 세 장 중 **한 장**을 골라 주세요.`))
+        .addMediaGalleryComponents(gallery('cards.png'))
         .addSeparatorComponents(line())
         .addActionRowComponents(row);
 }
 
-function buildCardResult(uid, order, picked, test = false) {
-    const chosen = rewardOf(order[picked]);
+function buildCardResult(uid, picked, test = false) {
     const row = new ActionRowBuilder().addComponents(
-        order.map((id, i) =>
+        [0, 1, 2].map((i) =>
             new ButtonBuilder()
                 .setCustomId(`pp_done:${i}`)
-                .setLabel(rewardOf(id).label)
+                .setLabel(`카드 ${i + 1}`)
                 .setStyle(i === picked ? ButtonStyle.Success : ButtonStyle.Secondary)
                 .setDisabled(true)
         )
     );
     return new ContainerBuilder()
-        .setAccentColor(chosen.id === 'none' ? GRAY : GREEN)
-        .addTextDisplayComponents(text(test ? '## [테스트] 카드 결과' : '## 카드 결과'))
+        .setAccentColor(COLOR)
+        .addTextDisplayComponents(text(test ? '## [테스트] 카드 선택 완료' : '## 카드 선택 완료'))
         .addTextDisplayComponents(text(`<@${uid}>님은 **카드 ${picked + 1}**을 골랐어요.`))
+        .addMediaGalleryComponents(gallery(`cards_pick${picked + 1}.png`))
         .addSeparatorComponents(line(true))
-        .addTextDisplayComponents(text(`### ${chosen.label}\n${test ? '테스트라 실제로 지급되지 않아요.' : chosen.desc}`))
+        .addTextDisplayComponents(text(
+            test
+                ? '테스트라 실제 보상은 없어요. 결과는 로그 채널에서 확인하세요.'
+                : `보상은 <#${TICKET_CHANNEL_ID}> 채널에서 **티켓을 열어** 받아 주세요.`
+        ))
         .addSeparatorComponents(line())
         .addActionRowComponents(row);
+}
+
+function rewardLog(uid, picked, rewardId, test = false) {
+    return box(
+        test ? '보상 카드 테스트 기록' : '보상 카드 기록',
+        `유저 <@${uid}> (\`${uid}\`)\n` +
+        `선택 카드 **${picked + 1}번**\n` +
+        `보상 **${rewardOf(rewardId).label}**\n` +
+        (test ? '-# 테스트라 지급하지 않아요\n' : rewardId === 'none' ? '' : '**지급 필요**\n') +
+        `-# ${nowTag()}`,
+        test || rewardId === 'none' ? GRAY : YELLOW
+    );
 }
 
 // ───────── 슬래시 명령어 ─────────
@@ -519,7 +553,7 @@ async function handleMessage(message) {
             return true;
         }
         if (g.rewards[uid]) {
-            await reply(box('이미 보상을 받았어요', `받은 보상: **${rewardOf(g.rewards[uid].id).label}**`));
+            await reply(box('이미 카드를 골랐어요', `보상은 <#${TICKET_CHANNEL_ID}> 채널에서 티켓을 열어 받아 주세요.`));
             return true;
         }
         // 카드 순서는 처음 한 번만 섞어서 저장 → 명령어를 다시 써도 순서가 안 바뀜
@@ -527,7 +561,7 @@ async function handleMessage(message) {
             g.cards[uid] = shuffle(REWARDS.map((r) => r.id));
             persist();
         }
-        await reply(buildCards(uid));
+        await message.reply({ ...v2(buildCards(uid)), files: [cardFile(null)] }).catch((e) => console.error('[빼빼로] 카드 전송 실패:', e.message));
     } catch (e) {
         console.error('[빼빼로] $보상받기 오류:', e);
     }
@@ -655,7 +689,10 @@ async function handleInteraction(interaction) {
             await interaction.deferUpdate().catch(() => {});
             await run.current;
             const payload = v2(resultBox(a, null, true));
-            if (a.success) payload.components.push(buildCards(uid, true));
+            if (a.success) {
+                payload.components.push(buildCards(uid, true));
+                payload.files = [cardFile(null)];
+            }
             await interaction.editReply(payload).catch((e) => console.error('[빼빼로] 테스트 응답 실패:', e.message));
             sendLog(guildId, attemptLog(uid, a, null, true)); // 로그 채널이 잘 되는지도 같이 확인
             return true;
@@ -674,12 +711,13 @@ async function handleInteraction(interaction) {
 
             if (test) {
                 const order = shuffle(REWARDS.map((r) => r.id));
-                await interaction.update(v2(buildCardResult(uid, order, picked, true))).catch(() => {});
+                await interaction.update({ ...v2(buildCardResult(uid, picked, true)), files: [cardFile(picked)], attachments: [] }).catch((e) => console.error('[빼빼로] 테스트 카드 응답 실패:', e.message));
+                sendLog(guildId, rewardLog(uid, picked, order[picked], true));
                 return true;
             }
 
             if (g.rewards[uid]) {
-                await interaction.reply(v2e(box('이미 보상을 받았어요', '카드는 한 번만 고를 수 있어요.', RED))).catch(() => {});
+                await interaction.reply(v2e(box('이미 카드를 골랐어요', '카드는 한 번만 고를 수 있어요.', RED))).catch(() => {});
                 return true;
             }
             const order = g.cards[uid];
@@ -692,17 +730,10 @@ async function handleInteraction(interaction) {
             g.rewards[uid] = { id: rewardId, card: picked + 1, ts: Date.now() };
             persist();
 
-            await interaction.update(v2(buildCardResult(uid, order, picked))).catch((e) => console.error('[빼빼로] 카드 응답 실패:', e.message));
+            await interaction.update({ ...v2(buildCardResult(uid, picked)), files: [cardFile(picked)], attachments: [] }).catch((e) => console.error('[빼빼로] 카드 응답 실패:', e.message));
 
-            sendLog(guildId, box(
-                '보상 카드 기록',
-                `유저 <@${uid}> (\`${uid}\`)\n` +
-                `선택 카드 **${picked + 1}번**\n` +
-                `보상 **${rewardOf(rewardId).label}**\n` +
-                (rewardId === 'none' ? '' : '**지급 필요**\n') +
-                `-# ${nowTag()}`,
-                rewardId === 'none' ? GRAY : YELLOW
-            ));
+            // 보상 결과는 로그 채널에만
+            sendLog(guildId, rewardLog(uid, picked, rewardId));
             return true;
         }
     } catch (e) {
@@ -728,6 +759,22 @@ function init(c, opts = {}) {
         }
     }
     if (changed) persist();
+
+    // 패널 제목 이모지: 봇 전용(애플리케이션) 이모지를 자동으로 만들어서 사용 → 서버에 이모지를 올릴 필요 없음
+    client.once('ready', async () => {
+        if (panelEmoji) return;
+        try {
+            const list = await client.application.emojis.fetch();
+            let emoji = list.find((e) => e.name === EMOJI_NAME);
+            if (!emoji) {
+                emoji = await client.application.emojis.create({ attachment: path.join(EVENT_DIR, 'pepero_emoji.png'), name: EMOJI_NAME });
+            }
+            panelEmoji = emoji.toString();
+            for (const guildId of Object.keys(S())) refreshPanel(guildId); // 이미 올린 패널에도 반영
+        } catch (e) {
+            console.error('[빼빼로] 패널 이모지 준비 실패 (이모지 없이 표시해요):', e.message);
+        }
+    });
 }
 
 module.exports = { init, commands, handleInteraction, handleMessage };
