@@ -33,7 +33,7 @@ const tickets = require('./tickets');
 const community = require('./community');
 const web = require('./web');
 const weekly = require('./weekly');
-const { renderProfileCard, renderStatsCard, renderRankCard, renderHistoryCard, ymd } = require('./infoCards');
+const { renderProfileCard, renderStatsCard, renderRankCard, renderHistoryCard, renderSellerCard, ymd } = require('./infoCards');
 const { SERVER_ROLES, resolveGrade } = require('./roles');
 
 const BOT_TOKEN = (process.env.TOKEN || process.env.DISCORD_TOKEN || '').trim();
@@ -291,22 +291,25 @@ client.on('interactionCreate', async interaction => {
             return;
         }
 
-        // $정보 아래 버튼: "내 거래 조회"(hist:) <-> "정보로 돌아가기"(prof:)
-        // 같은 메시지의 사진이 정보 <-> 거래 내역으로 바뀌어요. 프로필 주인 본인 또는 관리자만 누를 수 있어요.
-        if (interaction.customId.startsWith('hist:') || interaction.customId.startsWith('prof:')) {
-            const toHistory = interaction.customId.startsWith('hist:');
+        // $정보 아래 버튼: "내 거래 조회"(hist:) / "판매 정보"(sell:, 판매자만) <-> "정보로 돌아가기"(prof:)
+        // 같은 메시지의 사진이 바뀌어요. 프로필 주인 본인 또는 관리자만 누를 수 있어요.
+        if (interaction.customId.startsWith('hist:') || interaction.customId.startsWith('prof:') || interaction.customId.startsWith('sell:')) {
+            const mode = interaction.customId.startsWith('hist:') ? 'history' : interaction.customId.startsWith('sell:') ? 'seller' : 'profile';
             const ownerId = interaction.customId.slice(5);
             if (interaction.user.id !== ownerId && !isAdmin(interaction.member)) {
                 return interaction.reply({ content: '본인 또는 관리자만 누를 수 있어요.', flags: FLAG_EPHEMERAL }).catch(() => {});
             }
             await interaction.deferUpdate().catch(() => {});
             try {
-                const file = toHistory
+                const file = mode === 'history'
                     ? await buildHistoryFileFor(interaction.guild, ownerId)
-                    : await buildProfileFileFor(interaction.guild, await client.users.fetch(ownerId));
+                    : mode === 'seller'
+                        ? await buildSellerFileFor(interaction.guild, ownerId)
+                        : await buildProfileFileFor(interaction.guild, await client.users.fetch(ownerId));
+                const seller = mode === 'profile' ? await isSellerId(interaction.guild, ownerId) : false;
                 await interaction.editReply({
                     flags: FLAG_V2,
-                    components: [v2Card(ownerId, file.name, toHistory ? 'history' : 'profile')],
+                    components: [v2Card(ownerId, file.name, mode, seller)],
                     files: [file],
                     attachments: [],
                     allowedMentions: { parse: [] }
@@ -657,18 +660,30 @@ async function usernameOf(id) {
     }
 }
 
+// 판매자 역할 (roles.js의 '판매자')
+const SELLER_ROLE_ID = (SERVER_ROLES.find((r) => r.name === '판매자') || {}).id;
+async function isSellerId(guild, userId) {
+    if (!guild || !SELLER_ROLE_ID) return false;
+    const member = guild.members.cache.get(userId) || await guild.members.fetch(userId).catch(() => null);
+    return !!(member && member.roles.cache.has(SELLER_ROLE_ID));
+}
+
 // 컴포넌트 V2 카드: 컨테이너 안에 사진 + 구분선 + 버튼
-function v2Card(ownerId, fileName, mode) {
-    const button = mode === 'profile'
-        ? { type: 2, style: 1, label: '내 거래 조회', custom_id: `hist:${ownerId}` }
-        : { type: 2, style: 2, label: '정보로 돌아가기', custom_id: `prof:${ownerId}` };
+// mode: profile(정보) / history(거래 내역) / seller(판매 정보). seller=true면 정보 화면에 "판매 정보" 버튼 추가
+function v2Card(ownerId, fileName, mode, seller = false) {
+    const buttons = mode === 'profile'
+        ? [
+            { type: 2, style: 1, label: '내 거래 조회', custom_id: `hist:${ownerId}` },
+            ...(seller ? [{ type: 2, style: 3, label: '판매 정보', custom_id: `sell:${ownerId}` }] : [])
+        ]
+        : [{ type: 2, style: 2, label: '정보로 돌아가기', custom_id: `prof:${ownerId}` }];
     return {
         type: 17,
         accent_color: 0x7cc4ff,
         components: [
             { type: 12, items: [{ media: { url: `attachment://${fileName}` } }] },
             { type: 14, divider: true, spacing: 2 },
-            { type: 1, components: [button] }
+            { type: 1, components: buttons }
         ]
     };
 }
@@ -734,6 +749,25 @@ async function buildHistoryFileFor(guild, ownerId) {
         });
     });
     return new AttachmentBuilder(buf, { name: 'history.png' });
+}
+
+// 판매 정보 사진 (판매자 전용)
+async function buildSellerFileFor(guild, ownerId) {
+    const user = await client.users.fetch(ownerId);
+    const s = store.sellerStats(ownerId, 5);
+    const sig = `${s.count}:${s.spent}:${s.rank}:${s.rankTotal}:${s.recent.length ? s.recent[0].id : 0}:${new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10)}`;
+    const buf = await cached(`s${ownerId}`, sig, async () => {
+        const member = guild.members.cache.get(ownerId) || await guild.members.fetch(ownerId).catch(() => null);
+        return renderSellerCard({
+            name: user.username,
+            avatarBuf: await avatarBufOf(member || user),
+            guildName: shopNameOf(guild),
+            grade: resolveGrade(member),
+            s,
+            topBuyerName: s.topBuyer ? await usernameOf(s.topBuyer.id) : ''
+        });
+    });
+    return new AttachmentBuilder(buf, { name: 'seller.png' });
 }
 
 async function buildStatsFile(guild) {
@@ -853,7 +887,7 @@ client.on('messageCreate', async message => {
                     const file = await buildProfileFile(message, args);
                     const t = message.mentions.users.first() || (args[1] && /^\d{15,25}$/.test(args[1]) ? { id: args[1] } : message.author);
                     payload.files = [file];
-                    payload.components = [v2Card(t.id, file.name, 'profile')];
+                    payload.components = [v2Card(t.id, file.name, 'profile', await isSellerId(message.guild, t.id))];
                 } else if (command === '$통계') {
                     const file = await buildStatsFile(message.guild);
                     payload.files = [file];
