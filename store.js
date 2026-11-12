@@ -60,6 +60,21 @@ function load() {
                     migrated = true;
                 }
             }
+            // 지금까지의 /지급완료 기록으로 판매자 거래 횟수 한 번만 소급 적용
+            // (2026-11-12 22:04 배포본부터는 판매자≠구매자인 거래가 이미 +1 되어 있어서 그건 빼고 계산)
+            if (!db.meta.sellerCountBackfilled) {
+                const ALREADY_FROM = 1794488686000;
+                let added = 0;
+                for (const p of db.purchases) {
+                    if (!p.sellerId) continue;
+                    if (p.ts >= ALREADY_FROM && p.sellerId !== p.buyerId) continue;
+                    ensureUser(p.sellerId).count += 1;
+                    added++;
+                }
+                db.meta.sellerCountBackfilled = Date.now();
+                migrated = true;
+                console.log(`[데이터] 판매자 거래 횟수 소급 적용: ${added}건`);
+            }
             if (migrated) setTimeout(save, 0);
             console.log(`[데이터] 불러오기 완료 (유저 ${Object.keys(db.users).length}명, 구매 ${db.purchases.length}건) - ${FILE}`);
         } catch (e) {
