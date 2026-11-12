@@ -16,7 +16,8 @@ const {
     MediaGalleryItemBuilder,
     MessageFlags,
     ChannelType,
-    AttachmentBuilder
+    AttachmentBuilder,
+    MessageType
 } = require('discord.js');
 const {
     renderPurchaseCard,
@@ -206,6 +207,18 @@ client.once('ready', async () => {
     await client.application.commands.create(infoSetCommand);
     await client.application.commands.create(backupCommand);
     await client.application.commands.create(panelCommand);
+
+    const boostTokenCommand = new SlashCommandBuilder()
+        .setName('부스트토큰조회')
+        .setDescription('부스트했다가 만료된 계정 목록을 조회합니다. (추방 X, 조회만)')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .addChannelOption(option =>
+            option.setName('채널')
+                .setDescription('부스트 알림 메시지가 있는 채널 (기본: 서버 시스템 채널)')
+                .addChannelTypes(ChannelType.GuildText)
+                .setRequired(false)
+        );
+    await client.application.commands.create(boostTokenCommand);
     console.log('슬래시 명령어 등록 완료');
 
     // 티켓 / 퇴장 메시지 + 웹 대시보드 시작
@@ -407,6 +420,98 @@ client.on('interactionCreate', async interaction => {
                 `• 총 구매 금액: ${u.spent.toLocaleString()}원\n` +
                 `• 총 거래 횟수: ${u.count.toLocaleString()}회\n` +
                 `• 초대한 사람 수: ${u.invites.toLocaleString()}명`,
+            allowedMentions: { parse: [] }
+        });
+    }
+
+    // /부스트토큰조회 - 부스트 알림 메시지를 기준으로, 지금은 부스트 안 하는 계정만 조회 (추방 안 함)
+    if (interaction.commandName === '부스트토큰조회') {
+        if (!isAdmin(interaction.member)) {
+            return interaction.reply({ content: '이 명령어를 사용할 권한이 없습니다.', ephemeral: true });
+        }
+        await interaction.deferReply({ ephemeral: true });
+
+        const guild = interaction.guild;
+        const channel = interaction.options.getChannel('채널') || guild.systemChannel;
+        if (!channel) {
+            return interaction.editReply('시스템 채널이 설정돼 있지 않아요. `채널` 옵션으로 부스트 알림이 오는 채널을 지정해주세요.');
+        }
+
+        const BOOST_TYPES = [
+            MessageType.GuildBoost,
+            MessageType.GuildBoostTier1,
+            MessageType.GuildBoostTier2,
+            MessageType.GuildBoostTier3
+        ];
+
+        // 부스트 알림 작성자 + 마지막 부스트 시각 / 부스트 횟수 수집
+        const boosts = new Map();
+        let before;
+        let scanned = 0;
+        try {
+            while (true) {
+                const msgs = await channel.messages.fetch({ limit: 100, before });
+                if (msgs.size === 0) break;
+                scanned += msgs.size;
+                for (const m of msgs.values()) {
+                    if (!BOOST_TYPES.includes(m.type)) continue;
+                    const prev = boosts.get(m.author.id) || { last: 0, count: 0 };
+                    boosts.set(m.author.id, {
+                        last: Math.max(prev.last, m.createdTimestamp),
+                        count: prev.count + 1
+                    });
+                }
+                before = msgs.last().id;
+            }
+        } catch (e) {
+            console.error('부스트토큰조회 메시지 조회 오류:', e.message);
+            return interaction.editReply(`${channel} 채널 메시지를 읽지 못했어요. 봇에 **채널 보기 / 메시지 기록 보기** 권한이 있는지 확인해주세요.`);
+        }
+
+        // 서버에 아직 남아 있고, 현재 부스트 중이 아닌 계정만
+        const members = await guild.members.fetch().catch(() => guild.members.cache);
+        const list = [];
+        for (const [id, info] of boosts) {
+            const mem = members.get(id);
+            if (!mem || mem.premiumSince) continue;
+            list.push({ mem, ...info });
+        }
+        list.sort((a, b) => b.last - a.last);
+
+        if (list.length === 0) {
+            return interaction.editReply(`✅ 만료된 부스트 계정이 없어요. (메시지 ${scanned.toLocaleString()}개 / 부스트 기록 ${boosts.size}명 확인)`);
+        }
+
+        const sec = ms => Math.floor(ms / 1000);
+        let desc = '';
+        for (let i = 0; i < list.length; i++) {
+            const { mem, last, count } = list[i];
+            const line =
+                `**${i + 1}.** <@${mem.id}> \`${mem.user.tag}\`\n` +
+                `　ID \`${mem.id}\` · 가입 <t:${sec(mem.joinedTimestamp)}:d> · 마지막 부스트 <t:${sec(last)}:d> (${count}회)\n`;
+            if (desc.length + line.length > 3800) {
+                desc += `\n…외 ${list.length - i}명은 첨부된 txt 파일에서 확인하세요.`;
+                break;
+            }
+            desc += line;
+        }
+
+        const d = ms => new Date(ms).toISOString().slice(0, 10);
+        const txt =
+            '번호\t태그\tID\t서버가입일\t계정생성일\t마지막부스트\t부스트횟수\n' +
+            list.map(({ mem, last, count }, i) =>
+                `${i + 1}\t${mem.user.tag}\t${mem.id}\t${d(mem.joinedTimestamp)}\t${d(mem.user.createdTimestamp)}\t${d(last)}\t${count}`
+            ).join('\n');
+
+        const embed = new EmbedBuilder()
+            .setTitle(`🔍 부스트 만료 계정 ${list.length}명`)
+            .setDescription(desc)
+            .setColor(SKY_COLOR)
+            .setFooter({ text: `#${channel.name} · 메시지 ${scanned.toLocaleString()}개 확인 · 추방은 직접 진행` });
+
+        return interaction.editReply({
+            embeds: [embed],
+            files: [new AttachmentBuilder(Buffer.from('\uFEFF' + txt, 'utf8'), { name: 'boost_expired.txt' })],
             allowedMentions: { parse: [] }
         });
     }
