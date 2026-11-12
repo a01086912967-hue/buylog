@@ -188,6 +188,62 @@ function purchasesOf(userId, limit = 8) {
     return { total: all.length, list: all.slice(-limit).reverse() };
 }
 
+// 판매자 판매 정보 ($정보 > 판매 정보 버튼)
+function sellerStats(sellerId, recentLimit = 5) {
+    const KST = 9 * 60 * 60 * 1000;
+    const now = Date.now();
+    const k = new Date(now + KST);
+    const todayStart = Date.UTC(k.getUTCFullYear(), k.getUTCMonth(), k.getUTCDate()) - KST;
+    const monthStart = Date.UTC(k.getUTCFullYear(), k.getUTCMonth(), 1) - KST;
+    const weekStart = now - 7 * 24 * 60 * 60 * 1000;
+
+    const mine = db.purchases.filter((p) => p.sellerId === sellerId);
+    const s = {
+        count: 0, spent: 0, robux: 0,
+        today: { count: 0, spent: 0 },
+        week: { count: 0, spent: 0 },
+        month: { count: 0, spent: 0 },
+        byKind: { robux: { count: 0, spent: 0 }, ingame: { count: 0, spent: 0 }, etc: { count: 0, spent: 0 } },
+        buyers: 0, topBuyer: null, best: null, first: null, last: null, rank: null, rankTotal: 0,
+        recent: mine.slice(-recentLimit).reverse(),
+    };
+    const byBuyer = {};
+    for (const p of mine) {
+        s.count += 1;
+        s.spent += p.spent || 0;
+        s.robux += p.robux || 0;
+        const kd = s.byKind[p.kind] || s.byKind.etc;
+        kd.count += 1;
+        kd.spent += p.spent || 0;
+        if (p.ts >= todayStart) { s.today.count += 1; s.today.spent += p.spent || 0; }
+        if (p.ts >= weekStart) { s.week.count += 1; s.week.spent += p.spent || 0; }
+        if (p.ts >= monthStart) { s.month.count += 1; s.month.spent += p.spent || 0; }
+        if (!s.best || (p.spent || 0) > s.best.spent) s.best = { spent: p.spent || 0, ts: p.ts };
+        if (!s.first || p.ts < s.first) s.first = p.ts;
+        if (!s.last || p.ts > s.last) s.last = p.ts;
+        const b = byBuyer[p.buyerId] || (byBuyer[p.buyerId] = { id: p.buyerId, count: 0, spent: 0 });
+        b.count += 1;
+        b.spent += p.spent || 0;
+    }
+    const buyers = Object.values(byBuyer);
+    s.buyers = buyers.length;
+    s.repeatBuyers = buyers.filter((b) => b.count >= 2).length;
+    s.topBuyer = buyers.sort((a, b) => b.count - a.count || b.spent - a.spent)[0] || null;
+    s.avg = s.count ? Math.round(s.spent / s.count) : 0;
+
+    // 판매자 순위 (판매 금액 기준)
+    const totals = {};
+    for (const p of db.purchases) {
+        if (!p.sellerId) continue;
+        totals[p.sellerId] = (totals[p.sellerId] || 0) + (p.spent || 0);
+    }
+    const order = Object.entries(totals).sort((a, b) => b[1] - a[1]);
+    s.rankTotal = order.length;
+    const i = order.findIndex(([id]) => id === sellerId);
+    s.rank = i === -1 ? null : i + 1;
+    return s;
+}
+
 // 관리자가 직접 설정 (값을 준 항목만 덮어씀)
 function setUser(id, patch) {
     const u = ensureUser(id);
@@ -584,6 +640,7 @@ module.exports = {
     getUser,
     recordPurchase,
     purchasesOf,
+    sellerStats,
     weeklyTop,
     hasPurchases,
     getMeta,
