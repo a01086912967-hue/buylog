@@ -1,584 +1,1001 @@
-// 봇 데이터 저장소 (JSON 파일)
-// - 저장 위치: DATA_DIR 환경변수 > Railway Volume(RAILWAY_VOLUME_MOUNT_PATH) > ./data
-// - Railway는 재배포/재시작하면 파일이 지워져요. 데이터를 유지하려면 Volume을 만들어서 연결해야 해요.
-//   (Railway 서비스 > Settings > Volumes > Mount Path: /data)
+const {
+    Client,
+    GatewayIntentBits,
+    EmbedBuilder,
+    SlashCommandBuilder,
+    PermissionFlagsBits,
+    REST,
+    Routes,
+    ActionRowBuilder,
+    ButtonBuilder,
+    ButtonStyle,
+    ContainerBuilder,
+    TextDisplayBuilder,
+    SeparatorBuilder,
+    MediaGalleryBuilder,
+    MediaGalleryItemBuilder,
+    MessageFlags,
+    ChannelType,
+    AttachmentBuilder
+} = require('discord.js');
+const {
+    renderPurchaseCard,
+    renderCalcCard,
+    buildSummary,
+    lookupRobloxUser,
+    fetchRobloxAvatar,
+    fetchBuffer
+} = require('./purchaseCard');
 
-const fs = require('fs');
-const path = require('path');
+// TOKEN 또는 DISCORD_TOKEN 환경변수 모두 인식
+const store = require('./store');
+const tickets = require('./tickets');
+const community = require('./community');
+const web = require('./web');
+const weekly = require('./weekly');
+const { renderProfileCard, renderStatsCard, renderRankCard, renderHistoryCard, ymd } = require('./infoCards');
+const { SERVER_ROLES, resolveGrade } = require('./roles');
 
-// 모든 통계의 시작 시점: 2026-10-28 00:00 (한국 시간)
-const STATS_START_TS = Date.UTC(2026, 9, 27, 15, 0, 0);
+const BOT_TOKEN = (process.env.TOKEN || process.env.DISCORD_TOKEN || '').trim();
 
-const DATA_DIR = process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH || path.join(__dirname, 'data');
-const FILE = path.join(DATA_DIR, 'data.json');
+const client = new Client({
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.GuildInvites,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent
+    ]
+});
 
-const onRailway = !!(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID || process.env.RAILWAY_SERVICE_ID);
-const persistent = !!(process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH) || !onRailway;
+// 기본 설정
+const LOG_CHANNEL_ID = '1457384858065047663';
+// 구매로그 임베드 하단에 표시할 가게 이름 (비워두면 서버 이름을 대문자로 사용)
+const SHOP_NAME_OVERRIDE = 'SODDU SHOP';
+const ROLE_ID = '1457383788236505299';
+const CALCULATOR_ROLE_ID = '1456747541348749342';
+const IMAGE_URL = 'https://i.imgur.com/jokl6LQ.gif';
+const LIGHT_PINK_COLOR = 0xFFB6C1;
+const SKY_COLOR = 0xA9D8FF; // 구매로그 임베드 색 (하늘색)
 
-let db = { users: {}, purchases: [], purchaseSeq: 0, meta: {}, joins: [], guilds: {}, tickets: [], accounts: {}, loginLog: [], sessions: {}, site: {} };
+// 관리자 명령어를 쓸 수 있는 역할 (오너/관리자) - 서버 관리자 권한이 있어도 허용
+const ADMIN_ROLE_IDS = SERVER_ROLES.slice(0, 3).map((r) => r.id);
+function isAdmin(member) {
+    return !!member && (
+        member.permissions.has(PermissionFlagsBits.Administrator) ||
+        ADMIN_ROLE_IDS.some((id) => member.roles.cache.has(id))
+    );
+}
 
-// 13자리 랜덤 숫자 (겹치지 않게)
-function genPurchaseId(used) {
-    for (;;) {
-        const n = Number(String(1 + Math.floor(Math.random() * 9)) + String(Math.floor(Math.random() * 1e12)).padStart(12, '0'));
-        if (!used.has(n)) {
-            used.add(n);
-            return n;
-        }
+// 컴포넌트 V2 / 나만 보기 플래그 (discord.js 버전과 상관없이 숫자로 직접 사용)
+const FLAG_V2 = 1 << 15;
+const FLAG_EPHEMERAL = 1 << 6;
+
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// 서버 아이콘 이미지 (계산기 카드용, 실패 시 null)
+async function getGuildIconBuf(guild) {
+    try {
+        const url = guild && guild.iconURL({ extension: 'png', size: 128 });
+        return url ? await fetchBuffer(url) : null;
+    } catch (e) {
+        return null;
     }
 }
 
-function load() {
+// ==================== 초대 추적 ====================
+// 서버 초대 링크 사용 횟수를 비교해서 누가 초대했는지 기록해요. (봇에 "서버 관리" 권한 필요)
+const inviteCache = new Map(); // guildId -> Map(code -> { uses, inviterId })
+
+async function snapshotInvites(guild) {
+    const invs = await guild.invites.fetch();
+    return new Map(invs.map((i) => [i.code, { uses: i.uses || 0, inviterId: i.inviter ? i.inviter.id : null }]));
+}
+
+async function refreshInvites(guild) {
     try {
-        fs.mkdirSync(DATA_DIR, { recursive: true });
+        inviteCache.set(guild.id, await snapshotInvites(guild));
     } catch (e) {
-        console.error('[데이터] 저장 폴더를 만들 수 없어요:', e.message);
+        console.error('[초대] 초대 목록을 불러오지 못했어요 (봇에 "서버 관리" 권한이 필요해요):', e.message);
     }
-    if (fs.existsSync(FILE)) {
-        try {
-            const parsed = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-            db = {
-                users: parsed.users || {},
-                purchases: Array.isArray(parsed.purchases) ? parsed.purchases : [],
-                purchaseSeq: Number(parsed.purchaseSeq) || 0,
-                meta: parsed.meta && typeof parsed.meta === 'object' ? parsed.meta : {},
-                joins: Array.isArray(parsed.joins) ? parsed.joins : [],
-                guilds: parsed.guilds && typeof parsed.guilds === 'object' ? parsed.guilds : {},
-                tickets: Array.isArray(parsed.tickets) ? parsed.tickets : [],
-                accounts: parsed.accounts && typeof parsed.accounts === 'object' ? parsed.accounts : {},
-                loginLog: Array.isArray(parsed.loginLog) ? parsed.loginLog : [],
-                sessions: parsed.sessions && typeof parsed.sessions === 'object' ? parsed.sessions : {},
-                site: parsed.site && typeof parsed.site === 'object' ? parsed.site : {},
-            };
-            // 구매 아이디가 없는 예전 기록에 순서대로 번호 붙이기
-            // 구매 아이디는 13자리 긴 숫자 (예전 1,2,3.. 번호도 이때 긴 숫자로 바꿔요)
-            const used = new Set(db.purchases.filter((p) => p.id >= 1e12).map((p) => p.id));
-            let migrated = false;
-            for (const p of db.purchases) {
-                if (!(p.id >= 1e12)) {
-                    p.id = genPurchaseId(used);
-                    migrated = true;
+}
+
+client.on('inviteCreate', (invite) => {
+    const guild = invite.guild && client.guilds.cache.get(invite.guild.id);
+    if (guild) refreshInvites(guild);
+});
+
+client.on('guildMemberAdd', async (member) => {
+    if (member.user.bot) return;
+    let inviterId = null;
+    try {
+        const before = inviteCache.get(member.guild.id) || new Map();
+        const now = await snapshotInvites(member.guild);
+        let usedCode = null;
+        for (const [code, v] of now) {
+            if (v.uses > (before.has(code) ? before.get(code).uses : 0)) {
+                usedCode = code;
+                inviterId = v.inviterId;
+                break;
+            }
+        }
+        // 사용 횟수 제한이 있는 초대 링크는 마지막 사용 후 사라지므로, 사라진 링크를 사용한 것으로 판단
+        if (!usedCode) {
+            for (const [code, v] of before) {
+                if (!now.has(code)) {
+                    inviterId = v.inviterId;
+                    break;
                 }
             }
-            if (migrated) setTimeout(save, 0);
-            console.log(`[데이터] 불러오기 완료 (유저 ${Object.keys(db.users).length}명, 구매 ${db.purchases.length}건) - ${FILE}`);
-        } catch (e) {
-            const bak = `${FILE}.corrupt-${Date.now()}`;
-            try {
-                fs.copyFileSync(FILE, bak);
-            } catch (_) {}
-            console.error(`[데이터] 파일이 손상되어 새로 시작해요. 원본은 ${bak} 에 남겨뒀어요:`, e.message);
         }
-    } else {
-        console.log(`[데이터] 저장 파일이 없어 새로 시작해요 - ${FILE}`);
-    }
-    if (!persistent) {
-        console.warn(
-            '[데이터] ⚠️ Railway Volume이 연결되지 않은 것 같아요. 재배포/재시작하면 데이터가 사라져요!\n' +
-            '         Railway 서비스 > Settings > Volumes 에서 Volume을 만들고 Mount Path를 /data 로 설정하세요.'
-        );
-    }
-}
-
-function save() {
-    try {
-        const tmp = `${FILE}.tmp`;
-        fs.writeFileSync(tmp, JSON.stringify(db));
-        fs.renameSync(tmp, FILE);
+        inviteCache.set(member.guild.id, now);
     } catch (e) {
-        console.error('[데이터] 저장 실패:', e.message);
+        console.error('[초대] 초대한 사람을 확인하지 못했어요:', e.message);
     }
-}
+    if (inviterId === member.id) inviterId = null;
+    store.recordJoin(member.id, inviterId);
+    // 환영 메시지 / 자동 역할 (대시보드에서 설정)
+    community.onJoin(member, inviterId).catch((e) => console.error('[환영] 처리 실패:', e.message));
+});
 
-// "10,000원" / "1만" / "700 로벅스" -> 숫자
-function parseNumber(s) {
-    const t = String(s ?? '').replace(/,/g, '');
-    const man = t.match(/(\d+(?:\.\d+)?)\s*만\s*(\d+)?/);
-    if (man) return Math.round(Number(man[1]) * 10000 + (man[2] ? Number(man[2]) : 0));
-    const m = t.match(/\d+(?:\.\d+)?/);
-    return m ? Math.round(Number(m[0])) : 0;
-}
+client.once('ready', async () => {
+    console.log(`[릴리웨이] 봇이 성공적으로 실행되었습니다: ${client.user.tag}`);
+    for (const g of client.guilds.cache.values()) await refreshInvites(g);
 
-function emptyUser() {
-    return { robux: 0, spent: 0, count: 0, invites: 0 };
-}
-
-function getUser(id) {
-    return { ...emptyUser(), ...(db.users[id] || {}) };
-}
-
-function ensureUser(id) {
-    if (!db.users[id]) db.users[id] = emptyUser();
-    return db.users[id];
-}
-
-// 구매 1건 기록 (유저 누적 + 기간 통계용 기록)
-function recordPurchase({ buyerId, kind, qty, price, sellerId, item, guildId }) {
-    const robux = kind === 'robux' ? parseNumber(qty) : 0;
-    const spent = parseNumber(price);
-    const id = genPurchaseId(new Set(db.purchases.map((x) => x.id)));
-    db.purchases.push({
-        id,
-        ts: Date.now(),
-        buyerId,
-        kind,
-        robux,
-        spent,
-        sellerId: sellerId || null,
-        item: String(item || '').slice(0, 80),
-        qty: String(qty ?? '').slice(0, 30),
-        guildId: guildId || null,
-    });
-    const u = ensureUser(buyerId);
-    u.count += 1;
-    u.spent += spent;
-    u.robux += robux;
-    // 판매자도 거래 횟수 +1 (/지급완료에서 판매자를 안 고르면 명령어 쓴 사람이 판매자)
-    if (sellerId) ensureUser(sellerId).count += 1;
-    save();
-    return { robux, spent, id };
-}
-
-// 기간 안에서 구매 금액이 많은 순서 (주간 TOP용)
-function weeklyTop(guildId, fromTs, toTs) {
-    const m = new Map();
-    for (const p of db.purchases) {
-        if (p.ts < fromTs || p.ts >= toTs) continue;
-        if (p.guildId && guildId && p.guildId !== guildId) continue;
-        const e = m.get(p.buyerId) || { id: p.buyerId, spent: 0, robux: 0, count: 0 };
-        e.spent += p.spent || 0;
-        e.robux += p.robux || 0;
-        e.count += 1;
-        m.set(p.buyerId, e);
-    }
-    return [...m.values()].filter((e) => e.spent > 0).sort((a, b) => b.spent - a.spent || b.robux - a.robux || b.count - a.count);
-}
-
-function hasPurchases(guildId) {
-    return db.purchases.some((p) => !p.guildId || p.guildId === guildId);
-}
-
-function getMeta(key) {
-    return db.meta[key];
-}
-
-function setMeta(key, value) {
-    db.meta[key] = value;
-    save();
-}
-
-// 한 사람의 거래 내역 (최신순)
-function purchasesOf(userId, limit = 8) {
-    const all = db.purchases.filter((p) => p.buyerId === userId);
-    return { total: all.length, list: all.slice(-limit).reverse() };
-}
-
-// 관리자가 직접 설정 (값을 준 항목만 덮어씀)
-function setUser(id, patch) {
-    const u = ensureUser(id);
-    for (const k of ['robux', 'spent', 'count', 'invites']) {
-        if (typeof patch[k] === 'number' && Number.isFinite(patch[k]) && patch[k] >= 0) u[k] = Math.round(patch[k]);
-    }
-    save();
-    return { ...u };
-}
-
-// 서버 가입 기록 (초대한 사람이 있으면 초대 수 +1)
-function recordJoin(userId, inviterId) {
-    db.joins.push({ ts: Date.now(), userId, inviterId: inviterId || null });
-    if (inviterId) ensureUser(inviterId).invites += 1;
-    save();
-}
-
-// 구매 금액 순 랭킹 [{ id, ...user }]
-function ranking() {
-    return Object.entries(db.users)
-        .map(([id, u]) => ({ id, ...emptyUser(), ...u }))
-        .filter((u) => u.spent > 0)
-        .sort((a, b) => b.spent - a.spent || b.robux - a.robux || b.count - a.count);
-}
-
-// 유저 순위 (구매 기록이 없으면 null)
-function rankOf(id) {
-    const list = ranking();
-    const i = list.findIndex((u) => u.id === id);
-    return { rank: i === -1 ? null : i + 1, total: list.length };
-}
-
-// sinceTs 이후 서버 통계
-function periodStats(sinceTs, guildId) {
-    const from = Math.max(sinceTs, STATS_START_TS);
-    let robux = 0;
-    let spent = 0;
-    let count = 0;
-    const byBuyer = {};
-    for (const p of db.purchases) {
-        if (p.ts < from) continue;
-        if (guildId && p.guildId && p.guildId !== guildId) continue;
-        robux += p.robux || 0;
-        spent += p.spent || 0;
-        count += 1;
-        byBuyer[p.buyerId] = (byBuyer[p.buyerId] || 0) + (p.spent || 0);
-    }
-    let topBuyer = null;
-    for (const [id, amount] of Object.entries(byBuyer)) {
-        if (!topBuyer || amount > topBuyer.spent) topBuyer = { id, spent: amount };
+    try {
+        const rest = new REST({ version: '10' }).setToken(BOT_TOKEN);
+        await rest.put(
+            Routes.applicationCommands(client.user.id),
+            { body: [] }
+        );
+    } catch (error) {
+        console.error('기존 명령어 삭제 중 오류 발생:', error);
     }
 
-    let joined = 0;
-    const byInviter = {};
-    for (const j of db.joins) {
-        if (j.ts < from) continue;
-        joined += 1;
-        if (j.inviterId) byInviter[j.inviterId] = (byInviter[j.inviterId] || 0) + 1;
-    }
-    let topInviter = null;
-    for (const [id, n] of Object.entries(byInviter)) {
-        if (!topInviter || n > topInviter.count) topInviter = { id, count: n };
+    // 예전 버전이 서버(길드) 전용으로 등록해 둔 명령어 정리 (/지급완료 중복 방지)
+    for (const g of client.guilds.cache.values()) {
+        try {
+            await g.commands.set([]);
+        } catch (error) {
+            console.error('서버 전용 명령어 정리 중 오류 발생:', error.message);
+        }
     }
 
-    return { from, robux, spent, count, topBuyer, joined, topInviter };
-}
+    const logCommand = new SlashCommandBuilder()
+        .setName('지급완료')
+        .setDescription('구매 완료 로그를 전송합니다.')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .addUserOption(option => option.setName('구매자').setDescription('구매한 유저').setRequired(true))
+        .addStringOption(option =>
+            option.setName('종류')
+                .setDescription('구매 종류')
+                .setRequired(true)
+                .addChoices(
+                    { name: '로벅스 구매', value: 'robux' },
+                    { name: '인게임 상품 구매', value: 'ingame' },
+                    { name: '기타 구매', value: 'etc' }
+                )
+        )
+        .addStringOption(option => option.setName('상품').setDescription('구매한 상품명 (로벅스는 "로벅스"라고 입력)').setRequired(true))
+        .addStringOption(option => option.setName('수량').setDescription('구매한 수량 (로벅스는 로벅스 수량)').setRequired(true))
+        .addStringOption(option => option.setName('금액').setDescription('사용된 금액').setRequired(true))
+        .addStringOption(option => option.setName('로블아이디').setDescription('구매자의 로블록스 아이디 (없으면 X 입력 → 디스코드 프사만 표시)').setRequired(true))
+        .addUserOption(option => option.setName('판매자').setDescription('해당 관리 판매자').setRequired(false));
 
-// ==================== 티켓 (대시보드 설정 + 기록) ====================
-const emptyTicketConfig = () => ({ counter: 0, panels: [] });
+    const panelCommand = new SlashCommandBuilder()
+        .setName('패널')
+        .setDescription('안내 패널을 생성합니다.')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
 
-// 서버의 티켓 설정 (복사본을 돌려줘요)
-function getTicketConfig(guildId) {
-    const g = db.guilds[guildId];
-    return JSON.parse(JSON.stringify(g && g.tickets ? g.tickets : emptyTicketConfig()));
-}
+    const infoSetCommand = new SlashCommandBuilder()
+        .setName('정보설정')
+        .setDescription('유저의 구매 정보를 직접 설정합니다. (입력한 항목만 변경, 아무것도 안 넣으면 현재 값 확인)')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .addUserOption(option => option.setName('유저').setDescription('설정할 유저').setRequired(true))
+        .addIntegerOption(option => option.setName('로벅스').setDescription('구매한 로벅스 총 수량').setMinValue(0).setRequired(false))
+        .addIntegerOption(option => option.setName('금액').setDescription('총 구매 금액(원) - 인게임/기타/로벅스 합계').setMinValue(0).setRequired(false))
+        .addIntegerOption(option => option.setName('거래횟수').setDescription('총 거래 횟수').setMinValue(0).setRequired(false))
+        .addIntegerOption(option => option.setName('초대수').setDescription('초대한 사람 수').setMinValue(0).setRequired(false));
 
-function saveTicketConfig(guildId, cfg) {
-    if (!db.guilds[guildId]) db.guilds[guildId] = {};
-    db.guilds[guildId].tickets = cfg;
-    save();
-}
+    const backupCommand = new SlashCommandBuilder()
+        .setName('데이터백업')
+        .setDescription('저장된 구매/통계 데이터 파일(data.json)을 받아옵니다.')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
 
-// 티켓 번호 +1 (서버별)
-function nextTicketNumber(guildId) {
-    if (!db.guilds[guildId]) db.guilds[guildId] = {};
-    const g = db.guilds[guildId];
-    if (!g.tickets) g.tickets = emptyTicketConfig();
-    g.tickets.counter = (g.tickets.counter || 0) + 1;
-    save();
-    return g.tickets.counter;
-}
+    await client.application.commands.create(logCommand);
+    await client.application.commands.create(infoSetCommand);
+    await client.application.commands.create(backupCommand);
+    await client.application.commands.create(panelCommand);
+    console.log('슬래시 명령어 등록 완료');
 
-function addTicket(t) {
-    db.tickets.push({ ...t, closed: false, deleted: false, claimedBy: null, closedBy: null, closedTs: null });
-    save();
-}
+    // 티켓 / 퇴장 메시지 + 웹 대시보드 시작
+    tickets.init(client);
+    community.init(client);
+    web.start(client);
+    weekly.start(client);
+});
 
-function findTicket(channelId) {
-    return db.tickets.find((t) => t.channelId === channelId) || null;
-}
+client.on('interactionCreate', async interaction => {
 
-function closeTicket(channelId, closedBy) {
-    const t = findTicket(channelId);
-    if (!t || t.closed || t.deleted) return null;
-    t.closed = true;
-    t.closedBy = closedBy || null;
-    t.closedTs = Date.now();
-    save();
-    return t;
-}
+    // 티켓 (패널 버튼·선택기 / 양식 / 닫기 / 다시 열기 / 삭제) - 대시보드에서 설정한 대로 동작
+    if (await tickets.handleInteraction(interaction)) return;
 
-function reopenTicket(channelId) {
-    const t = findTicket(channelId);
-    if (!t || t.deleted || !t.closed) return null;
-    t.closed = false;
-    t.closedBy = null;
-    t.closedTs = null;
-    save();
-    return t;
-}
+    if (interaction.isButton()) {
 
-function markTicketDeleted(channelId, by) {
-    const t = findTicket(channelId);
-    if (!t) return null;
-    t.deleted = true;
-    t.closed = true;
-    t.closedBy = t.closedBy || by || null;
-    t.closedTs = t.closedTs || Date.now();
-    save();
-    return t;
-}
+        // $랭킹 [이전][다음]: 명령어를 친 사람 또는 관리자만
+        if (interaction.customId.startsWith('rank:')) {
+            const [, pageStr, uid] = interaction.customId.split(':');
+            if (interaction.user.id !== uid && !isAdmin(interaction.member)) {
+                return interaction.reply({ content: '명령어를 사용한 사람 또는 관리자만 누를 수 있어요.', flags: FLAG_EPHEMERAL }).catch(() => {});
+            }
+            await interaction.deferUpdate().catch(() => {});
+            try {
+                const r = await buildRankFile(interaction.guild, parseInt(pageStr, 10) || 0);
+                await interaction.editReply({
+                    flags: FLAG_V2,
+                    components: [rankCard(r.page, r.pages, uid, r.file.name)],
+                    files: [r.file],
+                    attachments: [],
+                    allowedMentions: { parse: [] }
+                });
+            } catch (e) {
+                console.error('랭킹 페이지 전환 실패:', e);
+                await interaction.followUp({ content: '랭킹을 불러오는 중 오류가 났어요.', flags: FLAG_EPHEMERAL }).catch(() => {});
+            }
+            return;
+        }
 
-function getOpenTickets(guildId) {
-    return db.tickets.filter((t) => t.guildId === guildId && !t.closed && !t.deleted);
-}
+        // $통계 [웹 대시보드]: 관리자만 / 누른 사람에게만 보이는 임베드로 기능 소개 + 링크
+        if (interaction.customId === 'stat:web') {
+            if (!isAdmin(interaction.member)) {
+                return interaction.reply({ content: '관리자만 누를 수 있어요.', flags: FLAG_EPHEMERAL }).catch(() => {});
+            }
+            const url = `${siteBase()}/#/g/${interaction.guildId}`;
+            const embed = new EmbedBuilder()
+                .setColor(SKY_COLOR)
+                .setTitle('웹 대시보드')
+                .setDescription(
+                    `디스코드 명령어 없이, 웹에서 서버를 한눈에 보고 설정할 수 있어요.\n\n` +
+                    `**서버 통계**\n-# 기간별 판매량·판매 금액·거래 횟수·가입·초대 현황\n\n` +
+                    `**구매 로그**\n-# 구매 ID로 검색, 티켓 안 대화 기록까지 확인\n\n` +
+                    `**유저 정보**\n-# 유저별 구매·초대·등급 조회와 수정\n\n` +
+                    `**티켓 설정**\n-# 패널·선택기(항목별 질문/카테고리)·양식·권한·닫기/삭제 문구\n\n` +
+                    `**환영 / 퇴장 메시지 · 자동응답**\n-# 환영·퇴장 임베드, 자동 역할, 명령어 + 글 자동응답\n\n` +
+                    `[웹 대시보드 열기](${url})`
+                );
+            const row = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setLabel('웹 대시보드 열기').setStyle(ButtonStyle.Link).setURL(url)
+            );
+            return interaction.reply({ embeds: [embed], components: [row], flags: FLAG_EPHEMERAL }).catch((e) => console.error('웹 대시보드 안내 실패:', e.message));
+        }
 
-function getRecentTickets(guildId, n = 20) {
-    return db.tickets.filter((t) => t.guildId === guildId).slice(-n).reverse();
-}
+        // $통계 [새로고침]: 관리자만
+        if (interaction.customId === 'stat:refresh') {
+            if (!isAdmin(interaction.member)) {
+                return interaction.reply({ content: '관리자만 누를 수 있어요.', flags: FLAG_EPHEMERAL }).catch(() => {});
+            }
+            await interaction.deferUpdate().catch(() => {});
+            try {
+                const file = await buildStatsFile(interaction.guild);
+                await interaction.editReply({
+                    flags: FLAG_V2,
+                    components: [statsCard(interaction.guild, file.name)],
+                    files: [file],
+                    attachments: [],
+                    allowedMentions: { parse: [] }
+                });
+            } catch (e) {
+                console.error('통계 새로고침 실패:', e);
+                await interaction.followUp({ content: '통계를 불러오는 중 오류가 났어요.', flags: FLAG_EPHEMERAL }).catch(() => {});
+            }
+            return;
+        }
 
+        // $정보 아래 버튼: "내 거래 조회"(hist:) <-> "정보로 돌아가기"(prof:)
+        // 같은 메시지의 사진이 정보 <-> 거래 내역으로 바뀌어요. 프로필 주인 본인 또는 관리자만 누를 수 있어요.
+        if (interaction.customId.startsWith('hist:') || interaction.customId.startsWith('prof:')) {
+            const toHistory = interaction.customId.startsWith('hist:');
+            const ownerId = interaction.customId.slice(5);
+            if (interaction.user.id !== ownerId && !isAdmin(interaction.member)) {
+                return interaction.reply({ content: '본인 또는 관리자만 누를 수 있어요.', flags: FLAG_EPHEMERAL }).catch(() => {});
+            }
+            await interaction.deferUpdate().catch(() => {});
+            try {
+                const file = toHistory
+                    ? await buildHistoryFileFor(interaction.guild, ownerId)
+                    : await buildProfileFileFor(interaction.guild, await client.users.fetch(ownerId));
+                await interaction.editReply({
+                    flags: FLAG_V2,
+                    components: [v2Card(ownerId, file.name, toHistory ? 'history' : 'profile')],
+                    files: [file],
+                    attachments: [],
+                    allowedMentions: { parse: [] }
+                });
+            } catch (e) {
+                console.error('정보/거래 내역 전환 실패:', e);
+                await interaction.followUp({ content: '이미지를 바꾸는 중 오류가 났어요. 잠시 후 다시 시도해 주세요.', flags: FLAG_EPHEMERAL }).catch(() => {});
+            }
+            return;
+        }
 
-// ==================== 서버별 커뮤니티 설정 (환영/퇴장/자동응답) ====================
-function getCommunity(guildId) {
-    const g = db.guilds[guildId];
-    return JSON.parse(JSON.stringify((g && g.community) || {}));
-}
+        if (interaction.customId === 'notice_btn') {
+            await interaction.reply({
+                content:
+                    `### <#1457384179535712473> 미작성 시 주의사항\n` +
+                    `-# - 2일 내 작성하지 않으면 <@&1550129139086794852> 지급돼요.\n` +
+                    `-# - 해당 역할 보유 시 다음 번 구매가 어려울 수 있어요.`,
+                ephemeral: true
+            });
+            return;
+        }
 
-function saveCommunity(guildId, cfg) {
-    if (!db.guilds[guildId]) db.guilds[guildId] = {};
-    db.guilds[guildId].community = cfg;
-    save();
-}
+        if (interaction.customId === 'panel_inquiry') {
+            await interaction.reply({ content: '문의사항이 있다면 관리자에게 문의해주세요.', ephemeral: true });
+            return;
+        }
 
-// ==================== 구매 기록 조회 (대시보드) ====================
-const inGuild = (p, guildId) => !guildId || !p.guildId || p.guildId === guildId;
+        if (interaction.customId === 'panel_apply') {
+            await interaction.reply({ content: '신청을 진행하려면 안내사항을 먼저 확인해주세요.', ephemeral: true });
+            return;
+        }
 
-const purchaseCode = (id) => String(id || '');
+        if (interaction.customId === 'panel_rules') {
+            await interaction.reply({ content: '서버 이용 규정을 확인해주세요.', ephemeral: true });
+            return;
+        }
 
-function getPurchase(id) {
-    return db.purchases.find((p) => p.id === id) || null;
-}
+        if (interaction.customId === 'panel_help') {
+            await interaction.reply({ content: '도움이 필요한 경우 관리자에게 문의해주세요.', ephemeral: true });
+            return;
+        }
 
-// 티켓 안 대화 기록을 구매 기록에 붙여요 (최대 300줄)
-function attachChat(id, chat) {
-    const p = getPurchase(id);
-    if (!p || !chat || !Array.isArray(chat.messages)) return false;
-    p.chat = {
-        channelName: String(chat.channelName || '').slice(0, 100),
-        ticketNumber: chat.ticketNumber || null,
-        messages: chat.messages.slice(0, 300).map((m) => ({
-            ts: Number(m.ts) || 0,
-            name: String(m.name || '').slice(0, 60),
-            bot: !!m.bot,
-            text: String(m.text || '').slice(0, 600),
-            files: (Array.isArray(m.files) ? m.files : []).slice(0, 5).map((f) => ({ name: String(f.name || '').slice(0, 80), url: String(f.url || '').slice(0, 400) })),
-        })),
-    };
-    save();
+        return;
+    }
+
+    if (!interaction.isChatInputCommand()) return;
+
+    // /패널
+    if (interaction.commandName === '패널') {
+
+        const title = new TextDisplayBuilder().setContent('## 서버 이용 안내');
+        const description = new TextDisplayBuilder().setContent(
+            '필요한 메뉴를 아래에서 선택해주세요.\n' +
+            '각 버튼을 눌러 관련 안내를 확인할 수 있습니다.'
+        );
+
+        const panelButtons = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('panel_inquiry').setLabel('문의').setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId('panel_apply').setLabel('신청').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('panel_rules').setLabel('규정').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('panel_help').setLabel('도움말').setStyle(ButtonStyle.Secondary)
+        );
+
+        const panel = new ContainerBuilder()
+            .setAccentColor(LIGHT_PINK_COLOR)
+            .addTextDisplayComponents(title)
+            .addTextDisplayComponents(description)
+            .addActionRowComponents(panelButtons);
+
+        await interaction.channel.send({
+            components: [panel],
+            flags: MessageFlags.IsComponentsV2
+        });
+
+        await interaction.reply({ content: '패널을 생성했습니다.', ephemeral: true });
+
+        return;
+    }
+
+    // /정보설정
+    if (interaction.commandName === '정보설정') {
+        if (!isAdmin(interaction.member)) {
+            return interaction.reply({ content: '이 명령어를 사용할 권한이 없습니다.', ephemeral: true });
+        }
+        const target = interaction.options.getUser('유저');
+        const patch = {};
+        for (const [opt, key] of [['로벅스', 'robux'], ['금액', 'spent'], ['거래횟수', 'count'], ['초대수', 'invites']]) {
+            const v = interaction.options.getInteger(opt);
+            if (v !== null) patch[key] = v;
+        }
+        const changed = Object.keys(patch).length > 0;
+        const u = changed ? store.setUser(target.id, patch) : store.getUser(target.id);
+        return interaction.reply({
+            ephemeral: true,
+            content:
+                `${changed ? '✅ 저장했어요.' : 'ℹ️ 현재 값이에요.'} ${target} 님\n` +
+                `• 구매한 로벅스: ${u.robux.toLocaleString()} R$\n` +
+                `• 총 구매 금액: ${u.spent.toLocaleString()}원\n` +
+                `• 총 거래 횟수: ${u.count.toLocaleString()}회\n` +
+                `• 초대한 사람 수: ${u.invites.toLocaleString()}명`,
+            allowedMentions: { parse: [] }
+        });
+    }
+
+    // /데이터백업
+    if (interaction.commandName === '데이터백업') {
+        if (!isAdmin(interaction.member)) {
+            return interaction.reply({ content: '이 명령어를 사용할 권한이 없습니다.', ephemeral: true });
+        }
+        const fs = require('fs');
+        if (!fs.existsSync(store.FILE)) {
+            return interaction.reply({ content: '아직 저장된 데이터가 없어요.', ephemeral: true });
+        }
+        return interaction.reply({
+            ephemeral: true,
+            content:
+                `저장 위치: \`${store.FILE}\`\n` +
+                (store.persistent ? '' : '⚠️ Railway Volume이 연결되지 않아 재배포하면 데이터가 사라져요. (Volume 연결 필요)'),
+            files: [new AttachmentBuilder(store.FILE, { name: 'data.json' })]
+        });
+    }
+
+    // /지급완료
+    if (interaction.commandName === '지급완료') {
+
+        await interaction.reply({ content: '지급완료를 처리 중입니다.', ephemeral: true });
+
+        const buyer = interaction.options.getUser('구매자');
+        const kind = interaction.options.getString('종류');
+        const item = interaction.options.getString('상품');
+        const count = interaction.options.getString('수량');
+        const price = interaction.options.getString('금액');
+        const robloxInput = interaction.options.getString('로블아이디').trim();
+        const seller = interaction.options.getUser('판매자') || interaction.user;
+
+        // 1) 로블록스 아이디 확인 (아바타 필수 → 없는 아이디면 아무것도 처리하지 않음)
+        const skipRoblox = robloxInput.toLowerCase() === 'x'; // X 입력 시 로블록스 없이 디스코드 프사만
+        const roblox = skipRoblox ? { status: 'skip' } : await lookupRobloxUser(robloxInput);
+        if (roblox.status === 'notfound') {
+            return interaction.editReply({
+                content: `❌ 로블록스 아이디 \`${robloxInput}\` 을(를) 찾을 수 없어요. 철자를 확인하고 다시 입력해 주세요. (아무것도 처리되지 않았어요)`
+            });
+        }
+
+        // 2) 역할 부여 (기존 동작 그대로)
+        let buyerMember = null;
+        try {
+            buyerMember = await interaction.guild.members.fetch(buyer.id);
+            if (buyerMember && !buyerMember.roles.cache.has(ROLE_ID)) {
+                await buyerMember.roles.add(ROLE_ID);
+            }
+        } catch (error) {
+            console.error('역할 부여 중 오류 발생:', error);
+        }
+
+        const logChannel = interaction.guild.channels.cache.get(LOG_CHANNEL_ID);
+        if (!logChannel) {
+            return interaction.followUp({ content: '로그 채널을 찾을 수 없습니다.', ephemeral: true });
+        }
+
+        // 3) 구매 감사 카드 이미지 생성
+        const summary = buildSummary(kind, item, count);
+        let cardBuffer = null;
+        let warn = '';
+
+        // 구매 정보 저장 ($정보 / $통계 / $랭킹에 사용)
+        let statWarn = '';
+        let purchaseId = null;
+        try {
+            const rec = store.recordPurchase({ buyerId: buyer.id, kind, qty: count, price, sellerId: seller.id, item, guildId: interaction.guildId });
+            purchaseId = rec.id;
+            // 티켓 채널에서 실행했다면 그 안의 대화 내용을 구매 기록에 같이 저장 (웹 대시보드 구매 로그에서 볼 수 있어요)
+            try {
+                // 릴리웨이 티켓 + 티켓툴(TicketTool) 등 다른 봇이 만든 티켓 채널(이름에 ticket/티켓/closed 포함)도 저장
+                const tk = store.findTicket(interaction.channelId);
+                const chName = String(interaction.channel.name || '');
+                if (tk || /ticket|티켓|closed/i.test(chName)) {
+                    const messages = await tickets.collectChat(interaction.channel);
+                    const num = tk ? tk.number : parseInt((chName.match(/\d+/) || [])[0], 10) || null;
+                    const saved = store.attachChat(rec.id, { channelName: chName, ticketNumber: num, messages });
+                    console.log(`[구매기록] ${store.purchaseCode(rec.id)} 대화 ${messages.length}줄 저장 (${chName}) ${saved ? '' : '실패'}`);
+                } else {
+                    console.log(`[구매기록] ${store.purchaseCode(rec.id)} 티켓 채널이 아니라 대화를 저장하지 않았어요 (${chName})`);
+                }
+            } catch (e) {
+                console.error('티켓 대화 저장 실패:', e.message);
+            }
+            if (rec.spent === 0 || (kind === 'robux' && rec.robux === 0)) {
+                statWarn = '⚠️ 금액/수량을 숫자로 읽지 못해 통계에 0으로 기록됐어요. /정보설정 으로 직접 고쳐주세요.';
+            }
+        } catch (e) {
+            console.error('구매 기록 저장 실패:', e);
+            statWarn = '⚠️ 구매 기록을 저장하지 못했어요. (통계에 반영되지 않았어요)';
+        }
+
+        try {
+            let sellerMember = null;
+            try {
+                sellerMember = await interaction.guild.members.fetch(seller.id);
+            } catch (e) {}
+
+            const avatarOpts = { extension: 'png', size: 256 };
+            const buyerAvatarUrl = (buyerMember || buyer).displayAvatarURL(avatarOpts);
+            const sellerAvatarUrl = (sellerMember || seller).displayAvatarURL(avatarOpts);
+            const guildIconUrl = interaction.guild.iconURL({ extension: 'png', size: 128 });
+
+            const tryBuf = (url) => (url ? fetchBuffer(url).catch(() => null) : Promise.resolve(null));
+            const [buyerAvatarBuf, sellerAvatarBuf, guildIconBuf] = await Promise.all([
+                tryBuf(buyerAvatarUrl),
+                tryBuf(sellerAvatarUrl),
+                tryBuf(guildIconUrl)
+            ]);
+
+            let robloxAvatarBuf = null;
+            if (roblox.status === 'ok') {
+                robloxAvatarBuf = await fetchRobloxAvatar(roblox.id);
+            }
+            if (!robloxAvatarBuf) {
+                robloxAvatarBuf = buyerAvatarBuf; // 로블록스 서버 문제 시 디스코드 프사로 대체
+                if (!skipRoblox) warn = '⚠️ 로블록스 아바타를 불러오지 못해 디스코드 프사로 대체했어요. (로블록스 서버 응답 문제일 수 있어요)';
+            }
+
+            cardBuffer = await renderPurchaseCard({
+                kind,
+                buyerName: buyer.username, // 서버 닉네임이 아닌 디스코드 아이디
+                buyerAvatarBuf,
+                robloxAvatarBuf,
+                hideBadge: skipRoblox,
+                item,
+                count,
+                price,
+                sellerName: seller.username, // 서버 닉네임이 아닌 디스코드 아이디
+                sellerAvatarBuf,
+                guildName: interaction.guild.name,
+                guildIconBuf
+            });
+        } catch (error) {
+            console.error('구매 카드 이미지 생성 실패:', error);
+        }
+
+        // 4) 구매 로그 전송
+        if (cardBuffer) {
+            // 이미지를 임베드 안에 넣고, 아래에 작은 글씨로 "서버 프로필 + 가게 이름"만 표시
+            const shopName = (SHOP_NAME_OVERRIDE || interaction.guild.name).toUpperCase();
+            const guildIcon = interaction.guild.iconURL({ extension: 'png', size: 64 });
+
+            // 디스코드 아이디에 로블록스 프로필 링크 연결 (X 입력 시 링크 없이 아이디만)
+            const titleName = roblox.status === 'ok'
+                ? `[${buyer.username}](https://www.roblox.com/users/${roblox.id}/profile)`
+                : buyer.username;
+
+            const cardEmbed = new EmbedBuilder()
+                .setColor(SKY_COLOR)
+                .setDescription(`## ${titleName}님 ${summary} 구매 감사합니다 .ᐟ.ᐟ`.slice(0, 4000))
+                .setImage('attachment://purchase.png')
+                .setFooter((() => {
+                    const text = purchaseId ? `구매 ID ${store.purchaseCode(purchaseId)} · ${shopName}` : shopName;
+                    return guildIcon ? { text, iconURL: guildIcon } : { text };
+                })())
+                .setTimestamp();
+
+            await logChannel.send({
+                content: `${buyer}`,
+                embeds: [cardEmbed],
+                files: [new AttachmentBuilder(cardBuffer, { name: 'purchase.png' })]
+            });
+        } else {
+            // 이미지 생성 실패 시 기존 임베드로 대체
+            const logEmbed = new EmbedBuilder()
+                .setColor(LIGHT_PINK_COLOR)
+                .setDescription(
+                    `${buyer}, ${item} (${count}) 구매 감사합니다.\n\n` +
+                    `사용된 금액 : ${price}\n\n` +
+                    `해당 관리 판매자: ${seller}`
+                )
+                .setImage(IMAGE_URL);
+            if (purchaseId) logEmbed.setFooter({ text: `구매 ID ${store.purchaseCode(purchaseId)}` });
+
+            await logChannel.send({ content: `${buyer}`, embeds: [logEmbed] });
+            warn = '⚠️ 구매 카드 이미지 생성에 실패해 기존 임베드로 전송했어요. (폰트 파일/패키지 설치를 확인해 주세요)';
+        }
+
+        if (warn) {
+            interaction.followUp({ content: warn, ephemeral: true }).catch(() => {});
+        }
+        if (statWarn) {
+            interaction.followUp({ content: statWarn, ephemeral: true }).catch(() => {});
+        }
+
+        const replyEmbed = new EmbedBuilder()
+            .setColor(LIGHT_PINK_COLOR)
+            .setDescription(
+                `아이템이 정상적으로 지급되었습니다.\n` +
+                `https://discord.com/channels/1456729030459134115/1457384179535712473 작성은 필수입니다.`
+            );
+        // 맨 아래: 구매 아이디 + 서버 프로필 + 서버 이름
+        {
+            const shop = (SHOP_NAME_OVERRIDE || interaction.guild.name).toUpperCase();
+            const icon = interaction.guild.iconURL({ extension: 'png', size: 64 });
+            const text = purchaseId ? `구매 ID ${store.purchaseCode(purchaseId)} · ${shop}` : shop;
+            replyEmbed.setFooter(icon ? { text, iconURL: icon } : { text });
+        }
+
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('notice_btn').setLabel('주의사항').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setLabel('후기작성').setStyle(ButtonStyle.Link).setURL(`https://discord.com/channels/${interaction.guildId}/1457384179535712473`)
+        );
+
+        await interaction.channel.send({
+            content: `${buyer}`,
+            embeds: [replyEmbed],
+            components: [row]
+        });
+
+        await interaction.editReply({ content: '✅ 지급완료 처리가 완료되었습니다.' }).catch(() => {});
+
+        return;
+    }
+
+});
+
+// ==================== $정보 / $통계 / $랭킹 ====================
+const infoCooldown = new Map();
+function infoCooldownOk(userId) {
+    const now = Date.now();
+    if (now - (infoCooldown.get(userId) || 0) < 4000) return false;
+    infoCooldown.set(userId, now);
     return true;
 }
 
-function getPurchases(guildId, { limit = 100, buyerId = null } = {}) {
-    const out = [];
-    for (let i = db.purchases.length - 1; i >= 0 && out.length < limit; i--) {
-        const p = db.purchases[i];
-        if (!inGuild(p, guildId)) continue;
-        if (buyerId && p.buyerId !== buyerId) continue;
-        out.push(p);
-    }
-    return out;
-}
+const shopNameOf = (guild) => SHOP_NAME_OVERRIDE || guild.name;
 
-// 최근 N일(한국 시간 기준 날짜) 일별 합계
-function dailySeries(guildId, days = 14) {
-    const DAY = 24 * 60 * 60 * 1000;
-    const KST = 9 * 60 * 60 * 1000;
-    const todayStart = Math.floor((Date.now() + KST) / DAY) * DAY - KST;
-    const list = [];
-    for (let i = days - 1; i >= 0; i--) list.push({ ts: todayStart - i * DAY, spent: 0, robux: 0, count: 0 });
-    for (const p of db.purchases) {
-        if (!inGuild(p, guildId)) continue;
-        const idx = Math.floor((p.ts - (todayStart - (days - 1) * DAY)) / DAY);
-        if (idx >= 0 && idx < days) {
-            list[idx].spent += p.spent || 0;
-            list[idx].robux += p.robux || 0;
-            list[idx].count += 1;
-        }
-    }
-    return list;
-}
-
-function allUsers() {
-    return Object.entries(db.users).map(([id, u]) => ({ id, ...emptyUser(), ...u }));
-}
-
-function countJoinsSince(guildId, sinceTs) {
-    return db.joins.filter((j) => j.ts >= sinceTs).length;
-}
-
-// ==================== 계정 / 로그인 기록 / 세션 ====================
-const newId = () => require('crypto').randomBytes(8).toString('hex');
-const sha = (s) => require('crypto').createHash('sha256').update(String(s)).digest('hex');
-
-function getAccount(id) {
-    return db.accounts[id] || null;
-}
-function findAccountByUsername(username) {
-    const u = String(username || '').toLowerCase();
-    return Object.values(db.accounts).find((a) => a.username && a.username === u) || null;
-}
-function findAccountByDiscord(discordId) {
-    return Object.values(db.accounts).find((a) => a.discordId === discordId) || null;
-}
-function createAccount({ username = null, pw = null, discordId = null, name = '', avatar = null }) {
-    const id = newId();
-    db.accounts[id] = {
-        id,
-        username: username ? String(username).toLowerCase() : null,
-        name: String(name || username || '').slice(0, 40),
-        pw,
-        discordId,
-        avatar,
-        createdTs: Date.now(),
-        lastLoginTs: null,
-        lastIp: null,
-    };
-    save();
-    return db.accounts[id];
-}
-function updateAccount(id, patch) {
-    const a = db.accounts[id];
-    if (!a) return null;
-    Object.assign(a, patch);
-    save();
-    return a;
-}
-function deleteAccount(id) {
-    delete db.accounts[id];
-    for (const [k, s] of Object.entries(db.sessions)) if (s.accountId === id) delete db.sessions[k];
-    save();
-}
-function allAccounts() {
-    return Object.values(db.accounts);
-}
-
-const LOG_MAX = 3000;
-function addLog(entry) {
-    db.loginLog.push({ ts: Date.now(), ...entry });
-    if (db.loginLog.length > LOG_MAX) db.loginLog.splice(0, db.loginLog.length - LOG_MAX);
-    save();
-}
-function getLogs({ limit = 200, type = null, q = '' } = {}) {
-    const needle = String(q || '').toLowerCase();
-    const out = [];
-    for (let i = db.loginLog.length - 1; i >= 0 && out.length < limit; i--) {
-        const l = db.loginLog[i];
-        if (type && l.type !== type) continue;
-        if (needle && !`${l.username || ''} ${l.name || ''} ${l.discordId || ''} ${l.ip || ''} ${l.detail || ''}`.toLowerCase().includes(needle)) continue;
-        out.push(l);
-    }
-    return out;
-}
-// 최근 실패 횟수 (무차별 대입 방지용)
-function recentFails(key, sinceTs) {
-    let n = 0;
-    for (let i = db.loginLog.length - 1; i >= 0; i--) {
-        const l = db.loginLog[i];
-        if (l.ts < sinceTs) break;
-        if (l.type === 'fail' && (l.ip === key || l.username === key)) n++;
-    }
-    return n;
-}
-function recentCount(type, ip, sinceTs) {
-    let n = 0;
-    for (let i = db.loginLog.length - 1; i >= 0; i--) {
-        const l = db.loginLog[i];
-        if (l.ts < sinceTs) break;
-        if (l.type === type && l.ip === ip) n++;
-    }
-    return n;
-}
-
-const SESSION_MS = 7 * 24 * 60 * 60 * 1000;
-function createSession(accountId) {
-    const sid = require('crypto').randomBytes(32).toString('hex');
-    db.sessions[sha(sid)] = { accountId, exp: Date.now() + SESSION_MS };
-    save();
-    return sid;
-}
-function getSessionAccount(sid) {
-    if (!sid) return null;
-    const k = sha(sid);
-    const s = db.sessions[k];
-    if (!s) return null;
-    if (s.exp < Date.now()) {
-        delete db.sessions[k];
+async function avatarBufOf(memberOrUser) {
+    if (!memberOrUser) return null;
+    try {
+        return await fetchBuffer(memberOrUser.displayAvatarURL({ extension: 'png', size: 256 }));
+    } catch (e) {
         return null;
     }
-    return db.accounts[s.accountId] || null;
 }
-function deleteSession(sid) {
-    if (!sid) return;
-    const k = sha(sid);
-    if (db.sessions[k]) {
-        delete db.sessions[k];
-        save();
+
+async function usernameOf(id) {
+    if (!id) return '';
+    try {
+        return (await client.users.fetch(id)).username;
+    } catch (e) {
+        return '알 수 없음';
     }
 }
-function cleanSessions() {
+
+// 컴포넌트 V2 카드: 컨테이너 안에 사진 + 구분선 + 버튼
+function v2Card(ownerId, fileName, mode) {
+    const button = mode === 'profile'
+        ? { type: 2, style: 1, label: '내 거래 조회', custom_id: `hist:${ownerId}` }
+        : { type: 2, style: 2, label: '정보로 돌아가기', custom_id: `prof:${ownerId}` };
+    return {
+        type: 17,
+        accent_color: 0x7cc4ff,
+        components: [
+            { type: 12, items: [{ media: { url: `attachment://${fileName}` } }] },
+            { type: 14, divider: true, spacing: 2 },
+            { type: 1, components: [button] }
+        ]
+    };
+}
+
+// 만들어 둔 이미지를 1분 동안 재사용 (버튼을 왔다 갔다 해도 빠르게)
+const imgCache = new Map();
+async function cached(key, sig, make) {
+    const hit = imgCache.get(key);
+    if (hit && hit.sig === sig && Date.now() - hit.at < 60000) return hit.buf;
+    const buf = await make();
+    imgCache.set(key, { sig, buf, at: Date.now() });
+    if (imgCache.size > 200) imgCache.delete(imgCache.keys().next().value);
+    return buf;
+}
+
+async function buildProfileFileFor(guild, target) {
+    const member = await guild.members.fetch(target.id).catch(() => null);
+    const u = store.getUser(target.id);
+    const { rank, total } = store.rankOf(target.id);
+    const sig = `${u.robux}:${u.spent}:${u.count}:${u.invites}:${rank}:${total}`;
+    const buf = await cached(`p${target.id}`, sig, async () =>
+        renderProfileCard({
+            name: target.username, // 서버 닉네임이 아닌 디스코드 아이디
+            avatarBuf: await avatarBufOf(member || target),
+            guildName: shopNameOf(guild),
+            grade: resolveGrade(member),
+            robux: u.robux,
+            spent: u.spent,
+            count: u.count,
+            rank,
+            rankTotal: total,
+            joinedTs: member ? member.joinedTimestamp : null,
+            invites: u.invites
+        })
+    );
+    return new AttachmentBuilder(buf, { name: 'profile.png' });
+}
+
+async function buildProfileFile(message, args) {
+    let target = message.mentions.users.first() || null;
+    if (!target && args[1] && /^\d{15,25}$/.test(args[1])) {
+        target = await client.users.fetch(args[1]).catch(() => null);
+    }
+    if (!target) target = message.author;
+    return buildProfileFileFor(message.guild, target);
+}
+
+// 거래 내역 사진 (최근 15건)
+async function buildHistoryFileFor(guild, ownerId) {
+    const user = await client.users.fetch(ownerId);
+    const u = store.getUser(ownerId);
+    const { list } = store.purchasesOf(ownerId, 15);
+    const sig = `${u.count}:${u.spent}:${u.robux}:${list.length ? list[0].id : 0}`;
+    const buf = await cached(`h${ownerId}`, sig, async () => {
+        const member = guild.members.cache.get(ownerId) || null;
+        const avatarBuf = await fetchBuffer((member || user).displayAvatarURL({ extension: 'png', size: 128 }), 3000).catch(() => null);
+        return renderHistoryCard({
+            name: user.username,
+            avatarBuf,
+            guildName: guild ? shopNameOf(guild) : '',
+            totals: { count: u.count, spent: u.spent, robux: u.robux },
+            rows: list.map((p) => ({ ts: p.ts, kind: p.kind, item: p.item, qty: p.qty, robux: p.robux, spent: p.spent, id: p.id }))
+        });
+    });
+    return new AttachmentBuilder(buf, { name: 'history.png' });
+}
+
+async function buildStatsFile(guild) {
     const now = Date.now();
-    let changed = false;
-    for (const [k, s] of Object.entries(db.sessions)) {
-        if (s.exp < now) {
-            delete db.sessions[k];
-            changed = true;
+    const week = store.periodStats(now - 7 * 24 * 60 * 60 * 1000);
+    const all = store.periodStats(store.STATS_START_TS);
+    const periods = [];
+    for (const [label, stats] of [['최근 7일', week], ['10월 28일 이후', all]]) {
+        periods.push({
+            label,
+            sub: `${ymd(stats.from)} ~ 현재`,
+            stats,
+            topBuyerName: await usernameOf(stats.topBuyer && stats.topBuyer.id),
+            topInviterName: await usernameOf(stats.topInviter && stats.topInviter.id)
+        });
+    }
+    const buf = await renderStatsCard({ guildName: shopNameOf(guild), periods });
+    return new AttachmentBuilder(buf, { name: 'stats.png' });
+}
+
+// 랭킹: 페이지당 10명 (page는 0부터)
+const RANK_PAGE = 10;
+async function buildRankFile(guild, page = 0) {
+    const all = store.ranking();
+    const pages = Math.max(1, Math.ceil(all.length / RANK_PAGE));
+    page = Math.min(Math.max(0, page), pages - 1);
+    const offset = page * RANK_PAGE;
+    const list = all.slice(offset, offset + RANK_PAGE);
+    const entries = await Promise.all(list.map(async (u, i) => {
+        const member = await guild.members.fetch(u.id).catch(() => null);
+        const user = member ? member.user : await client.users.fetch(u.id).catch(() => null);
+        return {
+            rank: offset + i + 1,
+            name: user ? user.username : '알 수 없음',
+            avatarBuf: await avatarBufOf(member || user),
+            grade: resolveGrade(member),
+            spent: u.spent,
+            robux: u.robux
+        };
+    }));
+    const gn = String(shopNameOf(guild) || '').toUpperCase();
+    const sub = `${gn ? gn + '  ·  ' : ''}구매 금액 기준  ·  ${page + 1} / ${pages} 페이지${list.length ? ` (${offset + 1}~${offset + list.length}위)` : ''}`;
+    const buf = await renderRankCard({ guildName: shopNameOf(guild), entries, sub });
+    return { file: new AttachmentBuilder(buf, { name: 'rank.png' }), page, pages };
+}
+
+// 랭킹 카드: 사진 + 구분선 + [이전][다음] 버튼
+function rankCard(page, pages, uid, fileName) {
+    return {
+        type: 17,
+        accent_color: 0x7cc4ff,
+        components: [
+            { type: 12, items: [{ media: { url: `attachment://${fileName}` } }] },
+            { type: 14, divider: true, spacing: 2 },
+            {
+                type: 1,
+                components: [
+                    { type: 2, style: 2, label: '◀ 이전', custom_id: `rank:${page - 1}:${uid}`, disabled: page <= 0 },
+                    { type: 2, style: 1, label: '다음 ▶', custom_id: `rank:${page + 1}:${uid}`, disabled: page >= pages - 1 }
+                ]
+            }
+        ]
+    };
+}
+
+// 웹 대시보드 주소 (PUBLIC_URL > Railway 도메인 > 기본 주소)
+function siteBase() {
+    const b = process.env.PUBLIC_URL || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : 'https://www.sodx.shop');
+    return b.replace(/\/+$/, '');
+}
+
+// 서버 통계 카드: 사진 + 구분선 + [새로고침] [웹 대시보드] (둘 다 관리자만 누를 수 있어요)
+function statsCard(guild, fileName) {
+    const buttons = [
+        { type: 2, style: 1, label: '새로고침', custom_id: 'stat:refresh' },
+        { type: 2, style: 2, label: '웹 대시보드', custom_id: 'stat:web' }
+    ];
+    return {
+        type: 17,
+        accent_color: 0x7cc4ff,
+        components: [
+            { type: 12, items: [{ media: { url: `attachment://${fileName}` } }] },
+            { type: 14, divider: true, spacing: 2 },
+            { type: 1, components: buttons }
+        ]
+    };
+}
+
+// $가격 / $로벅스
+client.on('messageCreate', async message => {
+
+    if (message.author.bot) return;
+
+    // 티켓 채널의 !close / !open / !delete, 그리고 대시보드에서 만든 자동응답
+    if (await tickets.handleMessage(message).catch((e) => { console.error('[티켓] 명령어 오류:', e); return false; })) return;
+    if (await community.handleMessage(message).catch((e) => { console.error('[자동응답] 오류:', e); return false; })) return;
+
+    const args = message.content.trim().split(/\s+/);
+    const command = args[0];
+
+    switch (command) {
+
+        case '$정보':
+        case '$통계':
+        case '$랭킹': {
+            if (!message.guild) return;
+            // $통계는 관리자만 사용할 수 있어요
+            if (command === '$통계' && !isAdmin(message.member)) {
+                return message.reply({ content: '해당 명령어를 사용할 권한이 없습니다.', allowedMentions: { repliedUser: false } });
+            }
+            if (!infoCooldownOk(message.author.id)) return;
+            message.channel.sendTyping().catch(() => {});
+            try {
+                const payload = { flags: FLAG_V2, allowedMentions: { repliedUser: false } };
+                if (command === '$정보') {
+                    // 컴포넌트 V2: 컨테이너 안에 프로필 사진 + 구분선 + "내 거래 조회" 버튼
+                    const file = await buildProfileFile(message, args);
+                    const t = message.mentions.users.first() || (args[1] && /^\d{15,25}$/.test(args[1]) ? { id: args[1] } : message.author);
+                    payload.files = [file];
+                    payload.components = [v2Card(t.id, file.name, 'profile')];
+                } else if (command === '$통계') {
+                    const file = await buildStatsFile(message.guild);
+                    payload.files = [file];
+                    payload.components = [statsCard(message.guild, file.name)];
+                } else {
+                    const r = await buildRankFile(message.guild, 0);
+                    payload.files = [r.file];
+                    payload.components = [rankCard(r.page, r.pages, message.author.id, r.file.name)];
+                }
+                return message.reply(payload);
+            } catch (e) {
+                console.error(`${command} 이미지 생성 실패:`, e);
+                return message.reply('이미지를 만드는 중 오류가 났어요. 잠시 후 다시 시도해 주세요.');
+            }
+        }
+
+        case '$주간갱신': {
+            if (!message.guild || !isAdmin(message.member)) return;
+            try {
+                const summary = await weekly.runGuild(message.guild);
+                store.setMeta('weekly', { ...(store.getMeta('weekly') || {}), [message.guild.id]: String(weekly.weekStart(Date.now())) });
+                return message.reply({ content: `**주간 TOP 갱신 완료**\n${summary}`, allowedMentions: { parse: [] } });
+            } catch (e) {
+                console.error('[주간] 수동 갱신 실패:', e);
+                return message.reply('주간 역할을 갱신하지 못했어요. 봇의 "역할 관리" 권한과 역할 순서를 확인해 주세요.');
+            }
+        }
+
+        case '$가격':
+        case '$로벅스': {
+
+            if (!message.member || !message.member.roles.cache.has(CALCULATOR_ROLE_ID)) {
+                return message.reply('해당 명령어를 사용할 권한이 없습니다.');
+            }
+
+            const tempMsg = await message.reply('계산을 진행 중입니다.');
+
+            try {
+                if (message.deletable) await message.delete();
+            } catch (err) {
+                console.error('유저 메시지 삭제 오류:', err);
+            }
+
+            await sleep(2000);
+
+            try {
+                if (tempMsg.deletable) await tempMsg.delete();
+            } catch (err) {
+                console.error('안내 메시지 삭제 오류:', err);
+            }
+
+            if (command === '$가격') {
+                const rate = parseFloat(args[1]);
+                const robux = parseFloat(args[2]);
+
+                if (isNaN(rate) || isNaN(robux) || rate <= 0 || robux <= 0) {
+                    return message.channel.send(
+                        '사용법: `$가격 (만 원당 로벅스량) (구매할 로벅스 수)`\n' +
+                        '예시: `$가격 1300 240`'
+                    );
+                }
+
+                const rawPrice = (robux / rate) * 10000;
+                const finalPrice = Math.ceil(rawPrice / 100) * 100;
+
+                try {
+                    const cardBuf = await renderCalcCard({
+                        mode: 'price',
+                        rate,
+                        amountIn: robux,
+                        result: finalPrice,
+                        guildName: message.guild ? message.guild.name : '',
+                        guildIconBuf: await getGuildIconBuf(message.guild)
+                    });
+                    return message.channel.send({ files: [new AttachmentBuilder(cardBuf, { name: 'calc.png' })] });
+                } catch (e) {
+                    console.error('계산기 카드 생성 실패, 임베드로 대체:', e);
+                }
+
+                const embed = new EmbedBuilder()
+                    .setColor(LIGHT_PINK_COLOR)
+                    .setDescription(
+                        `## 로벅스 가격 결과\n` +
+                        `**만 원당 로벅스 가격 : \`${rate.toLocaleString()}\`\n` +
+                        `구매할 로벅스 수량 : \`${robux.toLocaleString()}\`**\n\n` +
+                        `**계산된 로벅스 가격 = \`${finalPrice.toLocaleString()}\`원**`
+                    );
+
+                return message.channel.send({ embeds: [embed] });
+            }
+
+            if (command === '$로벅스') {
+                const rate = parseFloat(args[1]);
+                const money = parseFloat(args[2]);
+
+                if (isNaN(rate) || isNaN(money) || rate <= 0 || money <= 0) {
+                    return message.channel.send(
+                        '사용법: `$로벅스 (만 원당 로벅스량) (보낼 돈)`\n' +
+                        '예시: `$로벅스 1300 1900`'
+                    );
+                }
+
+                const totalRobux = Math.floor((money / 10000) * rate);
+
+                try {
+                    const cardBuf = await renderCalcCard({
+                        mode: 'robux',
+                        rate,
+                        amountIn: money,
+                        result: totalRobux,
+                        guildName: message.guild ? message.guild.name : '',
+                        guildIconBuf: await getGuildIconBuf(message.guild)
+                    });
+                    return message.channel.send({ files: [new AttachmentBuilder(cardBuf, { name: 'calc.png' })] });
+                } catch (e) {
+                    console.error('계산기 카드 생성 실패, 임베드로 대체:', e);
+                }
+
+                const embed = new EmbedBuilder()
+                    .setColor(LIGHT_PINK_COLOR)
+                    .setDescription(
+                        `## 지급 로벅스 결과\n` +
+                        `**만 원당 로벅스 가격 : \`${rate.toLocaleString()}\`\n` +
+                        `보낼 금액 : \`${money.toLocaleString()}\`원**\n\n` +
+                        `**계산된 로벅스 수량 = \`${totalRobux.toLocaleString()}\` R$**`
+                    );
+
+                return message.channel.send({ embeds: [embed] });
+            }
+
+            break;
         }
     }
-    if (changed) save();
-}
 
-const SITE_KEYS = ['supportUrl', 'contactUrl', 'inviteUrl'];
-function getSite() {
-    const out = {};
-    for (const k of SITE_KEYS) out[k] = db.site[k] || '';
-    return out;
-}
-function setSite(patch) {
-    for (const k of SITE_KEYS) if (typeof patch[k] === 'string') db.site[k] = patch[k];
-    save();
-    return getSite();
-}
+});
 
-load();
-
-module.exports = {
-    getCommunity,
-    saveCommunity,
-    getPurchases,
-    dailySeries,
-    allUsers,
-    countJoinsSince,
-    getAccount,
-    findAccountByUsername,
-    findAccountByDiscord,
-    createAccount,
-    updateAccount,
-    deleteAccount,
-    allAccounts,
-    addLog,
-    getLogs,
-    recentFails,
-    recentCount,
-    createSession,
-    getSessionAccount,
-    deleteSession,
-    cleanSessions,
-    getSite,
-    setSite,
-    getTicketConfig,
-    saveTicketConfig,
-    nextTicketNumber,
-    addTicket,
-    findTicket,
-    closeTicket,
-    reopenTicket,
-    markTicketDeleted,
-    getOpenTickets,
-    getRecentTickets,
-    STATS_START_TS,
-    DATA_DIR,
-    FILE,
-    persistent,
-    parseNumber,
-    getUser,
-    recordPurchase,
-    purchasesOf,
-    weeklyTop,
-    hasPurchases,
-    getMeta,
-    setMeta,
-    purchaseCode,
-    getPurchase,
-    attachChat,
-    setUser,
-    recordJoin,
-    ranking,
-    rankOf,
-    periodStats,
-};
+// 로그인
+if (!BOT_TOKEN) {
+    const similar = Object.keys(process.env).filter(k => /token/i.test(k));
+    console.error("오류: TOKEN이 설정되어 있지 않습니다. .env 파일이나 환경 변수를 확인해주세요.");
+    console.error(`감지된 토큰 관련 변수 이름: ${similar.length ? similar.map(k => `"${k}"`).join(', ') : '(없음)'}`);
+    console.error('Railway → 이 서비스의 Variables 탭에 TOKEN (또는 DISCORD_TOKEN) 이 있는지, 추가 후 Deploy 했는지 확인하세요.');
+} else {
+    client.login(BOT_TOKEN);
+}
