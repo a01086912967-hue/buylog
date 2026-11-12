@@ -133,8 +133,8 @@ function recordPurchase({ buyerId, kind, qty, price, sellerId, item, guildId }) 
     u.count += 1;
     u.spent += spent;
     u.robux += robux;
-    // 판매자도 거래 횟수 +1 (구매자와 같은 사람이면 중복으로 안 올림)
-    if (sellerId && sellerId !== buyerId) ensureUser(sellerId).count += 1;
+    // 판매자도 거래 횟수 +1 (/지급완료에서 판매자를 안 고르면 명령어 쓴 사람이 판매자)
+    if (sellerId) ensureUser(sellerId).count += 1;
     save();
     return { robux, spent, id };
 }
