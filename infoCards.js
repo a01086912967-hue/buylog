@@ -648,4 +648,173 @@ async function renderHistoryCard(o) {
     return canvas.toBuffer('image/png');
 }
 
-module.exports = { renderProfileCard, renderStatsCard, renderRankCard, renderHistoryCard, ymd };
+// =====================================================
+// 5) 판매 정보 카드 ($정보의 "판매 정보" 버튼 - 판매자 전용)
+// o = { name, avatarBuf, guildName, grade, s: store.sellerStats() 결과, topBuyerName }
+// =====================================================
+async function renderSellerCard(o) {
+    ensureFonts();
+    const s = o.s;
+    const col = (o.grade && o.grade.color) || { c1: SKY_C1, c2: SKY_C2, main: SKY_C2 };
+    const W = 1200;
+    const sumY = 214;
+    const sumH = 118;
+    const boxY = sumY + sumH + 28;
+    const rh = 64;
+    const boxH = 84 + rh * 6 + 16;
+    const recent = s.recent || [];
+    const listTitleY = boxY + boxH + 64;
+    const rowH = 78;
+    const gap = 10;
+    const listTop = listTitleY + 24;
+    const H = listTop + Math.max(1, recent.length) * (rowH + gap) + 86;
+
+    const canvas = createCanvas(W, H);
+    const ctx = canvas.getContext('2d');
+    drawSky(ctx, W, H, 56, 20, 44, 'wide');
+    tintGlow(ctx, W, H, 56, W - 140, 110, 480, hexA(col.c1, 0.35));
+
+    ctx.font = '66px NSKB';
+    gradText(ctx, '판매 정보', 60, 128, NAVY, col.main || SKY_C2);
+    ctx.font = '24px NSK';
+    ctx.fillStyle = MUTED;
+    const gn = clean(o.guildName, '').toUpperCase();
+    ctx.fillText(`${clean(o.name, '')}${gn ? '  ·  ' + gn : ''}`, 62, 174);
+
+    const av = await safeLoad(o.avatarBuf);
+    if (av) {
+        drawCircleImage(ctx, av, W - 120, 112, 50);
+        ctx.beginPath();
+        ctx.arc(W - 120, 112, 52, 0, Math.PI * 2);
+        const g = ctx.createLinearGradient(W - 172, 60, W - 68, 164);
+        g.addColorStop(0, col.c1);
+        g.addColorStop(1, col.c2);
+        ctx.strokeStyle = g;
+        ctx.lineWidth = 4;
+        ctx.stroke();
+    }
+
+    // 합계 4칸
+    glass(ctx, 60, sumY, W - 120, sumH, 32, col.c2);
+    const cells = [
+        ['총 판매 횟수', `${fmt(s.count)}회`],
+        ['총 판매 금액', `${fmt(s.spent)}원`],
+        ['판매 로벅스', `${fmt(s.robux)} R$`],
+        ['판매자 순위', s.rank ? `${s.rank}위 / ${s.rankTotal}명` : '순위 없음'],
+    ];
+    const cw = (W - 120) / cells.length;
+    cells.forEach(([label, value], i) => {
+        const cx = 60 + cw * i + cw / 2;
+        if (i > 0) {
+            setStroke(ctx, 'rgba(70,130,210,0.2)', 1.5);
+            ctx.beginPath();
+            ctx.moveTo(60 + cw * i, sumY + 24);
+            ctx.lineTo(60 + cw * i, sumY + sumH - 24);
+            ctx.stroke();
+        }
+        ctx.textAlign = 'center';
+        ctx.font = '23px NSK';
+        ctx.fillStyle = LABEL;
+        ctx.fillText(label, cx, sumY + 44);
+        const vf = fit(ctx, value, 'NSKB', 36, 18, cw - 30);
+        ctx.font = `${vf.size}px NSKB`;
+        ctx.fillStyle = NAVY;
+        ctx.fillText(vf.text, cx, sumY + 92);
+        ctx.textAlign = 'left';
+    });
+
+    // 2열 상세
+    const day = (ts) => (ts ? ymd(ts) : '-');
+    const amt = (p) => `${fmt(p.spent)}원 · ${fmt(p.count)}건`;
+    const boxes = [
+        ['판매 분석', [
+            ['평균 거래 금액', `${fmt(s.avg)}원`],
+            ['최고 판매 1건', s.best ? `${fmt(s.best.spent)}원` : '-'],
+            ['담당 구매자', `${fmt(s.buyers)}명`],
+            ['재구매 구매자', `${fmt(s.repeatBuyers)}명`],
+            ['단골 구매자', s.topBuyer ? `${clean(o.topBuyerName, '알 수 없음')} · ${fmt(s.topBuyer.count)}회` : '-'],
+            ['첫 판매 / 마지막', s.first ? `${day(s.first)} ~ ${day(s.last).slice(6)}` : '-'],
+        ]],
+        ['기간 · 종류별', [
+            ['오늘', amt(s.today)],
+            ['최근 7일', amt(s.week)],
+            ['이번 달', amt(s.month)],
+            ['로벅스 판매', amt(s.byKind.robux)],
+            ['인게임 판매', amt(s.byKind.ingame)],
+            ['기타 판매', amt(s.byKind.etc)],
+        ]],
+    ];
+    const pw = 528;
+    boxes.forEach(([title, rows], i) => {
+        const x = 60 + i * (pw + 24);
+        glass(ctx, x, boxY, pw, boxH, 36, col.c2);
+        pill(ctx, title, x + 30, boxY + 48, { c1: col.c1, c2: col.c2, text: '#ffffff' }, 24);
+        const ry0 = boxY + 84;
+        rows.forEach(([label, value], ri) => {
+            const y = ry0 + ri * rh;
+            if (ri > 0) {
+                setStroke(ctx, 'rgba(70,130,210,0.18)', 1.5);
+                ctx.beginPath();
+                ctx.moveTo(x + 30, y);
+                ctx.lineTo(x + pw - 30, y);
+                ctx.stroke();
+            }
+            ctx.font = '24px NSK';
+            ctx.fillStyle = LABEL;
+            ctx.textBaseline = 'middle';
+            ctx.fillText(label, x + 30, y + rh / 2 + 1);
+            const lw = ctx.measureText(label).width;
+            const vf = fit(ctx, value, 'NSKB', 30, 16, pw - 60 - lw - 20);
+            ctx.font = `${vf.size}px NSKB`;
+            ctx.fillStyle = NAVY;
+            ctx.textAlign = 'right';
+            ctx.fillText(vf.text, x + pw - 30, y + rh / 2 + 2);
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'alphabetic';
+        });
+    });
+
+    // 최근 판매
+    ctx.font = '32px NSKB';
+    ctx.fillStyle = NAVY;
+    ctx.fillText('최근 판매', 64, listTitleY);
+    if (!recent.length) {
+        glass(ctx, 60, listTop, W - 120, rowH, 26, col.c2);
+        ctx.font = '28px NSK';
+        ctx.fillStyle = LABEL;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('아직 판매 기록이 없어요', W / 2, listTop + rowH / 2);
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'alphabetic';
+    }
+    recent.forEach((r, i) => {
+        const x = 60;
+        const y = listTop + i * (rowH + gap);
+        const w = W - 120;
+        glass(ctx, x, y, w, rowH, 26, col.c2);
+        const cy = y + rowH / 2;
+        ctx.font = '25px NSKB';
+        ctx.fillStyle = NAVY;
+        ctx.textBaseline = 'middle';
+        ctx.fillText(kstStamp(r.ts), x + 30, cy + 1);
+        const kp = KIND_PILL[r.kind] || KIND_PILL.etc;
+        const kw = pill(ctx, kp.name, x + 250, cy, kp, 21);
+        const desc = r.kind === 'robux' && r.robux ? `${fmt(r.robux)} R$` : clean(`${r.item || '-'}${r.qty ? ' × ' + r.qty : ''}`, '-');
+        const df = fit(ctx, desc, 'NSKB', 28, 16, w - 250 - kw - 16 - 260);
+        ctx.font = `${df.size}px NSKB`;
+        ctx.fillStyle = NAVY;
+        ctx.textBaseline = 'middle';
+        ctx.fillText(df.text, x + 250 + kw + 16, cy + 1);
+        ctx.textAlign = 'right';
+        ctx.font = '32px NSKB';
+        ctx.fillText(`${fmt(r.spent)}원`, x + w - 30, cy + 2);
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'alphabetic';
+    });
+
+    note(ctx, W, H);
+    return canvas.toBuffer('image/png');
+}
+
+module.exports = { renderProfileCard, renderStatsCard, renderRankCard, renderHistoryCard, renderSellerCard, ymd };
