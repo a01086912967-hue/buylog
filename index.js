@@ -905,6 +905,17 @@ client.on('messageCreate', async message => {
             }
         }
 
+        case '$순위초기화': {
+            if (!message.guild || !isAdmin(message.member)) return;
+            try {
+                const summary = await weekly.resetGuild(message.guild);
+                return message.reply({ content: `**TOP 역할 초기화 완료**\n${summary}`, allowedMentions: { parse: [] } });
+            } catch (e) {
+                console.error('[TOP] 수동 초기화 실패:', e);
+                return message.reply('TOP 역할을 초기화하지 못했어요. 봇의 "역할 관리" 권한과 역할 순서를 확인해 주세요.');
+            }
+        }
+
         case '$주간갱신': {
             if (!message.guild || !isAdmin(message.member)) return;
             try {
