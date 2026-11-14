@@ -55,6 +55,14 @@ async function getRole(guild, def) {
     } else if (!sameColors(role, colors)) {
         await role.setColors(colors, 'TOP 역할 색 적용').catch((e) => console.error(`[TOP] 색 적용 실패 (${def.name}):`, e.message));
     }
+    // 같은 이름 역할이 여러 개면 (예전에 중복 생성) 하나만 남기고 정리
+    const dups = guild.roles.cache.filter((r) => r.name === def.name && r.id !== role.id);
+    for (const dup of dups.values()) {
+        for (const holder of dup.members.values()) {
+            await holder.roles.remove(dup, 'TOP 중복 역할 정리').catch(() => {});
+        }
+        await dup.delete('TOP 중복 역할 정리').catch((e) => console.error(`[TOP] 중복 역할 삭제 실패 (${def.name}):`, e.message));
+    }
     if (saved[def.key] !== role.id) {
         const all = store.getMeta('rankRoles') || {};
         all[guild.id] = { ...(all[guild.id] || {}), [def.key]: role.id };
@@ -149,13 +157,39 @@ async function runGuild(guild, { fullFetch = false } = {}) {
     ].join('\n');
 }
 
+// 초기화: 모든 TOP 역할을 모든 사람한테서 빼고, 지금 순위대로 다시 지급
+async function resetGuild(guild) {
+    await guild.members.fetch().catch(() => {});
+    let removed = 0;
+    for (const def of ROLE_DEFS) {
+        const roles = guild.roles.cache.filter((r) => r.name === def.name);
+        for (const role of roles.values()) {
+            for (const holder of role.members.values()) {
+                await holder.roles.remove(role, 'TOP 역할 초기화').then(() => removed++).catch((e) => console.error('[TOP] 초기화 회수 실패:', e.message));
+            }
+        }
+    }
+    const summary = await runGuild(guild);
+    return `기존 TOP 역할 ${removed}개 회수 후 다시 지급했어요.\n\n${summary}`;
+}
+
 let running = false;
+const RESET_VERSION = 'v2'; // 이 값이 바뀌면 배포 후 한 번 전체 초기화
 async function tick(client, fullFetch) {
     if (running) return;
     running = true;
     try {
         for (const guild of client.guilds.cache.values()) {
             if (!store.hasPurchases(guild.id)) continue; // 구매 기록이 전혀 없는 서버는 건드리지 않아요
+            const done = store.getMeta('rankRolesReset') || {};
+            if (done[guild.id] !== RESET_VERSION) {
+                const summary = await resetGuild(guild).catch((e) => { console.error('[TOP] 초기화 실패:', e); return null; });
+                if (summary) {
+                    console.log(`[TOP] ${guild.name} 초기화 완료\n${summary}`);
+                    store.setMeta('rankRolesReset', { ...done, [guild.id]: RESET_VERSION });
+                }
+                continue;
+            }
             await runGuild(guild, { fullFetch }).catch((e) => console.error('[TOP] 갱신 실패:', e));
         }
     } finally {
@@ -166,7 +200,7 @@ async function tick(client, fullFetch) {
 function start(client) {
     setTimeout(() => tick(client, true), 20 * 1000); // 켜진 직후 한 번 (멤버 전체 불러오기)
     setInterval(() => tick(client, false), 5 * 60 * 1000).unref();
-    setInterval(() => tick(client, true), 6 * 60 * 60 * 1000).unref();
+    setInterval(() => tick(client, true), 30 * 60 * 1000).unref(); // 30분마다 멤버 전체 다시 확인
 }
 
-module.exports = { start, runGuild, weekStart, ROLE_DEFS, DAY };
+module.exports = { start, runGuild, resetGuild, weekStart, ROLE_DEFS, DAY };
