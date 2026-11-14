@@ -772,10 +772,11 @@ async function buildSellerFileFor(guild, ownerId) {
 
 async function buildStatsFile(guild) {
     const now = Date.now();
-    const week = store.periodStats(now - 7 * 24 * 60 * 60 * 1000);
+    // 이번 주 = 한국 시간 월요일 00:00부터 (주간 TOP 역할과 같은 기준)
+    const week = store.periodStats(weekly.weekStart(now), guild.id);
     const all = store.periodStats(store.STATS_START_TS);
     const periods = [];
-    for (const [label, stats] of [['최근 7일', week], ['10월 28일 이후', all]]) {
+    for (const [label, stats] of [['이번 주 (월~일)', week], ['10월 28일 이후', all]]) {
         periods.push({
             label,
             sub: `${ymd(stats.from)} ~ 현재`,
@@ -907,9 +908,8 @@ client.on('messageCreate', async message => {
         case '$주간갱신': {
             if (!message.guild || !isAdmin(message.member)) return;
             try {
-                const summary = await weekly.runGuild(message.guild);
-                store.setMeta('weekly', { ...(store.getMeta('weekly') || {}), [message.guild.id]: String(weekly.weekStart(Date.now())) });
-                return message.reply({ content: `**주간 TOP 갱신 완료**\n${summary}`, allowedMentions: { parse: [] } });
+                const summary = await weekly.runGuild(message.guild, { fullFetch: true });
+                return message.reply({ content: `**TOP 역할 갱신 완료**\n${summary}`, allowedMentions: { parse: [] } });
             } catch (e) {
                 console.error('[주간] 수동 갱신 실패:', e);
                 return message.reply('주간 역할을 갱신하지 못했어요. 봇의 "역할 관리" 권한과 역할 순서를 확인해 주세요.');
