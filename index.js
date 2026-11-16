@@ -207,8 +207,8 @@ client.once('ready', async () => {
         .setName('반응제거')
         .setDescription('여러 메시지에서 특정 반응을 한 번에 제거합니다.')
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
-        .addStringOption(option => option.setName('이모지').setDescription('제거할 이모지 (예: 😂 또는 커스텀 이모지)').setRequired(true))
-        .addIntegerOption(option => option.setName('개수').setDescription('최근 메시지 몇 개를 검사할지 (기본 100, 최대 1000)').setMinValue(1).setMaxValue(1000).setRequired(false))
+        .addStringOption(option => option.setName('이모지').setDescription('제거할 이모지 (예: 😂 / 커스텀 이모지 / "전체" = 모든 반응)').setRequired(true))
+        .addIntegerOption(option => option.setName('개수').setDescription('최근 메시지 몇 개를 검사할지 (0 = 채널 전체, 기본 0)').setMinValue(0).setRequired(false))
         .addUserOption(option => option.setName('유저').setDescription('이 유저가 단 반응만 제거 (비우면 그 이모지 전체 제거)').setRequired(false))
         .addChannelOption(option => option.setName('채널').setDescription('대상 채널 (비우면 현재 채널)').addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement).setRequired(false));
 
