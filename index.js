@@ -208,9 +208,9 @@ client.once('ready', async () => {
         .setDescription('여러 메시지에서 특정 반응을 한 번에 제거합니다.')
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
         .addStringOption(option => option.setName('이모지').setDescription('제거할 이모지 (예: 😂 / 커스텀 이모지 / "전체" = 모든 반응)').setRequired(true))
-        .addIntegerOption(option => option.setName('개수').setDescription('최근 메시지 몇 개를 검사할지 (0 = 채널 전체, 기본 0)').setMinValue(0).setRequired(false))
+        .addIntegerOption(option => option.setName('개수').setDescription('채널마다 최근 메시지 몇 개를 검사할지 (0 = 처음 메시지까지 전부, 기본 0)').setMinValue(0).setRequired(false))
         .addUserOption(option => option.setName('유저').setDescription('이 유저가 단 반응만 제거 (비우면 그 이모지 전체 제거)').setRequired(false))
-        .addChannelOption(option => option.setName('채널').setDescription('대상 채널 (비우면 현재 채널)').addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement).setRequired(false));
+        .addChannelOption(option => option.setName('채널').setDescription('대상 채널 (비우면 서버의 모든 채널·스레드)').addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement, ChannelType.GuildVoice, ChannelType.GuildForum, ChannelType.PublicThread, ChannelType.PrivateThread, ChannelType.AnnouncementThread).setRequired(false));
 
     await client.application.commands.create(logCommand);
     await client.application.commands.create(infoSetCommand);
@@ -451,51 +451,139 @@ client.on('interactionCreate', async interaction => {
         await interaction.deferReply({ ephemeral: true });
 
         const input = interaction.options.getString('이모지').trim();
-        const limit = interaction.options.getInteger('개수') ?? 100;
+        const all = ['전체', 'all', '*'].includes(input.toLowerCase()); // 모든 반응
+        const limitOpt = interaction.options.getInteger('개수') ?? 0;
+        const limit = limitOpt === 0 ? Infinity : limitOpt;             // 0 = 처음 메시지까지 전부
         const target = interaction.options.getUser('유저');
-        const channel = interaction.options.getChannel('채널') ?? interaction.channel;
+        const picked = interaction.options.getChannel('채널');           // 비우면 서버 전체
+        const guild = interaction.guild;
+        const me = guild.members.me || await guild.members.fetchMe();
 
         // 커스텀 이모지(<:이름:ID> / ID만)와 일반 이모지 모두 지원
         const customId = (input.match(/:(\d{15,25})>$/) || [])[1] || (/^\d{15,25}$/.test(input) ? input : null);
-        const norm = (s) => (s || '').replace(/️/g, '');
-        const isMatch = (r) => customId ? r.emoji.id === customId : norm(r.emoji.name) === norm(input);
+        const norm = (s) => (s || '').replace(/\uFE0F/g, '');
+        const isMatch = (r) => all || (customId ? r.emoji.id === customId : norm(r.emoji.name) === norm(input));
+        const label = all ? '모든' : input;
 
-        let before;
+        const startedAt = Date.now();
+        let lastUpdate = 0;
         let scanned = 0;
         let removed = 0;
         let failed = 0;
+        let doneChannels = 0;
+        const noPerm = [];
 
-        try {
-            while (scanned < limit) {
-                const batch = await channel.messages.fetch({ limit: Math.min(100, limit - scanned), before });
+        // 진행 상황 표시 (상호작용 응답은 15분까지만 수정 가능)
+        const overTime = () => Date.now() - startedAt > 14 * 60 * 1000;
+        const progress = (text) => overTime()
+            ? Promise.resolve()
+            : interaction.editReply({ content: text, allowedMentions: { parse: [] } }).catch(() => {});
+
+        // ---- 검사할 채널 목록 만들기 ----
+        await progress('⏳ 검사할 채널을 모으는 중...');
+        const targets = new Map();
+        const addThreadsOf = async (parent) => {
+            if (!parent.threads) return;
+            try {
+                const active = await parent.threads.fetchActive();
+                active.threads.forEach((t) => targets.set(t.id, t));
+            } catch (e) { /* 무시 */ }
+            try {
+                let before;
+                while (true) {
+                    const res = await parent.threads.fetchArchived({ type: 'public', limit: 100, before });
+                    res.threads.forEach((t) => targets.set(t.id, t));
+                    if (!res.hasMore || !res.threads.size) break;
+                    before = res.threads.last();
+                }
+            } catch (e) { /* 권한 없으면 건너뜀 */ }
+        };
+
+        if (picked) {
+            if (picked.isTextBased()) targets.set(picked.id, picked);
+            await addThreadsOf(picked);
+        } else {
+            const chans = await guild.channels.fetch();
+            for (const c of chans.values()) {
+                if (!c) continue;
+                if (c.isTextBased() && !c.isThread()) targets.set(c.id, c);
+                if ([ChannelType.GuildText, ChannelType.GuildAnnouncement, ChannelType.GuildForum].includes(c.type)) {
+                    await addThreadsOf(c);
+                }
+            }
+        }
+
+        // ---- 채널 하나 검사 ----
+        const scanChannel = async (channel) => {
+            const perms = channel.permissionsFor(me);
+            if (!perms || !perms.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory])) {
+                noPerm.push(channel.id);
+                return;
+            }
+            let before;
+            let count = 0;
+            while (count < limit) {
+                const batch = await channel.messages.fetch({ limit: Math.min(100, limit - count), before, cache: false });
                 if (!batch.size) break;
 
                 for (const msg of batch.values()) {
-                    const reaction = msg.reactions.cache.find(isMatch);
-                    if (!reaction) continue;
+                    const reactions = msg.reactions.cache.filter(isMatch);
+                    if (!reactions.size) continue;
                     try {
-                        if (target) await reaction.users.remove(target.id); // 그 유저 반응만
-                        else await reaction.remove();                       // 그 이모지 전체
+                        if (!target && all) {
+                            await msg.reactions.removeAll();                     // 메시지의 반응 전부
+                        } else {
+                            for (const reaction of reactions.values()) {
+                                if (target) await reaction.users.remove(target.id); // 그 유저 반응만
+                                else await reaction.remove();                       // 그 이모지 전체
+                            }
+                        }
                         removed++;
                     } catch (e) {
                         failed++;
-                        console.error('[반응제거] 실패:', msg.id, e.message);
+                        console.error('[반응제거] 실패:', channel.id, msg.id, e.message);
                     }
                 }
 
+                count += batch.size;
                 scanned += batch.size;
                 before = batch.last().id;
+
+                if (Date.now() - lastUpdate > 5000) {
+                    lastUpdate = Date.now();
+                    await progress(
+                        `⏳ 진행 중... 채널 ${doneChannels}/${targets.size} · 지금 <#${channel.id}>\n` +
+                        `-# 메시지 ${scanned.toLocaleString()}개 검사 / ${removed.toLocaleString()}개 정리`
+                    );
+                }
             }
-        } catch (e) {
-            console.error('[반응제거] 메시지 불러오기 실패:', e.message);
-            return interaction.editReply('메시지를 불러오지 못했어요. 봇에게 해당 채널의 **메시지 기록 보기** 권한이 있는지 확인해 주세요.');
+        };
+
+        for (const channel of targets.values()) {
+            try {
+                await scanChannel(channel);
+            } catch (e) {
+                console.error('[반응제거] 채널 검사 실패:', channel.id, e.message);
+                noPerm.push(channel.id);
+            }
+            doneChannels++;
         }
 
+        const result =
+            `✅ ${picked ? `<#${picked.id}>` : '서버 전체'} 채널·스레드 ${targets.size}개, 메시지 ${scanned.toLocaleString()}개 검사 → ` +
+            `**${removed.toLocaleString()}개** 메시지에서 ${label} 반응을 제거했어요.` +
+            (target ? ` (${target} 반응만)` : '') +
+            (failed ? `\n⚠️ ${failed}개 실패 (봇에게 **메시지 관리** 권한이 필요해요)` : '') +
+            (noPerm.length
+                ? `\n⚠️ 권한이 없어 못 본 채널 ${noPerm.length}개: ${noPerm.slice(0, 15).map((id) => `<#${id}>`).join(' ')}${noPerm.length > 15 ? ' ...' : ''}\n-# 봇 역할에 **채널 보기 + 메시지 기록 보기 + 메시지 관리** 권한을 주세요.`
+                : '');
+
+        // 15분이 넘게 걸렸으면 응답 수정이 안 되니 명령어 쓴 사람에게 DM으로 결과 전송
+        if (overTime()) {
+            return interaction.user.send(result).catch(() => {});
+        }
         return interaction.editReply({
-            content:
-                `✅ 메시지 ${scanned}개 검사 → **${removed}개** 메시지에서 ${input} 반응을 제거했어요.` +
-                (target ? ` (${target} 반응만)` : '') +
-                (failed ? `\n⚠️ ${failed}개 실패 (봇에게 **메시지 관리** 권한이 필요해요)` : ''),
+            content: result,
             allowedMentions: { parse: [] }
         });
     }
