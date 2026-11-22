@@ -88,15 +88,21 @@ async function getGuildIconBuf(guild) {
 // ==================== 지급완료 처리 (공통) ====================
 // /지급완료 명령어와 티켓툴 구매로그 패널의 [지급완료] 버튼이 같이 사용해요.
 // 반환: { ok: true, purchaseId, warns: [] } 또는 { ok: false, error }
-async function completePurchase({ guild, channel, buyer, kind, item, count, price, robloxInput, seller }) {
+// fallbackDiscord: true 면 로블록스 아이디를 못 찾았을 때 멈추지 않고 디스코드 프로필로 전송 (티켓툴 패널용)
+async function completePurchase({ guild, channel, buyer, kind, item, count, price, robloxInput, seller, fallbackDiscord = false }) {
     const warns = [];
     robloxInput = String(robloxInput || '').trim();
 
-    // 1) 로블록스 아이디 확인 (아바타 필수 → 없는 아이디면 아무것도 처리하지 않음)
-    const skipRoblox = robloxInput.toLowerCase() === 'x'; // X 입력 시 로블록스 없이 디스코드 프사만
-    const roblox = skipRoblox ? { status: 'skip' } : await lookupRobloxUser(robloxInput);
+    // 1) 로블록스 아이디 확인 (/지급완료 는 없는 아이디면 아무것도 처리하지 않음)
+    let skipRoblox = !robloxInput || robloxInput.toLowerCase() === 'x'; // X 입력 시 로블록스 없이 디스코드 프사만
+    let roblox = skipRoblox ? { status: 'skip' } : await lookupRobloxUser(robloxInput);
     if (roblox.status === 'notfound') {
-        return { ok: false, error: `❌ 로블록스 아이디 \`${robloxInput}\` 을(를) 찾을 수 없어요. 철자를 확인하고 다시 입력해 주세요. (아무것도 처리되지 않았어요)` };
+        if (!fallbackDiscord) {
+            return { ok: false, error: `❌ 로블록스 아이디 \`${robloxInput}\` 을(를) 찾을 수 없어요. 철자를 확인하고 다시 입력해 주세요. (아무것도 처리되지 않았어요)` };
+        }
+        skipRoblox = true;
+        roblox = { status: 'skip' };
+        warns.push(`로블록스 아이디 \`${robloxInput}\` 을(를) 찾지 못해 디스코드 프로필로 전송했어요.`);
     }
 
     const logChannel = guild.channels.cache.get(LOG_CHANNEL_ID);
@@ -396,6 +402,7 @@ client.once('ready', async () => {
     tickettool.init(client, {
         completePurchase,
         purchaseCode: (id) => store.purchaseCode(id),
+        sellerRoleId: CALCULATOR_ROLE_ID, // "판매자" 역할 (티켓 이름으로 판매자 자동 지정에 사용)
         canUse: (member) => isAdmin(member) || !!(member && member.roles.cache.has(CALCULATOR_ROLE_ID))
     });
 });
