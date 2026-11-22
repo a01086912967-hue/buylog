@@ -1,29 +1,32 @@
-// ==================== 티켓툴(Ticket Tool) 구매로그 설정 패널 ====================
-// 티켓툴이 티켓 채널을 만들면 그 아래에 작은 "구매로그 설정" 패널(컴포넌트 V2)을 띄워요.
-// - 구매자가 티켓툴 양식에 적은 답변(로블록스 닉네임, 수량, 금액 등)을 자동으로 읽어와요.
-// - 판매자는 티켓 이름/카테고리(예: "라프" 티켓 → 라프)로 자동 지정돼요.
-// - [구매로그 확인] 으로 전체 정보를 보고 판매자/구매자 변경, [정보 수정] 으로 고친 뒤
-//   [지급완료] 를 누르면 /지급완료 명령어와 똑같이 구매로그가 전송되고 통계에 기록돼요.
-// - 같은 티켓에서 또 구매하면 완료된 패널의 [추가 구매] 로 새 구매로그를 적을 수 있어요.
-// - 패널 정보는 data.json 에 저장되므로 Railway 재배포 후에도 버튼이 그대로 동작해요.
+// ==================== 티켓 구매로그 설정 패널 + 자동 질문 ====================
+// 1) 이름에 ticket / 티켓 이 들어간 채널이 열리면(티켓툴 포함) "구매로그 설정" 패널(컴포넌트 V2)을 띄워요.
+// 2) 이어서 봇이 구매자를 멘션하며 질문을 하나씩 해요 (로블록스 아이디, 수량, 상품 이름 등).
+//    구매자가 채팅으로 답하면 패널에 자동 저장돼요. 티켓툴 양식에 이미 적은 항목은 묻지 않아요.
+// 3) 판매자가 티켓에서 $가격 / $로벅스 를 쓰면 수량·금액이 자동으로 채워져요.
+// 4) [정보 수정] : 판매자/구매자는 선택 메뉴로 바로 변경, 상품·수량·금액은 버튼으로 수정
+//    [지급완료]  : /지급완료 명령어와 똑같이 구매로그 전송 (빈 칸이 있으면 빈 칸만 묻는 창이 떠요)
+//    [추가 구매] : 같은 티켓에서 또 구매할 때 새 패널 생성 (구매자·판매자·로블록스 아이디 유지)
+// 패널 정보는 data.json 에 저장되므로 Railway 재배포 후에도 그대로 이어져요.
 
 const {
     ActionRowBuilder,
     ModalBuilder,
     TextInputBuilder,
-    TextInputStyle
+    TextInputStyle,
+    ChannelType
 } = require('discord.js');
 const store = require('./store');
 
 // ---------- 설정 ----------
 // 티켓툴 봇 ID (기존 Ticket Tool + 이름이 같은 새 Ticket Tool 봇. 프리미엄/커스텀 봇이면 여기에 추가)
 const TICKET_TOOL_BOT_IDS = ['557628352828014614', '1506999581722804274'];
-const PANEL_WINDOW_MS = 5 * 60 * 1000;               // 채널이 만들어진 지 5분 안의 티켓툴 메시지에만 패널 생성
-const COLLECT_DELAY_MS = 4000;                       // 티켓툴이 양식 답변을 보낼 때까지 잠깐 기다리기
+const TICKET_NAME_RE = /ticket|티켓/i;               // 이 이름이 들어간 채널이 열리면 패널 생성
+const PANEL_WINDOW_MS = 5 * 60 * 1000;               // 채널이 만들어진 지 5분 안에만 패널 생성
+const COLLECT_DELAY_MS = 4000;                       // 티켓툴이 환영 메시지·양식 답변을 보낼 때까지 기다리기
 // 채널 이름 / 카테고리 이름에 이 단어가 있으면 패널을 만들지 않아요 (문의 티켓 등)
-const SKIP_KEYWORDS = ['문의', '신고', '셀러', '지원', 'support', 'report'];
+const SKIP_KEYWORDS = ['문의', '신고', '셀러', '지원', 'support', 'report', 'closed'];
 // 판매자 이름 → 디스코드 유저 ID (비워두면 "판매자" 역할을 가진 사람의 닉네임/아이디로 자동으로 찾아요)
-// 티켓 이름이 판매자 닉네임과 다르면 여기에 직접 적어주세요. 예: { '라프': '123456789012345678' }
+// 예: { '라프': '123456789012345678' }
 const SELLER_MAP = {};
 const PANEL_COLOR = 0xA9D8FF;
 const DONE_COLOR = 0x7BD88F;
@@ -32,9 +35,10 @@ const FLAG_EPHEMERAL = 1 << 6;
 const META_KEY = 'ttPanels';
 
 const KIND_LABEL = { robux: '로벅스', ingame: '인게임', etc: '기타' };
+const FIELD_NAME = { buyer: '구매자 (디스코드 유저 ID)', kind: '종류', item: '상품 이름', count: '수량', price: '금액', roblox: '로블록스 아이디' };
 
-let deps = null; // { completePurchase, canUse, purchaseCode, sellerRoleId }
-const handled = new Set();     // 패널을 이미 만든 채널
+let deps = null; // { completePurchase, canUse, purchaseCode, sellerRoleId, lookupRoblox }
+const handled = new Set();     // 패널을 이미 만든(만드는 중인) 채널
 const busy = new Set();        // 지급완료 처리 중인 패널 (중복 클릭 방지)
 
 // ---------- 패널 데이터 저장 (data.json) ----------
@@ -42,16 +46,19 @@ function allPanels() {
     const v = store.getMeta(META_KEY);
     return v && typeof v === 'object' ? v : {};
 }
-function getPanel(msgId) {
-    return allPanels()[msgId] || null;
-}
+const getPanel = (msgId) => allPanels()[msgId] || null;
 function savePanel(msgId, d) {
     const all = allPanels();
     all[msgId] = { ...d, ts: d.ts || Date.now() };
-    // 30일 지난 패널 정보는 정리
-    const cut = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    const cut = Date.now() - 30 * 24 * 60 * 60 * 1000; // 30일 지난 패널 정보는 정리
     for (const [k, v] of Object.entries(all)) if (!v || v.ts < cut) delete all[k];
     store.setMeta(META_KEY, all);
+}
+function activePanelOf(channelId) {
+    const list = Object.entries(allPanels()).filter(([, p]) => p.channelId === channelId && !p.done);
+    if (!list.length) return null;
+    list.sort((a, b) => b[1].ts - a[1].ts);
+    return { id: list[0][0], d: list[0][1] };
 }
 const isTicketToolChannel = (channelId) =>
     handled.has(channelId) || Object.values(allPanels()).some((p) => p.channelId === channelId);
@@ -60,14 +67,12 @@ const isTicketToolChannel = (channelId) =>
 function textsOfComponent(c, out) {
     if (!c || typeof c !== 'object') return;
     if (typeof c.content === 'string') out.push(c.content);
-    if (c.label && typeof c.label === 'string') out.push(c.label);
     for (const k of ['components', 'accessory']) {
         const v = c[k];
         if (Array.isArray(v)) v.forEach((x) => textsOfComponent(x, out));
         else if (v) textsOfComponent(v, out);
     }
 }
-
 function messageTexts(m) {
     const out = [];
     if (m.content) out.push(m.content);
@@ -86,7 +91,7 @@ const clean = (v) => String(v || '')
     .replace(/[:：]\s*$/, '')
     .trim();
 
-// [질문, 답변] 목록
+// 티켓툴 양식의 [질문, 답변] 목록
 function extractQA(msgs) {
     const qa = [];
     const push = (q, a) => {
@@ -97,13 +102,10 @@ function extractQA(msgs) {
         for (const e of m.embeds) for (const f of e.fields || []) push(f.name, f.value);
         for (const t of messageTexts(m)) {
             let r;
-            // 질문 (다음 줄) ```답변```
             const codeRe = /(?:^|\n)([^\n`]+?)\s*\n\s*```(?:[a-z]+\n)?([\s\S]*?)```/gi;
             while ((r = codeRe.exec(t))) push(r[1], r[2]);
-            // **질문** (다음 줄) 답변
             const boldRe = /\*\*([^*\n]+)\*\*\s*\n\s*([^\n`*][^\n]*)/g;
             while ((r = boldRe.exec(t))) push(r[1], r[2]);
-            // 질문: 답변
             const colonRe = /^[\s*_#>\-]*([^:\n：`]{1,40}?)[\s*_]*[:：]\s*([^\n]+)$/gm;
             while ((r = colonRe.exec(t))) if (!/^https?$/i.test(r[1].trim())) push(r[1], r[2]);
         }
@@ -111,7 +113,6 @@ function extractQA(msgs) {
     return qa;
 }
 
-// 질문 내용으로 어떤 항목인지 판단
 function matchKey(q) {
     const s = q.toLowerCase().replace(/\s/g, '');
     if (/로블|roblox|닉네임|닉|아이디|username|아바타/.test(s)) return 'roblox';
@@ -131,13 +132,13 @@ function detectKind(text) {
 }
 const parseKindInput = (v) => detectKind(v) || (String(v || '').trim() ? 'etc' : null);
 const norm = (s) => String(s || '').toLowerCase().replace(/[\s\-_.·|]/g, '');
+const num = (v) => parseFloat(String(v).replace(/,/g, ''));
+const fmt = (n) => Math.round(n).toLocaleString('ko-KR');
 
 // ---------- 판매자 / 구매자 찾기 ----------
 async function sellerMembers(guild) {
+    try { await guild.members.fetch(); } catch (e) {}
     const roleId = deps.sellerRoleId;
-    try {
-        await guild.members.fetch();
-    } catch (e) {}
     return guild.members.cache.filter((m) => !m.user.bot && roleId && m.roles.cache.has(roleId));
 }
 
@@ -179,7 +180,7 @@ async function gatherFromChannel(channel) {
         if (sellers.has(id)) { if (!d.sellerId) d.sellerId = id; }
         else if (!d.buyerId) d.buyerId = id;
     }
-    // 티켓을 연 사람 = 채널 권한에 직접 추가된 유저 (티켓툴이 티켓 연 사람을 채널에 추가해요)
+    // 티켓을 연 사람 = 채널 권한에 직접 추가된 유저
     const memberOws = [...channel.permissionOverwrites.cache.values()].filter((o) =>
         o.type === 1 && o.id !== channel.client.user.id && !TICKET_TOOL_BOT_IDS.includes(o.id));
     if (!d.buyerId) {
@@ -190,9 +191,8 @@ async function gatherFromChannel(channel) {
     if (!d.buyerId && mentioned.length) d.buyerId = mentioned[0];
     if (!d.buyerId && memberOws.length) d.buyerId = memberOws[0].id;
     if (!d.buyerId && channel.topic) d.buyerId = (channel.topic.match(/(\d{17,20})/) || [])[1] || null;
-    if (d.sellerId === d.buyerId && mentioned[0] === d.buyerId) d.sellerId = null;
 
-    // 판매자: 티켓 이름 → 카테고리 이름 → 티켓툴 메시지 내용 순서로 판매자 이름 찾기
+    // 판매자: 티켓 이름 → 카테고리 이름 → 티켓툴 메시지 내용 (예: "라프" 티켓 → 라프)
     const parentName = (channel.parent && channel.parent.name) || '';
     const nameSeller = findSellerByName(channel.name, sellers) || findSellerByName(parentName, sellers) || findSellerByName(allText, sellers);
     if (nameSeller) d.sellerId = nameSeller;
@@ -202,26 +202,168 @@ async function gatherFromChannel(channel) {
     if (!d.kind) d.kind = detectKind(channel.name) || detectKind(parentName) || detectKind(allText);
     if (d.kind === 'robux' && !d.item) d.item = '로벅스';
 
-    console.log(`[티켓툴] ${channel.name} 양식 읽기 → ${JSON.stringify(d)}`);
-    if (!d.roblox || !d.count) {
-        // 못 읽은 항목이 있으면 원문을 로그에 남겨요 (Railway 로그에서 확인 가능)
-        console.log(`[티켓툴] 양식 원문 (${channel.name}):\n${allText.slice(0, 1500)}\n필드: ${JSON.stringify(msgs.flatMap((m) => m.embeds.flatMap((e) => e.fields || []))).slice(0, 800)}`);
-    }
+    console.log(`[티켓] ${channel.name} 정보 읽기 → ${JSON.stringify(d)}`);
     return d;
 }
 
-// ---------- 구매자가 직접 적는 항목 (티켓 종류별) ----------
-const FIELD_NAME = { kind: '종류', item: '상품 이름', count: '수량', roblox: '로블록스 닉네임', price: '금액' };
-function buyerFields(kind) {
-    if (kind === 'robux') return ['roblox', 'count'];
-    if (kind === 'ingame') return ['item', 'count', 'roblox'];
-    if (kind === 'etc') return ['item', 'count'];
-    return ['kind', 'item', 'count'];
+// ---------- 자동 질문 ----------
+// 티켓 종류별로 구매자에게 물어볼 항목 (순서대로)
+function questionKeys(d) {
+    if (!d.kind) return ['kind'];
+    if (d.kind === 'robux') return ['roblox', 'count'];
+    if (d.kind === 'ingame') return ['item', 'count', 'roblox'];
+    return ['item', 'count', 'roblox'];
 }
-const missingBuyer = (d) => buyerFields(d.kind).filter((k) => !d[k]);
+const nextQuestion = (d) => questionKeys(d).find((k) => !d[k]) || null;
+
+function questionText(d, key, retry) {
+    if (retry) {
+        if (key === 'roblox') return '찾을 수 없는 로블록스 아이디예요. 다시 입력해 주세요. (없으면 X)';
+        if (key === 'count') return '숫자로 입력해 주세요. (예: 1000)';
+        if (key === 'kind') return '로벅스 / 인게임 / 기타 중 하나로 입력해 주세요.';
+    }
+    if (key === 'kind') return '구매하실 종류를 입력해 주세요. (로벅스 / 인게임 / 기타)';
+    if (key === 'roblox') return d.kind === 'etc'
+        ? '로블록스 아이디를 입력해 주세요. (없으면 X)'
+        : '로블록스 아이디를 입력해 주세요. (디스플레이 이름 말고 아이디)';
+    if (key === 'count') return d.kind === 'robux' ? '구매하실 로벅스 수량을 입력해 주세요. (예: 1000)' : '구매하실 수량을 입력해 주세요.';
+    if (key === 'item') return d.kind === 'ingame'
+        ? '구매하실 게임과 상품 이름을 입력해 주세요. (예: 블록스 피스 - 레오파드)'
+        : '구매하실 상품 이름을 입력해 주세요.';
+    return '';
+}
+
+const v2Text = (content, color = PANEL_COLOR) => ({
+    flags: FLAG_V2,
+    components: [{ type: 17, accent_color: color, components: [{ type: 10, content }] }]
+});
+
+async function sendQuestion(channel, d, key, retry = false) {
+    d.asking = key;
+    await channel.send({
+        ...v2Text(`<@${d.buyerId}> ${questionText(d, key, retry)}`),
+        allowedMentions: { users: [d.buyerId] }
+    });
+}
+
+// 다음 질문 보내기. 다 끝났으면 완료 안내. (d 를 바꾸므로 호출한 쪽에서 저장)
+async function askNext(channel, d) {
+    const key = nextQuestion(d);
+    if (key) return sendQuestion(channel, d, key);
+    d.asking = null;
+    d.asked = true;
+    await channel.send({
+        ...v2Text(`<@${d.buyerId}> 입력이 완료되었어요. 판매자가 확인 후 진행해 드릴게요.`, DONE_COLOR),
+        allowedMentions: { users: [d.buyerId] }
+    });
+}
+
+async function startQuestions(channel, panelId, d) {
+    d.asked = false;
+    if (!nextQuestion(d)) {
+        d.asked = true;
+        return savePanel(panelId, d);
+    }
+    await channel.send({
+        ...v2Text(`### 구매하기 전 몇 가지만 여쭤볼게요\n<@${d.buyerId}> 질문에 채팅으로 답해 주세요.`),
+        allowedMentions: { users: [d.buyerId] }
+    });
+    await askNext(channel, d);
+    savePanel(panelId, d);
+}
+
+// 구매자의 답변 처리. 처리했으면 true
+async function handleAnswer(message, panelId, d) {
+    const key = d.asking;
+    const t = message.content.trim().slice(0, 200);
+    if (!key || !t) return false;
+
+    if (key === 'kind') {
+        const k = detectKind(t);
+        if (!k) { await sendQuestion(message.channel, d, key, true); savePanel(panelId, d); return true; }
+        d.kind = k;
+        if (k === 'robux' && !d.item) d.item = '로벅스';
+    } else if (key === 'count') {
+        const m = t.match(/\d[\d,.]*/);
+        if (!m) { await sendQuestion(message.channel, d, key, true); savePanel(panelId, d); return true; }
+        d.count = /^[\d,.]+$/.test(t) || d.kind === 'robux' ? fmt(num(m[0])) : t;
+    } else if (key === 'roblox') {
+        const cand = t.split(/\s+/)[0].replace(/^@/, '');
+        if (cand.toLowerCase() === 'x') {
+            d.roblox = 'X';
+        } else {
+            const r = deps.lookupRoblox ? await deps.lookupRoblox(cand).catch(() => null) : null;
+            if (r && r.status === 'ok') d.roblox = r.name || cand;
+            else if (r && r.status === 'notfound' && !d.robloxRetry) {
+                d.robloxRetry = true;
+                await sendQuestion(message.channel, d, key, true);
+                savePanel(panelId, d);
+                return true;
+            } else d.roblox = cand; // 두 번째도 못 찾으면 그대로 저장 → 지급완료 때 디스코드 프로필로 전송
+        }
+    } else if (key === 'item') {
+        d.item = t;
+    }
+
+    await askNext(message.channel, d);
+    await refreshPanel(message.channel, panelId, d);
+    return true;
+}
+
+// ---------- 티켓 대화에서 자동으로 채우기 ($가격 / $로벅스 / 금액) ----------
+function scanStaffMessage(d, t) {
+    let m, changed = false;
+    const set = (k, v) => { if (v && d[k] !== v) { d[k] = v; changed = true; } };
+    if ((m = t.match(/^\$가격\s+([\d.,]+)\s+([\d.,]+)/))) {
+        const rate = num(m[1]), robux = num(m[2]);
+        if (rate > 0 && robux > 0) {
+            set('count', fmt(robux));
+            set('price', `${fmt(Math.ceil((robux / rate) * 10000 / 100) * 100)}원`);
+        }
+    } else if ((m = t.match(/^\$로벅스\s+([\d.,]+)\s+([\d.,]+)/))) {
+        const rate = num(m[1]), money = num(m[2]);
+        if (rate > 0 && money > 0) {
+            set('count', fmt(Math.floor((money / 10000) * rate)));
+            set('price', `${fmt(money)}원`);
+        }
+    }
+    return changed;
+}
+
+function scanPrice(d, t) {
+    if (d.price || t.startsWith('$')) return false;
+    let m;
+    if ((m = t.match(/([\d.]+)\s*만\s*원/))) d.price = `${fmt(num(m[1]) * 10000)}원`;
+    else if ((m = t.match(/(\d[\d,]{2,})\s*원/))) d.price = `${fmt(num(m[1]))}원`;
+    else return false;
+    return true;
+}
+
+async function onChatMessage(message) {
+    if (!message.guild || message.author.bot) return;
+    const p = activePanelOf(message.channel.id);
+    if (!p) return;
+    const { id, d } = p;
+    const t = String(message.content || '').trim();
+    const staff = message.member ? deps.canUse(message.member) : false;
+
+    // 구매자를 못 찾았던 티켓: 처음 말한 (판매자가 아닌) 사람을 구매자로 잡고 질문 시작
+    if (!d.buyerId && !staff) {
+        d.buyerId = message.author.id;
+        await refreshPanel(message.channel, id, d);
+        await startQuestions(message.channel, id, d);
+        return;
+    }
+
+    if (message.author.id === d.buyerId && d.asking) {
+        await handleAnswer(message, id, d);
+        return;
+    }
+    if (staff && scanStaffMessage(d, t)) return refreshPanel(message.channel, id, d);
+    if ((staff || message.author.id === d.buyerId) && scanPrice(d, t)) return refreshPanel(message.channel, id, d);
+}
 
 // ---------- 화면 (컴포넌트 V2) ----------
-const show = (v) => (v ? String(v).slice(0, 200) : '미입력');
 const mention = (id) => (id ? `<@${id}>` : '미지정');
 
 async function avatarUrl(client, userId) {
@@ -233,35 +375,30 @@ async function avatarUrl(client, userId) {
     }
 }
 
+function summaryLine(d) {
+    const parts = [
+        d.kind ? KIND_LABEL[d.kind] : '종류 미정',
+        d.kind === 'robux' ? null : (d.item || '상품 미입력'),
+        d.count ? (d.kind === 'robux' ? `${d.count} 로벅스` : `${d.count}개`) : '수량 미입력',
+        d.price || '금액 미입력',
+        d.roblox && d.roblox.toLowerCase() !== 'x' ? d.roblox : (d.roblox ? '로블록스 없음' : '로블록스 미입력')
+    ].filter(Boolean);
+    return `-# ${parts.join(' · ')}`;
+}
+
 async function panelPayload(client, d) {
     const done = !!d.done;
     const lines = done
-        ? [
-            '### 구매로그 전송 완료',
-            `구매자 ${mention(d.buyerId)}`,
-            `판매자 ${mention(d.sellerId)}`,
-            `-# ${d.code ? `구매 ID ${d.code} · ` : ''}처리 ${mention(d.by)}`
-        ]
-        : [
-            '### 구매로그 설정',
-            `구매자 ${mention(d.buyerId)}`,
-            `판매자 ${mention(d.sellerId)}`,
-            `-# ${d.kind ? `${KIND_LABEL[d.kind]} 티켓` : '종류 미정'}${missingBuyer(d).length ? ` · 입력 필요: ${missingBuyer(d).map((k) => FIELD_NAME[k]).join(', ')}` : ''}`
-        ];
+        ? ['### 구매로그 전송 완료', `구매자 ${mention(d.buyerId)} · 판매자 ${mention(d.sellerId)}`, summaryLine(d),
+            `-# ${d.code ? `구매 ID ${d.code} · ` : ''}처리 ${mention(d.by)}`]
+        : ['### 구매로그 설정', `구매자 ${mention(d.buyerId)} · 판매자 ${mention(d.sellerId)}`, summaryLine(d)];
     const text = { type: 10, content: lines.join('\n') };
     const avatar = d.buyerId ? await avatarUrl(client, d.buyerId) : null;
-    const head = avatar
-        ? { type: 9, components: [text], accessory: { type: 11, media: { url: avatar } } }
-        : text;
+    const head = avatar ? { type: 9, components: [text], accessory: { type: 11, media: { url: avatar } } } : text;
 
     const buttons = done
-        ? [
-            { type: 2, style: 2, label: '구매로그 확인', custom_id: 'ttlog_view' },
-            { type: 2, style: 1, label: '추가 구매', custom_id: 'ttlog_more' }
-        ]
+        ? [{ type: 2, style: 1, label: '추가 구매', custom_id: 'ttlog_more' }]
         : [
-            { type: 2, style: 1, label: '구매 정보 입력', custom_id: 'ttlog_input' },
-            { type: 2, style: 2, label: '구매로그 확인', custom_id: 'ttlog_view' },
             { type: 2, style: 2, label: '정보 수정', custom_id: 'ttlog_edit' },
             { type: 2, style: 3, label: '지급완료', custom_id: 'ttlog_done' }
         ];
@@ -276,46 +413,51 @@ async function panelPayload(client, d) {
     };
 }
 
-// [구매로그 확인] 눌렀을 때 나만 보이는 전체 정보
-function viewPayload(panelId, d) {
+// [정보 수정] 눌렀을 때 나만 보이는 화면: 판매자/구매자는 선택 메뉴로 바로, 나머지는 버튼으로
+function editPayload(panelId, d) {
     const body = [
-        '### 구매로그 정보',
-        `**구매자** ${mention(d.buyerId)}`,
-        `**판매자** ${mention(d.sellerId)}${d.sellerId ? '' : ' (지급완료를 누른 사람으로 기록)'}`,
+        '### 구매로그 정보 수정',
         `**종류** ${d.kind ? KIND_LABEL[d.kind] : '미정'}`,
-        `**상품** ${show(d.item)}`,
-        `**수량** ${show(d.count)}`,
-        `**금액** ${show(d.price)}`,
-        `**로블록스 아이디** ${show(d.roblox)}`,
-        '-# 로블록스 아이디가 없거나 맞지 않으면 디스코드 프로필로 전송돼요.'
+        `**상품** ${d.item || '미입력'}`,
+        `**수량** ${d.count || '미입력'}`,
+        `**금액** ${d.price || '미입력'}`,
+        `**로블록스 아이디** ${d.roblox || '미입력'}`,
+        '-# 판매자 / 구매자는 아래 메뉴에서 이름을 검색해 고르면 바로 적용돼요.'
     ].join('\n');
-    const comps = [{ type: 10, content: body }];
-    if (!d.done) {
-        const sel = (cid, ph, id) => ({
-            type: 1,
-            components: [{
-                type: 5, custom_id: `${cid}:${panelId}`, placeholder: ph, min_values: 1, max_values: 1,
-                ...(id ? { default_values: [{ id, type: 'user' }] } : {})
-            }]
-        });
-        comps.push(
-            { type: 14, divider: true, spacing: 1 },
-            sel('ttlog_seller', '판매자 변경', d.sellerId),
-            sel('ttlog_buyer', '구매자 변경', d.buyerId),
-            { type: 1, components: [{ type: 2, style: 2, label: '정보 수정', custom_id: `ttlog_edit:${panelId}` }] }
-        );
-    }
-    return { components: [{ type: 17, accent_color: d.done ? DONE_COLOR : PANEL_COLOR, components: comps }], allowedMentions: { parse: [] } };
+    const sel = (cid, ph, id) => ({
+        type: 1,
+        components: [{
+            type: 5, custom_id: `${cid}:${panelId}`, placeholder: ph, min_values: 1, max_values: 1,
+            ...(id ? { default_values: [{ id, type: 'user' }] } : {})
+        }]
+    });
+    return {
+        components: [{
+            type: 17,
+            accent_color: PANEL_COLOR,
+            components: [
+                { type: 10, content: body },
+                { type: 14, divider: true, spacing: 1 },
+                { type: 10, content: '**판매자**' },
+                sel('ttlog_seller', '판매자 선택', d.sellerId),
+                { type: 10, content: '**구매자**' },
+                sel('ttlog_buyer', '구매자 선택', d.buyerId),
+                { type: 14, divider: true, spacing: 1 },
+                { type: 1, components: [{ type: 2, style: 1, label: '상품 · 수량 · 금액 수정', custom_id: `ttlog_info:${panelId}` }] }
+            ]
+        }],
+        allowedMentions: { parse: [] }
+    };
 }
 
-function editModal(customId, title, d) {
+function infoModal(panelId, d) {
     const input = (cid, label, value, placeholder, required = true) => {
         const t = new TextInputBuilder().setCustomId(cid).setLabel(label).setStyle(TextInputStyle.Short).setRequired(required).setMaxLength(200);
         if (placeholder) t.setPlaceholder(placeholder);
         if (value) t.setValue(String(value).slice(0, 200));
         return new ActionRowBuilder().addComponents(t);
     };
-    return new ModalBuilder().setCustomId(customId).setTitle(title).addComponents(
+    return new ModalBuilder().setCustomId(`ttlog_modal:${panelId}`).setTitle('구매로그 정보 수정').addComponents(
         input('kind', '종류 (로벅스 / 인게임 / 기타)', d.kind ? KIND_LABEL[d.kind] : '', '로벅스'),
         input('item', '상품', d.item, '로벅스는 "로벅스"'),
         input('count', '수량 (로벅스는 로벅스 수량)', d.count, '1000'),
@@ -324,129 +466,25 @@ function editModal(customId, title, d) {
     );
 }
 
-// 구매자용 입력창 (금액은 판매자가 [정보 수정]에서 적어요)
-function buyerModal(panelId, d) {
-    const spec = {
-        kind: ['종류 (로벅스 / 인게임 / 기타)', '로벅스', true],
-        item: [d.kind === 'ingame' ? '게임 / 상품 이름' : '상품 이름', d.kind === 'ingame' ? '블록스 피스 - 레오파드' : '구매할 상품', true],
-        count: [d.kind === 'robux' ? '로벅스 수량' : '수량', d.kind === 'robux' ? '1000' : '1', true],
-        roblox: ['로블록스 닉네임', '로블록스 닉네임 (디스플레이 이름 X)', d.kind !== 'etc']
-    };
-    const keys = d.kind === 'etc' ? ['item', 'count', 'roblox'] : buyerFields(d.kind).concat(d.kind ? [] : ['roblox']);
-    const modal = new ModalBuilder().setCustomId(`ttlog_inmodal:${panelId}`).setTitle('구매 정보 입력');
-    for (const k of keys) {
-        const [label, ph, req] = spec[k];
-        const t = new TextInputBuilder().setCustomId(k).setLabel(label).setStyle(TextInputStyle.Short).setRequired(req).setMaxLength(100).setPlaceholder(ph);
-        const cur = k === 'kind' ? (d.kind ? KIND_LABEL[d.kind] : '') : d[k];
-        if (cur) t.setValue(String(cur).slice(0, 100));
-        modal.addComponents(new ActionRowBuilder().addComponents(t));
+// 지급완료 때 빈 칸만 묻는 창
+function missingForDone(d) {
+    return ['buyer', 'kind', 'item', 'count', 'price'].filter((k) => (k === 'buyer' ? !d.buyerId : !d[k]));
+}
+function doneModal(panelId, d, miss) {
+    const keys = [...miss];
+    if (!d.roblox && keys.length < 5) keys.push('roblox');
+    const ph = { buyer: '123456789012345678', kind: '로벅스 / 인게임 / 기타', item: '상품 이름', count: d.kind === 'robux' ? '로벅스 수량' : '수량', price: '10000원', roblox: '없으면 비워두기 (디스코드 프로필로 전송)' };
+    const modal = new ModalBuilder().setCustomId(`ttlog_donemodal:${panelId}`).setTitle('빈 칸만 채워주세요');
+    for (const k of keys.slice(0, 5)) {
+        modal.addComponents(new ActionRowBuilder().addComponents(
+            new TextInputBuilder().setCustomId(k).setLabel(FIELD_NAME[k]).setStyle(TextInputStyle.Short)
+                .setRequired(k !== 'roblox').setMaxLength(100).setPlaceholder(ph[k])
+        ));
     }
     return modal;
 }
 
-function applyModal(interaction, d) {
-    const v = (k) => interaction.fields.getTextInputValue(k).trim();
-    d.kind = parseKindInput(v('kind')) || d.kind;
-    d.item = v('item');
-    d.count = v('count');
-    d.price = v('price');
-    d.roblox = v('roblox');
-    return d;
-}
-
-// ---------- 티켓 대화에서 자동으로 채우기 ----------
-const num = (v) => parseFloat(String(v).replace(/,/g, ''));
-const fmt = (n) => Math.round(n).toLocaleString('ko-KR');
-
-// 메시지 하나를 읽어서 d 에 채워요. 바뀐 게 있으면 true
-async function scanMessage(d, message, { staff, buyer }) {
-    const t = String(message.content || '').trim();
-    if (!t) return false;
-    let changed = false;
-    const set = (k, v, force = false) => {
-        if (v && (force || !d[k]) && d[k] !== v) { d[k] = v; changed = true; }
-    };
-
-    // 판매자 계산 명령어: $가격 (만 원당 로벅스) (로벅스) / $로벅스 (만 원당 로벅스) (금액)
-    let m;
-    if (staff && (m = t.match(/^\$가격\s+([\d.,]+)\s+([\d.,]+)/))) {
-        const rate = num(m[1]), robux = num(m[2]);
-        if (rate > 0 && robux > 0) {
-            set('count', fmt(robux), true);
-            set('price', `${fmt(Math.ceil((robux / rate) * 10000 / 100) * 100)}원`, true);
-            if (!d.kind) set('kind', 'robux');
-        }
-        return changed;
-    }
-    if (staff && (m = t.match(/^\$로벅스\s+([\d.,]+)\s+([\d.,]+)/))) {
-        const rate = num(m[1]), money = num(m[2]);
-        if (rate > 0 && money > 0) {
-            set('count', fmt(Math.floor((money / 10000) * rate)), true);
-            set('price', `${fmt(money)}원`, true);
-            if (!d.kind) set('kind', 'robux');
-        }
-        return changed;
-    }
-    if (t.startsWith('$') || t.startsWith('/') || t.startsWith('!')) return false;
-
-    // 금액: "12,000원", "1.5만원"
-    if ((m = t.match(/([\d.]+)\s*만\s*원/))) set('price', `${fmt(num(m[1]) * 10000)}원`);
-    else if ((m = t.match(/(\d[\d,]{2,})\s*원/))) set('price', `${fmt(num(m[1]))}원`);
-
-    // 수량: "2400 로벅스", "3개"
-    if ((m = t.match(/(\d[\d,]*)\s*(?:로벅스|robux|rbx|알)/i))) set('count', fmt(num(m[1])));
-    else if ((m = t.match(/(\d[\d,]*)\s*(?:개|장|세트)/))) set('count', m[1]);
-    else if (buyer && !d.count && /^\d[\d,]*$/.test(t) && !d.price) {
-        // 구매자가 숫자만 보냈을 때 (로벅스 티켓은 10 이상만)
-        if (d.kind !== 'robux' || num(t) >= 10) set('count', fmt(num(t)));
-    }
-
-    // 로블록스 닉네임 (구매자 메시지만, 실제로 있는 아이디인지 확인)
-    if (buyer && !d.roblox && deps.lookupRoblox) {
-        const cand = (t.match(/(?:닉네임|닉|아이디|로블록스|로블)\s*(?:은|는|:|：)?\s*([A-Za-z0-9_]{3,20})\b/) || [])[1]
-            || (/^[A-Za-z0-9_]{3,20}$/.test(t) && !/^\d+$/.test(t) ? t : null);
-        if (cand) {
-            const r = await deps.lookupRoblox(cand).catch(() => null);
-            if (r && r.status === 'ok') set('roblox', r.name || cand);
-        }
-    }
-    return changed;
-}
-
-// 채널의 지난 대화를 훑어서 빈 칸 채우기 (지급완료 직전 / 재시작 후 대비)
-async function scanHistory(channel, d, limit = 100) {
-    const msgs = [...(await channel.messages.fetch({ limit })).values()]
-        .filter((m) => !m.author.bot)
-        .sort((a, b) => a.createdTimestamp - b.createdTimestamp);
-    let changed = false;
-    for (const m of msgs) {
-        const staff = m.member ? deps.canUse(m.member) : false;
-        if (await scanMessage(d, m, { staff, buyer: m.author.id === d.buyerId })) changed = true;
-    }
-    return changed;
-}
-
-function activePanelOf(channelId) {
-    const list = Object.entries(allPanels()).filter(([, p]) => p.channelId === channelId && !p.done);
-    if (!list.length) return null;
-    list.sort((a, b) => b[1].ts - a[1].ts);
-    return { id: list[0][0], d: list[0][1] };
-}
-
-async function onChatMessage(message) {
-    if (!message.guild || message.author.bot) return;
-    const p = activePanelOf(message.channel.id);
-    if (!p) return;
-    const staff = message.member ? deps.canUse(message.member) : false;
-    const buyer = message.author.id === p.d.buyerId;
-    if (!staff && !buyer) return;
-    if (await scanMessage(p.d, message, { staff, buyer })) {
-        if (p.d.kind === 'robux' && !p.d.item) p.d.item = '로벅스';
-        await refreshPanel(message.channel, p.id, p.d);
-    }
-}
-
-// ---------- 패널 생성 ----------
+// ---------- 패널 생성 / 갱신 ----------
 async function sendPanel(channel, d) {
     const msg = await channel.send({ flags: FLAG_V2, ...(await panelPayload(channel.client, d)) });
     savePanel(msg.id, d);
@@ -456,7 +494,7 @@ async function sendPanel(channel, d) {
 async function refreshPanel(channel, panelId, d) {
     savePanel(panelId, d);
     const msg = await channel.messages.fetch(panelId).catch(() => null);
-    if (msg) await msg.edit(await panelPayload(channel.client, d)).catch((e) => console.error('[티켓툴] 패널 수정 실패:', e.message));
+    if (msg) await msg.edit(await panelPayload(channel.client, d)).catch((e) => console.error('[티켓] 패널 수정 실패:', e.message));
 }
 
 function shouldSkip(channel) {
@@ -464,9 +502,8 @@ function shouldSkip(channel) {
     return SKIP_KEYWORDS.some((k) => text.includes(k.toLowerCase()));
 }
 
-async function onTicketToolMessage(message) {
-    const channel = message.channel;
-    if (!message.guild || !channel || handled.has(channel.id)) return;
+async function setupTicket(channel) {
+    if (!channel || !channel.guild || handled.has(channel.id)) return;
     if (!channel.createdTimestamp || Date.now() - channel.createdTimestamp > PANEL_WINDOW_MS) return;
     if (shouldSkip(channel)) return;
     handled.add(channel.id);
@@ -476,39 +513,16 @@ async function onTicketToolMessage(message) {
         // 재시작 직후 등으로 이미 패널이 있으면 다시 만들지 않기
         if (Object.values(allPanels()).some((p) => p.channelId === channel.id)) return;
         const d = await gatherFromChannel(channel);
-        await sendPanel(channel, d);
+        const msg = await sendPanel(channel, d);
+        if (d.buyerId) await startQuestions(channel, msg.id, d);
+        // 구매자를 못 찾았으면 처음 채팅한 사람을 구매자로 잡고 그때 질문을 시작해요
     } catch (e) {
         handled.delete(channel.id);
-        console.error('[티켓툴] 구매로그 패널 생성 실패:', e.message);
+        console.error('[티켓] 구매로그 패널 생성 실패:', e.message);
     }
 }
 
 // ---------- 지급완료 ----------
-FIELD_NAME.buyer = '구매자 (디스코드 유저 ID)';
-function missingForDone(d) {
-    const miss = [];
-    if (!d.buyerId) miss.push('buyer');
-    if (!d.kind) miss.push('kind');
-    if (!d.item) miss.push('item');
-    if (!d.count) miss.push('count');
-    if (!d.price) miss.push('price');
-    return miss;
-}
-
-// 빈 칸만 보여주는 입력창 (로블록스 닉네임도 비어 있으면 같이, 최대 5칸)
-function doneModal(panelId, d, miss) {
-    const keys = [...miss];
-    if (!d.roblox && d.kind !== 'etc' && keys.length < 5) keys.push('roblox');
-    const ph = { buyer: '123456789012345678', kind: '로벅스 / 인게임 / 기타', item: '상품 이름', count: d.kind === 'robux' ? '로벅스 수량' : '수량', price: '10000원', roblox: '없으면 비워두기 (디스코드 프로필로 전송)' };
-    const modal = new ModalBuilder().setCustomId(`ttlog_donemodal:${panelId}`).setTitle('빈 칸만 채워주세요');
-    for (const k of keys.slice(0, 5)) {
-        const t = new TextInputBuilder().setCustomId(k).setLabel(FIELD_NAME[k]).setStyle(TextInputStyle.Short)
-            .setRequired(k !== 'roblox').setMaxLength(100).setPlaceholder(ph[k]);
-        modal.addComponents(new ActionRowBuilder().addComponents(t));
-    }
-    return modal;
-}
-
 async function finishPurchase(interaction, channel, panelId, d) {
     busy.add(panelId);
     try {
@@ -536,6 +550,7 @@ async function finishPurchase(interaction, channel, panelId, d) {
 
         Object.assign(d, {
             done: true,
+            asking: null,
             sellerId: d.sellerId || seller.id,
             by: interaction.user.id,
             code: res.purchaseId ? deps.purchaseCode(res.purchaseId) : null
@@ -544,7 +559,7 @@ async function finishPurchase(interaction, channel, panelId, d) {
         for (const w of res.warns) interaction.followUp(eph(w)).catch(() => {});
         await interaction.editReply({ content: '지급완료 처리가 완료되었습니다.' }).catch(() => {});
     } catch (e) {
-        console.error('[티켓툴] 지급완료 처리 실패:', e);
+        console.error('[티켓] 지급완료 처리 실패:', e);
         await interaction.editReply({ content: '처리 중 오류가 났어요. 잠시 후 다시 시도하거나 /지급완료 명령어를 사용해 주세요.' }).catch(() => {});
     } finally {
         busy.delete(panelId);
@@ -559,6 +574,11 @@ async function handleInteraction(interaction) {
     if (!cid.startsWith('ttlog_')) return false;
     const [action, ref] = cid.split(':');
 
+    if (!deps.canUse(interaction.member)) {
+        await interaction.reply(eph('판매자 또는 관리자만 사용할 수 있어요.')).catch(() => {});
+        return true;
+    }
+
     const panelId = ref || (interaction.message && interaction.message.id);
     const d = getPanel(panelId);
     if (!d) {
@@ -566,33 +586,14 @@ async function handleInteraction(interaction) {
         return true;
     }
     const channel = interaction.channel;
-    const staff = deps.canUse(interaction.member);
-    const isBuyerAction = action === 'ttlog_input' || action === 'ttlog_inmodal';
 
-    if (!staff && !(isBuyerAction && interaction.user.id === d.buyerId)) {
-        await interaction.reply(eph(isBuyerAction ? '이 티켓의 구매자만 입력할 수 있어요.' : '판매자 또는 관리자만 사용할 수 있어요.')).catch(() => {});
-        return true;
-    }
-
-    // 구매로그 확인
-    if (action === 'ttlog_view') {
-        await interaction.reply({ flags: FLAG_V2 | FLAG_EPHEMERAL, ...viewPayload(panelId, d) });
-        return true;
-    }
-
-    // 추가 구매 (같은 티켓에서 또 구매) → 양식 입력 후 새 패널
+    // 추가 구매 (같은 티켓에서 또 구매) → 바로 새 패널 (수량·금액은 $가격 이나 지급완료 때 입력)
     if (action === 'ttlog_more') {
-        const base = { ...d, count: '', price: '', item: d.kind === 'robux' ? '로벅스' : '' };
-        await interaction.showModal(editModal(`ttlog_addmodal:${panelId}`, '추가 구매 정보 입력', base));
-        return true;
-    }
-    if (action === 'ttlog_addmodal' && interaction.isModalSubmit()) {
-        const nd = applyModal(interaction, {
-            channelId: channel.id, buyerId: d.buyerId, sellerId: d.sellerId, kind: d.kind,
-            item: '', count: '', price: '', roblox: d.roblox
-        });
         await interaction.deferUpdate();
-        await sendPanel(channel, nd);
+        await sendPanel(channel, {
+            channelId: channel.id, buyerId: d.buyerId, sellerId: d.sellerId, kind: d.kind,
+            item: d.kind === 'robux' ? '로벅스' : '', count: '', price: '', roblox: d.roblox, asked: true
+        });
         return true;
     }
 
@@ -601,62 +602,52 @@ async function handleInteraction(interaction) {
         return true;
     }
 
-    // 구매 정보 입력 (구매자)
-    if (action === 'ttlog_input') {
-        await interaction.showModal(buyerModal(panelId, d));
-        return true;
-    }
-    if (action === 'ttlog_inmodal' && interaction.isModalSubmit()) {
-        const has = (k) => { try { return interaction.fields.getTextInputValue(k).trim(); } catch (e) { return null; } };
-        const kind = has('kind');
-        if (kind) d.kind = parseKindInput(kind);
-        for (const k of ['item', 'count', 'roblox']) {
-            const v = has(k);
-            if (v !== null) d[k] = v;
-        }
-        if (d.kind === 'robux' && !d.item) d.item = '로벅스';
-        await interaction.deferUpdate();
-        await refreshPanel(channel, panelId, d);
+    // 정보 수정 → 나만 보이는 수정 화면
+    if (action === 'ttlog_edit') {
+        await interaction.reply({ flags: FLAG_V2 | FLAG_EPHEMERAL, ...editPayload(panelId, d) });
         return true;
     }
 
-    // 판매자 / 구매자 변경 (구매로그 확인 화면)
+    // 판매자 / 구매자 선택 → 바로 적용
     if (interaction.isUserSelectMenu()) {
         const u = interaction.users.first();
         if (!u || u.bot) {
             await interaction.reply(eph('봇은 선택할 수 없어요.'));
             return true;
         }
+        const buyerChanged = action === 'ttlog_buyer' && d.buyerId !== u.id;
         if (action === 'ttlog_seller') d.sellerId = u.id;
         if (action === 'ttlog_buyer') d.buyerId = u.id;
-        await interaction.update(viewPayload(panelId, d));
+        await interaction.update(editPayload(panelId, d));
         await refreshPanel(channel, panelId, d);
+        // 구매자가 바뀌었고 아직 질문이 안 끝났으면 새 구매자에게 질문
+        if (buyerChanged && !d.asked) await startQuestions(channel, panelId, d);
         return true;
     }
 
-    // 정보 수정
-    if (action === 'ttlog_edit') {
-        await interaction.showModal(editModal(`ttlog_modal:${panelId}`, '구매로그 정보 수정', d));
+    // 상품 · 수량 · 금액 수정
+    if (action === 'ttlog_info') {
+        await interaction.showModal(infoModal(panelId, d));
         return true;
     }
     if (action === 'ttlog_modal' && interaction.isModalSubmit()) {
-        applyModal(interaction, d);
-        const fromView = interaction.message && interaction.message.id !== panelId;
-        if (fromView) await interaction.update(viewPayload(panelId, d));
+        const v = (k) => interaction.fields.getTextInputValue(k).trim();
+        d.kind = parseKindInput(v('kind')) || d.kind;
+        d.item = v('item');
+        d.count = v('count');
+        d.price = v('price');
+        d.roblox = v('roblox');
+        if (interaction.message) await interaction.update(editPayload(panelId, d));
         else await interaction.deferUpdate();
         await refreshPanel(channel, panelId, d);
         return true;
     }
 
-    // 지급완료 → 빈 칸이 있으면 대화에서 한 번 더 찾아보고, 그래도 없으면 빈 칸만 적는 창 띄우기
+    // 지급완료 → 빈 칸이 있으면 빈 칸만 묻는 창
     if (action === 'ttlog_done') {
         if (busy.has(panelId)) {
             await interaction.reply(eph('지금 처리 중이에요. 잠시만 기다려 주세요.'));
             return true;
-        }
-        if (missingForDone(d).length) {
-            const found = await Promise.race([scanHistory(channel, d).catch(() => false), new Promise((r) => setTimeout(() => r(false), 1500))]);
-            if (found) savePanel(panelId, d);
         }
         const miss = missingForDone(d);
         if (miss.length) {
@@ -671,7 +662,7 @@ async function handleInteraction(interaction) {
         for (const k of ['buyer', 'kind', 'item', 'count', 'price', 'roblox']) {
             let v = null;
             try { v = interaction.fields.getTextInputValue(k).trim(); } catch (e) {}
-            if (v === null || v === '') continue;
+            if (!v) continue;
             if (k === 'kind') d.kind = parseKindInput(v);
             else if (k === 'buyer') d.buyerId = (v.match(/\d{15,25}/) || [])[0] || d.buyerId;
             else d[k] = v;
@@ -692,16 +683,25 @@ async function handleInteraction(interaction) {
         return true;
     }
 
-    return false;
+    // 예전 버전 패널의 버튼 (구매로그 확인 / 구매 정보 입력 등)
+    await interaction.reply(eph('예전 버전 버튼이에요. [정보 수정] 을 사용해 주세요.')).catch(() => {});
+    return true;
 }
 
 function init(client, d) {
     deps = d;
+    // 이름에 ticket / 티켓 이 들어간 채널이 만들어지면 패널 생성
+    client.on('channelCreate', (channel) => {
+        if (channel.type === ChannelType.GuildText && TICKET_NAME_RE.test(channel.name)) {
+            setupTicket(channel).catch((e) => console.error('[티켓] 오류:', e.message));
+        }
+    });
     client.on('messageCreate', (message) => {
+        // 티켓 이름이 ticket 이 아니어도(예: "라프-0012") 티켓툴이 연 티켓이면 패널 생성
         if (message.author && TICKET_TOOL_BOT_IDS.includes(message.author.id)) {
-            onTicketToolMessage(message).catch((e) => console.error('[티켓툴] 오류:', e.message));
+            setupTicket(message.channel).catch((e) => console.error('[티켓] 오류:', e.message));
         } else {
-            onChatMessage(message).catch((e) => console.error('[티켓툴] 대화 읽기 오류:', e.message));
+            onChatMessage(message).catch((e) => console.error('[티켓] 대화 읽기 오류:', e.message));
         }
     });
     client.on('channelDelete', (ch) => handled.delete(ch.id));
