@@ -354,6 +354,98 @@ function applyModal(interaction, d) {
     return d;
 }
 
+// ---------- 티켓 대화에서 자동으로 채우기 ----------
+const num = (v) => parseFloat(String(v).replace(/,/g, ''));
+const fmt = (n) => Math.round(n).toLocaleString('ko-KR');
+
+// 메시지 하나를 읽어서 d 에 채워요. 바뀐 게 있으면 true
+async function scanMessage(d, message, { staff, buyer }) {
+    const t = String(message.content || '').trim();
+    if (!t) return false;
+    let changed = false;
+    const set = (k, v, force = false) => {
+        if (v && (force || !d[k]) && d[k] !== v) { d[k] = v; changed = true; }
+    };
+
+    // 판매자 계산 명령어: $가격 (만 원당 로벅스) (로벅스) / $로벅스 (만 원당 로벅스) (금액)
+    let m;
+    if (staff && (m = t.match(/^\$가격\s+([\d.,]+)\s+([\d.,]+)/))) {
+        const rate = num(m[1]), robux = num(m[2]);
+        if (rate > 0 && robux > 0) {
+            set('count', fmt(robux), true);
+            set('price', `${fmt(Math.ceil((robux / rate) * 10000 / 100) * 100)}원`, true);
+            if (!d.kind) set('kind', 'robux');
+        }
+        return changed;
+    }
+    if (staff && (m = t.match(/^\$로벅스\s+([\d.,]+)\s+([\d.,]+)/))) {
+        const rate = num(m[1]), money = num(m[2]);
+        if (rate > 0 && money > 0) {
+            set('count', fmt(Math.floor((money / 10000) * rate)), true);
+            set('price', `${fmt(money)}원`, true);
+            if (!d.kind) set('kind', 'robux');
+        }
+        return changed;
+    }
+    if (t.startsWith('$') || t.startsWith('/') || t.startsWith('!')) return false;
+
+    // 금액: "12,000원", "1.5만원"
+    if ((m = t.match(/([\d.]+)\s*만\s*원/))) set('price', `${fmt(num(m[1]) * 10000)}원`);
+    else if ((m = t.match(/(\d[\d,]{2,})\s*원/))) set('price', `${fmt(num(m[1]))}원`);
+
+    // 수량: "2400 로벅스", "3개"
+    if ((m = t.match(/(\d[\d,]*)\s*(?:로벅스|robux|rbx|알)/i))) set('count', fmt(num(m[1])));
+    else if ((m = t.match(/(\d[\d,]*)\s*(?:개|장|세트)/))) set('count', m[1]);
+    else if (buyer && !d.count && /^\d[\d,]*$/.test(t) && !d.price) {
+        // 구매자가 숫자만 보냈을 때 (로벅스 티켓은 10 이상만)
+        if (d.kind !== 'robux' || num(t) >= 10) set('count', fmt(num(t)));
+    }
+
+    // 로블록스 닉네임 (구매자 메시지만, 실제로 있는 아이디인지 확인)
+    if (buyer && !d.roblox && deps.lookupRoblox) {
+        const cand = (t.match(/(?:닉네임|닉|아이디|로블록스|로블)\s*(?:은|는|:|：)?\s*([A-Za-z0-9_]{3,20})\b/) || [])[1]
+            || (/^[A-Za-z0-9_]{3,20}$/.test(t) && !/^\d+$/.test(t) ? t : null);
+        if (cand) {
+            const r = await deps.lookupRoblox(cand).catch(() => null);
+            if (r && r.status === 'ok') set('roblox', r.name || cand);
+        }
+    }
+    return changed;
+}
+
+// 채널의 지난 대화를 훑어서 빈 칸 채우기 (지급완료 직전 / 재시작 후 대비)
+async function scanHistory(channel, d, limit = 100) {
+    const msgs = [...(await channel.messages.fetch({ limit })).values()]
+        .filter((m) => !m.author.bot)
+        .sort((a, b) => a.createdTimestamp - b.createdTimestamp);
+    let changed = false;
+    for (const m of msgs) {
+        const staff = m.member ? deps.canUse(m.member) : false;
+        if (await scanMessage(d, m, { staff, buyer: m.author.id === d.buyerId })) changed = true;
+    }
+    return changed;
+}
+
+function activePanelOf(channelId) {
+    const list = Object.entries(allPanels()).filter(([, p]) => p.channelId === channelId && !p.done);
+    if (!list.length) return null;
+    list.sort((a, b) => b[1].ts - a[1].ts);
+    return { id: list[0][0], d: list[0][1] };
+}
+
+async function onChatMessage(message) {
+    if (!message.guild || message.author.bot) return;
+    const p = activePanelOf(message.channel.id);
+    if (!p) return;
+    const staff = message.member ? deps.canUse(message.member) : false;
+    const buyer = message.author.id === p.d.buyerId;
+    if (!staff && !buyer) return;
+    if (await scanMessage(p.d, message, { staff, buyer })) {
+        if (p.d.kind === 'robux' && !p.d.item) p.d.item = '로벅스';
+        await refreshPanel(message.channel, p.id, p.d);
+    }
+}
+
 // ---------- 패널 생성 ----------
 async function sendPanel(channel, d) {
     const msg = await channel.send({ flags: FLAG_V2, ...(await panelPayload(channel.client, d)) });
@@ -388,6 +480,74 @@ async function onTicketToolMessage(message) {
     } catch (e) {
         handled.delete(channel.id);
         console.error('[티켓툴] 구매로그 패널 생성 실패:', e.message);
+    }
+}
+
+// ---------- 지급완료 ----------
+FIELD_NAME.buyer = '구매자 (디스코드 유저 ID)';
+function missingForDone(d) {
+    const miss = [];
+    if (!d.buyerId) miss.push('buyer');
+    if (!d.kind) miss.push('kind');
+    if (!d.item) miss.push('item');
+    if (!d.count) miss.push('count');
+    if (!d.price) miss.push('price');
+    return miss;
+}
+
+// 빈 칸만 보여주는 입력창 (로블록스 닉네임도 비어 있으면 같이, 최대 5칸)
+function doneModal(panelId, d, miss) {
+    const keys = [...miss];
+    if (!d.roblox && d.kind !== 'etc' && keys.length < 5) keys.push('roblox');
+    const ph = { buyer: '123456789012345678', kind: '로벅스 / 인게임 / 기타', item: '상품 이름', count: d.kind === 'robux' ? '로벅스 수량' : '수량', price: '10000원', roblox: '없으면 비워두기 (디스코드 프로필로 전송)' };
+    const modal = new ModalBuilder().setCustomId(`ttlog_donemodal:${panelId}`).setTitle('빈 칸만 채워주세요');
+    for (const k of keys.slice(0, 5)) {
+        const t = new TextInputBuilder().setCustomId(k).setLabel(FIELD_NAME[k]).setStyle(TextInputStyle.Short)
+            .setRequired(k !== 'roblox').setMaxLength(100).setPlaceholder(ph[k]);
+        modal.addComponents(new ActionRowBuilder().addComponents(t));
+    }
+    return modal;
+}
+
+async function finishPurchase(interaction, channel, panelId, d) {
+    busy.add(panelId);
+    try {
+        const client = interaction.client;
+        const buyer = await client.users.fetch(d.buyerId);
+        const seller = d.sellerId ? await client.users.fetch(d.sellerId) : interaction.user;
+
+        const res = await deps.completePurchase({
+            guild: interaction.guild,
+            channel,
+            buyer,
+            kind: d.kind,
+            item: d.item,
+            count: d.count,
+            price: d.price,
+            robloxInput: d.roblox || 'X',
+            seller,
+            fallbackDiscord: true // 로블록스 아이디가 맞지 않으면 디스코드 프로필로
+        });
+        if (!res.ok) {
+            savePanel(panelId, d);
+            await interaction.editReply({ content: res.error });
+            return;
+        }
+
+        Object.assign(d, {
+            done: true,
+            sellerId: d.sellerId || seller.id,
+            by: interaction.user.id,
+            code: res.purchaseId ? deps.purchaseCode(res.purchaseId) : null
+        });
+        await refreshPanel(channel, panelId, d);
+        for (const w of res.warns) interaction.followUp(eph(w)).catch(() => {});
+        await interaction.editReply({ content: '지급완료 처리가 완료되었습니다.' }).catch(() => {});
+    } catch (e) {
+        console.error('[티켓툴] 지급완료 처리 실패:', e);
+        await interaction.editReply({ content: '처리 중 오류가 났어요. 잠시 후 다시 시도하거나 /지급완료 명령어를 사용해 주세요.' }).catch(() => {});
+    } finally {
+        busy.delete(panelId);
     }
 }
 
@@ -488,59 +648,47 @@ async function handleInteraction(interaction) {
         return true;
     }
 
-    // 지급완료
+    // 지급완료 → 빈 칸이 있으면 대화에서 한 번 더 찾아보고, 그래도 없으면 빈 칸만 적는 창 띄우기
     if (action === 'ttlog_done') {
-        const missing = [
-            !d.buyerId && '구매자', !d.kind && '종류', !d.item && '상품', !d.count && '수량', !d.price && '금액'
-        ].filter(Boolean);
-        // 로블록스 닉네임이 비어 있으면 디스코드 프로필로 전송돼요 (지급완료는 막지 않음)
-        if (missing.length) {
-            await interaction.reply(eph(`아직 비어 있는 항목이 있어요: **${missing.join(', ')}**\n[정보 수정] 또는 [구매로그 확인]에서 채워주세요.`));
+        if (busy.has(panelId)) {
+            await interaction.reply(eph('지금 처리 중이에요. 잠시만 기다려 주세요.'));
+            return true;
+        }
+        if (missingForDone(d).length) {
+            const found = await Promise.race([scanHistory(channel, d).catch(() => false), new Promise((r) => setTimeout(() => r(false), 1500))]);
+            if (found) savePanel(panelId, d);
+        }
+        const miss = missingForDone(d);
+        if (miss.length) {
+            await interaction.showModal(doneModal(panelId, d, miss));
+            return true;
+        }
+        await interaction.reply(eph('지급완료를 처리 중입니다.'));
+        await finishPurchase(interaction, channel, panelId, d);
+        return true;
+    }
+    if (action === 'ttlog_donemodal' && interaction.isModalSubmit()) {
+        for (const k of ['buyer', 'kind', 'item', 'count', 'price', 'roblox']) {
+            let v = null;
+            try { v = interaction.fields.getTextInputValue(k).trim(); } catch (e) {}
+            if (v === null || v === '') continue;
+            if (k === 'kind') d.kind = parseKindInput(v);
+            else if (k === 'buyer') d.buyerId = (v.match(/\d{15,25}/) || [])[0] || d.buyerId;
+            else d[k] = v;
+        }
+        if (d.kind === 'robux' && !d.item) d.item = '로벅스';
+        const miss = missingForDone(d);
+        if (miss.length) {
+            savePanel(panelId, d);
+            await interaction.reply(eph(`아직 비어 있어요: **${miss.map((k) => FIELD_NAME[k]).join(', ')}**`));
             return true;
         }
         if (busy.has(panelId)) {
             await interaction.reply(eph('지금 처리 중이에요. 잠시만 기다려 주세요.'));
             return true;
         }
-        busy.add(panelId);
         await interaction.reply(eph('지급완료를 처리 중입니다.'));
-        try {
-            const client = interaction.client;
-            const buyer = await client.users.fetch(d.buyerId);
-            const seller = d.sellerId ? await client.users.fetch(d.sellerId) : interaction.user;
-
-            const res = await deps.completePurchase({
-                guild: interaction.guild,
-                channel,
-                buyer,
-                kind: d.kind,
-                item: d.item,
-                count: d.count,
-                price: d.price,
-                robloxInput: d.roblox || 'X',
-                seller,
-                fallbackDiscord: true // 로블록스 아이디가 맞지 않으면 디스코드 프로필로
-            });
-            if (!res.ok) {
-                await interaction.editReply({ content: res.error });
-                return true;
-            }
-
-            Object.assign(d, {
-                done: true,
-                sellerId: d.sellerId || seller.id,
-                by: interaction.user.id,
-                code: res.purchaseId ? deps.purchaseCode(res.purchaseId) : null
-            });
-            await refreshPanel(channel, panelId, d);
-            for (const w of res.warns) interaction.followUp(eph(w)).catch(() => {});
-            await interaction.editReply({ content: '지급완료 처리가 완료되었습니다.' }).catch(() => {});
-        } catch (e) {
-            console.error('[티켓툴] 지급완료 처리 실패:', e);
-            await interaction.editReply({ content: '처리 중 오류가 났어요. 잠시 후 다시 시도하거나 /지급완료 명령어를 사용해 주세요.' }).catch(() => {});
-        } finally {
-            busy.delete(panelId);
-        }
+        await finishPurchase(interaction, channel, panelId, d);
         return true;
     }
 
@@ -552,6 +700,8 @@ function init(client, d) {
     client.on('messageCreate', (message) => {
         if (message.author && TICKET_TOOL_BOT_IDS.includes(message.author.id)) {
             onTicketToolMessage(message).catch((e) => console.error('[티켓툴] 오류:', e.message));
+        } else {
+            onChatMessage(message).catch((e) => console.error('[티켓툴] 대화 읽기 오류:', e.message));
         }
     });
     client.on('channelDelete', (ch) => handled.delete(ch.id));
