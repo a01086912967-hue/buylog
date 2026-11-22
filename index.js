@@ -402,6 +402,7 @@ client.once('ready', async () => {
     tickettool.init(client, {
         completePurchase,
         purchaseCode: (id) => store.purchaseCode(id),
+        lookupRoblox: lookupRobloxUser, // 대화에서 로블록스 닉네임 확인용
         sellerRoleId: CALCULATOR_ROLE_ID, // "판매자" 역할 (티켓 이름으로 판매자 자동 지정에 사용)
         canUse: (member) => isAdmin(member) || !!(member && member.roles.cache.has(CALCULATOR_ROLE_ID))
     });
