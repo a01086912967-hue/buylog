@@ -33,6 +33,7 @@ const tickets = require('./tickets');
 const community = require('./community');
 const web = require('./web');
 const weekly = require('./weekly');
+const tickettool = require('./tickettool');
 const { renderProfileCard, renderStatsCard, renderRankCard, renderHistoryCard, renderSellerCard, ymd } = require('./infoCards');
 const { SERVER_ROLES, resolveGrade } = require('./roles');
 
@@ -82,6 +83,173 @@ async function getGuildIconBuf(guild) {
     } catch (e) {
         return null;
     }
+}
+
+// ==================== 지급완료 처리 (공통) ====================
+// /지급완료 명령어와 티켓툴 구매로그 패널의 [지급완료] 버튼이 같이 사용해요.
+// 반환: { ok: true, purchaseId, warns: [] } 또는 { ok: false, error }
+async function completePurchase({ guild, channel, buyer, kind, item, count, price, robloxInput, seller }) {
+    const warns = [];
+    robloxInput = String(robloxInput || '').trim();
+
+    // 1) 로블록스 아이디 확인 (아바타 필수 → 없는 아이디면 아무것도 처리하지 않음)
+    const skipRoblox = robloxInput.toLowerCase() === 'x'; // X 입력 시 로블록스 없이 디스코드 프사만
+    const roblox = skipRoblox ? { status: 'skip' } : await lookupRobloxUser(robloxInput);
+    if (roblox.status === 'notfound') {
+        return { ok: false, error: `❌ 로블록스 아이디 \`${robloxInput}\` 을(를) 찾을 수 없어요. 철자를 확인하고 다시 입력해 주세요. (아무것도 처리되지 않았어요)` };
+    }
+
+    const logChannel = guild.channels.cache.get(LOG_CHANNEL_ID);
+    if (!logChannel) return { ok: false, error: '로그 채널을 찾을 수 없습니다.' };
+
+    // 2) 역할 부여 (기존 동작 그대로)
+    let buyerMember = null;
+    try {
+        buyerMember = await guild.members.fetch(buyer.id);
+        if (buyerMember && !buyerMember.roles.cache.has(ROLE_ID)) {
+            await buyerMember.roles.add(ROLE_ID);
+        }
+    } catch (error) {
+        console.error('역할 부여 중 오류 발생:', error);
+    }
+
+    // 3) 구매 감사 카드 이미지 생성
+    const summary = buildSummary(kind, item, count);
+    let cardBuffer = null;
+
+    // 구매 정보 저장 ($정보 / $통계 / $랭킹에 사용)
+    let purchaseId = null;
+    try {
+        const rec = store.recordPurchase({ buyerId: buyer.id, kind, qty: count, price, sellerId: seller.id, item, guildId: guild.id });
+        purchaseId = rec.id;
+        // 티켓 채널에서 실행했다면 그 안의 대화 내용을 구매 기록에 같이 저장 (웹 대시보드 구매 로그에서 볼 수 있어요)
+        try {
+            // 릴리웨이 티켓 + 티켓툴(TicketTool) 등 다른 봇이 만든 티켓 채널(이름에 ticket/티켓/closed 포함)도 저장
+            const tk = store.findTicket(channel.id);
+            const chName = String(channel.name || '');
+            if (tk || /ticket|티켓|closed/i.test(chName) || tickettool.isTicketToolChannel(channel.id)) {
+                const messages = await tickets.collectChat(channel);
+                const num = tk ? tk.number : parseInt((chName.match(/\d+/) || [])[0], 10) || null;
+                const saved = store.attachChat(rec.id, { channelName: chName, ticketNumber: num, messages });
+                console.log(`[구매기록] ${store.purchaseCode(rec.id)} 대화 ${messages.length}줄 저장 (${chName}) ${saved ? '' : '실패'}`);
+            } else {
+                console.log(`[구매기록] ${store.purchaseCode(rec.id)} 티켓 채널이 아니라 대화를 저장하지 않았어요 (${chName})`);
+            }
+        } catch (e) {
+            console.error('티켓 대화 저장 실패:', e.message);
+        }
+        if (rec.spent === 0 || (kind === 'robux' && rec.robux === 0)) {
+            warns.push('⚠️ 금액/수량을 숫자로 읽지 못해 통계에 0으로 기록됐어요. /정보설정 으로 직접 고쳐주세요.');
+        }
+    } catch (e) {
+        console.error('구매 기록 저장 실패:', e);
+        warns.push('⚠️ 구매 기록을 저장하지 못했어요. (통계에 반영되지 않았어요)');
+    }
+
+    try {
+        let sellerMember = null;
+        try {
+            sellerMember = await guild.members.fetch(seller.id);
+        } catch (e) {}
+
+        const avatarOpts = { extension: 'png', size: 256 };
+        const buyerAvatarUrl = (buyerMember || buyer).displayAvatarURL(avatarOpts);
+        const sellerAvatarUrl = (sellerMember || seller).displayAvatarURL(avatarOpts);
+        const guildIconUrl = guild.iconURL({ extension: 'png', size: 128 });
+
+        const tryBuf = (url) => (url ? fetchBuffer(url).catch(() => null) : Promise.resolve(null));
+        const [buyerAvatarBuf, sellerAvatarBuf, guildIconBuf] = await Promise.all([
+            tryBuf(buyerAvatarUrl),
+            tryBuf(sellerAvatarUrl),
+            tryBuf(guildIconUrl)
+        ]);
+
+        let robloxAvatarBuf = null;
+        if (roblox.status === 'ok') {
+            robloxAvatarBuf = await fetchRobloxAvatar(roblox.id);
+        }
+        if (!robloxAvatarBuf) {
+            robloxAvatarBuf = buyerAvatarBuf; // 로블록스 서버 문제 시 디스코드 프사로 대체
+            if (!skipRoblox) warns.push('⚠️ 로블록스 아바타를 불러오지 못해 디스코드 프사로 대체했어요. (로블록스 서버 응답 문제일 수 있어요)');
+        }
+
+        cardBuffer = await renderPurchaseCard({
+            kind,
+            buyerName: buyer.username, // 서버 닉네임이 아닌 디스코드 아이디
+            buyerAvatarBuf,
+            robloxAvatarBuf,
+            hideBadge: skipRoblox,
+            item,
+            count,
+            price,
+            sellerName: seller.username, // 서버 닉네임이 아닌 디스코드 아이디
+            sellerAvatarBuf,
+            guildName: guild.name,
+            guildIconBuf
+        });
+    } catch (error) {
+        console.error('구매 카드 이미지 생성 실패:', error);
+    }
+
+    // 4) 구매 로그 전송
+    const shopName = (SHOP_NAME_OVERRIDE || guild.name).toUpperCase();
+    const guildIcon = guild.iconURL({ extension: 'png', size: 64 });
+    const footer = () => {
+        const text = purchaseId ? `구매 ID ${store.purchaseCode(purchaseId)} · ${shopName}` : shopName;
+        return guildIcon ? { text, iconURL: guildIcon } : { text };
+    };
+
+    if (cardBuffer) {
+        // 디스코드 아이디에 로블록스 프로필 링크 연결 (X 입력 시 링크 없이 아이디만)
+        const titleName = roblox.status === 'ok'
+            ? `[${buyer.username}](https://www.roblox.com/users/${roblox.id}/profile)`
+            : buyer.username;
+
+        const cardEmbed = new EmbedBuilder()
+            .setColor(SKY_COLOR)
+            .setDescription(`## ${titleName}님 ${summary} 구매 감사합니다 .ᐟ.ᐟ`.slice(0, 4000))
+            .setImage('attachment://purchase.png')
+            .setFooter(footer())
+            .setTimestamp();
+
+        await logChannel.send({
+            content: `${buyer}`,
+            embeds: [cardEmbed],
+            files: [new AttachmentBuilder(cardBuffer, { name: 'purchase.png' })]
+        });
+    } else {
+        // 이미지 생성 실패 시 기존 임베드로 대체
+        const logEmbed = new EmbedBuilder()
+            .setColor(LIGHT_PINK_COLOR)
+            .setDescription(
+                `${buyer}, ${item} (${count}) 구매 감사합니다.\n\n` +
+                `사용된 금액 : ${price}\n\n` +
+                `해당 관리 판매자: ${seller}`
+            )
+            .setImage(IMAGE_URL);
+        if (purchaseId) logEmbed.setFooter({ text: `구매 ID ${store.purchaseCode(purchaseId)}` });
+
+        await logChannel.send({ content: `${buyer}`, embeds: [logEmbed] });
+        warns.push('⚠️ 구매 카드 이미지 생성에 실패해 기존 임베드로 전송했어요. (폰트 파일/패키지 설치를 확인해 주세요)');
+    }
+
+    // 5) 티켓(현재) 채널에 지급 완료 안내
+    const replyEmbed = new EmbedBuilder()
+        .setColor(LIGHT_PINK_COLOR)
+        .setDescription(
+            `아이템이 정상적으로 지급되었습니다.\n` +
+            `https://discord.com/channels/1456729030459134115/1457384179535712473 작성은 필수입니다.`
+        )
+        .setFooter(footer());
+
+    const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('notice_btn').setLabel('주의사항').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setLabel('후기작성').setStyle(ButtonStyle.Link).setURL(`https://discord.com/channels/${guild.id}/1457384179535712473`)
+    );
+
+    await channel.send({ content: `${buyer}`, embeds: [replyEmbed], components: [row] });
+
+    return { ok: true, purchaseId, warns };
 }
 
 // ==================== 초대 추적 ====================
@@ -224,12 +392,21 @@ client.once('ready', async () => {
     community.init(client);
     web.start(client);
     weekly.start(client);
+    // 티켓툴 티켓이 열리면 구매로그 설정 패널 자동 생성 (판매자 역할 / 관리자만 사용)
+    tickettool.init(client, {
+        completePurchase,
+        purchaseCode: (id) => store.purchaseCode(id),
+        canUse: (member) => isAdmin(member) || !!(member && member.roles.cache.has(CALCULATOR_ROLE_ID))
+    });
 });
 
 client.on('interactionCreate', async interaction => {
 
     // 티켓 (패널 버튼·선택기 / 양식 / 닫기 / 다시 열기 / 삭제) - 대시보드에서 설정한 대로 동작
     if (await tickets.handleInteraction(interaction)) return;
+
+    // 티켓툴 구매로그 설정 패널 (판매자 선택 / 정보 수정 / 지급완료)
+    if (await tickettool.handleInteraction(interaction).catch((e) => { console.error('[티켓툴] 패널 오류:', e); return true; })) return;
 
     if (interaction.isButton()) {
 
@@ -593,195 +770,21 @@ client.on('interactionCreate', async interaction => {
 
         await interaction.reply({ content: '지급완료를 처리 중입니다.', ephemeral: true });
 
-        const buyer = interaction.options.getUser('구매자');
-        const kind = interaction.options.getString('종류');
-        const item = interaction.options.getString('상품');
-        const count = interaction.options.getString('수량');
-        const price = interaction.options.getString('금액');
-        const robloxInput = interaction.options.getString('로블아이디').trim();
-        const seller = interaction.options.getUser('판매자') || interaction.user;
-
-        // 1) 로블록스 아이디 확인 (아바타 필수 → 없는 아이디면 아무것도 처리하지 않음)
-        const skipRoblox = robloxInput.toLowerCase() === 'x'; // X 입력 시 로블록스 없이 디스코드 프사만
-        const roblox = skipRoblox ? { status: 'skip' } : await lookupRobloxUser(robloxInput);
-        if (roblox.status === 'notfound') {
-            return interaction.editReply({
-                content: `❌ 로블록스 아이디 \`${robloxInput}\` 을(를) 찾을 수 없어요. 철자를 확인하고 다시 입력해 주세요. (아무것도 처리되지 않았어요)`
-            });
-        }
-
-        // 2) 역할 부여 (기존 동작 그대로)
-        let buyerMember = null;
-        try {
-            buyerMember = await interaction.guild.members.fetch(buyer.id);
-            if (buyerMember && !buyerMember.roles.cache.has(ROLE_ID)) {
-                await buyerMember.roles.add(ROLE_ID);
-            }
-        } catch (error) {
-            console.error('역할 부여 중 오류 발생:', error);
-        }
-
-        const logChannel = interaction.guild.channels.cache.get(LOG_CHANNEL_ID);
-        if (!logChannel) {
-            return interaction.followUp({ content: '로그 채널을 찾을 수 없습니다.', ephemeral: true });
-        }
-
-        // 3) 구매 감사 카드 이미지 생성
-        const summary = buildSummary(kind, item, count);
-        let cardBuffer = null;
-        let warn = '';
-
-        // 구매 정보 저장 ($정보 / $통계 / $랭킹에 사용)
-        let statWarn = '';
-        let purchaseId = null;
-        try {
-            const rec = store.recordPurchase({ buyerId: buyer.id, kind, qty: count, price, sellerId: seller.id, item, guildId: interaction.guildId });
-            purchaseId = rec.id;
-            // 티켓 채널에서 실행했다면 그 안의 대화 내용을 구매 기록에 같이 저장 (웹 대시보드 구매 로그에서 볼 수 있어요)
-            try {
-                // 릴리웨이 티켓 + 티켓툴(TicketTool) 등 다른 봇이 만든 티켓 채널(이름에 ticket/티켓/closed 포함)도 저장
-                const tk = store.findTicket(interaction.channelId);
-                const chName = String(interaction.channel.name || '');
-                if (tk || /ticket|티켓|closed/i.test(chName)) {
-                    const messages = await tickets.collectChat(interaction.channel);
-                    const num = tk ? tk.number : parseInt((chName.match(/\d+/) || [])[0], 10) || null;
-                    const saved = store.attachChat(rec.id, { channelName: chName, ticketNumber: num, messages });
-                    console.log(`[구매기록] ${store.purchaseCode(rec.id)} 대화 ${messages.length}줄 저장 (${chName}) ${saved ? '' : '실패'}`);
-                } else {
-                    console.log(`[구매기록] ${store.purchaseCode(rec.id)} 티켓 채널이 아니라 대화를 저장하지 않았어요 (${chName})`);
-                }
-            } catch (e) {
-                console.error('티켓 대화 저장 실패:', e.message);
-            }
-            if (rec.spent === 0 || (kind === 'robux' && rec.robux === 0)) {
-                statWarn = '⚠️ 금액/수량을 숫자로 읽지 못해 통계에 0으로 기록됐어요. /정보설정 으로 직접 고쳐주세요.';
-            }
-        } catch (e) {
-            console.error('구매 기록 저장 실패:', e);
-            statWarn = '⚠️ 구매 기록을 저장하지 못했어요. (통계에 반영되지 않았어요)';
-        }
-
-        try {
-            let sellerMember = null;
-            try {
-                sellerMember = await interaction.guild.members.fetch(seller.id);
-            } catch (e) {}
-
-            const avatarOpts = { extension: 'png', size: 256 };
-            const buyerAvatarUrl = (buyerMember || buyer).displayAvatarURL(avatarOpts);
-            const sellerAvatarUrl = (sellerMember || seller).displayAvatarURL(avatarOpts);
-            const guildIconUrl = interaction.guild.iconURL({ extension: 'png', size: 128 });
-
-            const tryBuf = (url) => (url ? fetchBuffer(url).catch(() => null) : Promise.resolve(null));
-            const [buyerAvatarBuf, sellerAvatarBuf, guildIconBuf] = await Promise.all([
-                tryBuf(buyerAvatarUrl),
-                tryBuf(sellerAvatarUrl),
-                tryBuf(guildIconUrl)
-            ]);
-
-            let robloxAvatarBuf = null;
-            if (roblox.status === 'ok') {
-                robloxAvatarBuf = await fetchRobloxAvatar(roblox.id);
-            }
-            if (!robloxAvatarBuf) {
-                robloxAvatarBuf = buyerAvatarBuf; // 로블록스 서버 문제 시 디스코드 프사로 대체
-                if (!skipRoblox) warn = '⚠️ 로블록스 아바타를 불러오지 못해 디스코드 프사로 대체했어요. (로블록스 서버 응답 문제일 수 있어요)';
-            }
-
-            cardBuffer = await renderPurchaseCard({
-                kind,
-                buyerName: buyer.username, // 서버 닉네임이 아닌 디스코드 아이디
-                buyerAvatarBuf,
-                robloxAvatarBuf,
-                hideBadge: skipRoblox,
-                item,
-                count,
-                price,
-                sellerName: seller.username, // 서버 닉네임이 아닌 디스코드 아이디
-                sellerAvatarBuf,
-                guildName: interaction.guild.name,
-                guildIconBuf
-            });
-        } catch (error) {
-            console.error('구매 카드 이미지 생성 실패:', error);
-        }
-
-        // 4) 구매 로그 전송
-        if (cardBuffer) {
-            // 이미지를 임베드 안에 넣고, 아래에 작은 글씨로 "서버 프로필 + 가게 이름"만 표시
-            const shopName = (SHOP_NAME_OVERRIDE || interaction.guild.name).toUpperCase();
-            const guildIcon = interaction.guild.iconURL({ extension: 'png', size: 64 });
-
-            // 디스코드 아이디에 로블록스 프로필 링크 연결 (X 입력 시 링크 없이 아이디만)
-            const titleName = roblox.status === 'ok'
-                ? `[${buyer.username}](https://www.roblox.com/users/${roblox.id}/profile)`
-                : buyer.username;
-
-            const cardEmbed = new EmbedBuilder()
-                .setColor(SKY_COLOR)
-                .setDescription(`## ${titleName}님 ${summary} 구매 감사합니다 .ᐟ.ᐟ`.slice(0, 4000))
-                .setImage('attachment://purchase.png')
-                .setFooter((() => {
-                    const text = purchaseId ? `구매 ID ${store.purchaseCode(purchaseId)} · ${shopName}` : shopName;
-                    return guildIcon ? { text, iconURL: guildIcon } : { text };
-                })())
-                .setTimestamp();
-
-            await logChannel.send({
-                content: `${buyer}`,
-                embeds: [cardEmbed],
-                files: [new AttachmentBuilder(cardBuffer, { name: 'purchase.png' })]
-            });
-        } else {
-            // 이미지 생성 실패 시 기존 임베드로 대체
-            const logEmbed = new EmbedBuilder()
-                .setColor(LIGHT_PINK_COLOR)
-                .setDescription(
-                    `${buyer}, ${item} (${count}) 구매 감사합니다.\n\n` +
-                    `사용된 금액 : ${price}\n\n` +
-                    `해당 관리 판매자: ${seller}`
-                )
-                .setImage(IMAGE_URL);
-            if (purchaseId) logEmbed.setFooter({ text: `구매 ID ${store.purchaseCode(purchaseId)}` });
-
-            await logChannel.send({ content: `${buyer}`, embeds: [logEmbed] });
-            warn = '⚠️ 구매 카드 이미지 생성에 실패해 기존 임베드로 전송했어요. (폰트 파일/패키지 설치를 확인해 주세요)';
-        }
-
-        if (warn) {
-            interaction.followUp({ content: warn, ephemeral: true }).catch(() => {});
-        }
-        if (statWarn) {
-            interaction.followUp({ content: statWarn, ephemeral: true }).catch(() => {});
-        }
-
-        const replyEmbed = new EmbedBuilder()
-            .setColor(LIGHT_PINK_COLOR)
-            .setDescription(
-                `아이템이 정상적으로 지급되었습니다.\n` +
-                `https://discord.com/channels/1456729030459134115/1457384179535712473 작성은 필수입니다.`
-            );
-        // 맨 아래: 구매 아이디 + 서버 프로필 + 서버 이름
-        {
-            const shop = (SHOP_NAME_OVERRIDE || interaction.guild.name).toUpperCase();
-            const icon = interaction.guild.iconURL({ extension: 'png', size: 64 });
-            const text = purchaseId ? `구매 ID ${store.purchaseCode(purchaseId)} · ${shop}` : shop;
-            replyEmbed.setFooter(icon ? { text, iconURL: icon } : { text });
-        }
-
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('notice_btn').setLabel('주의사항').setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setLabel('후기작성').setStyle(ButtonStyle.Link).setURL(`https://discord.com/channels/${interaction.guildId}/1457384179535712473`)
-        );
-
-        await interaction.channel.send({
-            content: `${buyer}`,
-            embeds: [replyEmbed],
-            components: [row]
+        const res = await completePurchase({
+            guild: interaction.guild,
+            channel: interaction.channel,
+            buyer: interaction.options.getUser('구매자'),
+            kind: interaction.options.getString('종류'),
+            item: interaction.options.getString('상품'),
+            count: interaction.options.getString('수량'),
+            price: interaction.options.getString('금액'),
+            robloxInput: interaction.options.getString('로블아이디'),
+            seller: interaction.options.getUser('판매자') || interaction.user
         });
 
+        if (!res.ok) return interaction.editReply({ content: res.error });
+        for (const w of res.warns) interaction.followUp({ content: w, ephemeral: true }).catch(() => {});
         await interaction.editReply({ content: '✅ 지급완료 처리가 완료되었습니다.' }).catch(() => {});
-
         return;
     }
 
