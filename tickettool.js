@@ -16,7 +16,8 @@ const {
 const store = require('./store');
 
 // ---------- 설정 ----------
-const TICKET_TOOL_BOT_IDS = ['557628352828014614']; // 티켓툴 봇 ID (프리미엄/커스텀 봇이면 여기에 추가)
+// 티켓툴 봇 ID (기존 Ticket Tool + 이름이 같은 새 Ticket Tool 봇. 프리미엄/커스텀 봇이면 여기에 추가)
+const TICKET_TOOL_BOT_IDS = ['557628352828014614', '1506999581722804274'];
 const PANEL_WINDOW_MS = 5 * 60 * 1000;               // 채널이 만들어진 지 5분 안의 티켓툴 메시지에만 패널 생성
 const COLLECT_DELAY_MS = 4000;                       // 티켓툴이 양식 답변을 보낼 때까지 잠깐 기다리기
 // 채널 이름 / 카테고리 이름에 이 단어가 있으면 패널을 만들지 않아요 (문의 티켓 등)
@@ -178,11 +179,18 @@ async function gatherFromChannel(channel) {
         if (sellers.has(id)) { if (!d.sellerId) d.sellerId = id; }
         else if (!d.buyerId) d.buyerId = id;
     }
+    // 티켓을 연 사람 = 채널 권한에 직접 추가된 유저 (티켓툴이 티켓 연 사람을 채널에 추가해요)
+    const memberOws = [...channel.permissionOverwrites.cache.values()].filter((o) =>
+        o.type === 1 && o.id !== channel.client.user.id && !TICKET_TOOL_BOT_IDS.includes(o.id));
     if (!d.buyerId) {
-        const ow = channel.permissionOverwrites.cache.find((o) =>
-            o.type === 1 && o.id !== channel.client.user.id && !TICKET_TOOL_BOT_IDS.includes(o.id) && !sellers.has(o.id));
+        const ow = memberOws.find((o) => !sellers.has(o.id));
         if (ow) d.buyerId = ow.id;
     }
+    // 판매자 역할이 있는 사람이 직접 연 티켓(테스트 등)이어도 구매자로 잡기
+    if (!d.buyerId && mentioned.length) d.buyerId = mentioned[0];
+    if (!d.buyerId && memberOws.length) d.buyerId = memberOws[0].id;
+    if (!d.buyerId && channel.topic) d.buyerId = (channel.topic.match(/(\d{17,20})/) || [])[1] || null;
+    if (d.sellerId === d.buyerId && mentioned[0] === d.buyerId) d.sellerId = null;
 
     // 판매자: 티켓 이름 → 카테고리 이름 → 티켓툴 메시지 내용 순서로 판매자 이름 찾기
     const parentName = (channel.parent && channel.parent.name) || '';
@@ -201,6 +209,16 @@ async function gatherFromChannel(channel) {
     }
     return d;
 }
+
+// ---------- 구매자가 직접 적는 항목 (티켓 종류별) ----------
+const FIELD_NAME = { kind: '종류', item: '상품 이름', count: '수량', roblox: '로블록스 닉네임', price: '금액' };
+function buyerFields(kind) {
+    if (kind === 'robux') return ['roblox', 'count'];
+    if (kind === 'ingame') return ['item', 'count', 'roblox'];
+    if (kind === 'etc') return ['item', 'count'];
+    return ['kind', 'item', 'count'];
+}
+const missingBuyer = (d) => buyerFields(d.kind).filter((k) => !d[k]);
 
 // ---------- 화면 (컴포넌트 V2) ----------
 const show = (v) => (v ? String(v).slice(0, 200) : '미입력');
@@ -228,7 +246,7 @@ async function panelPayload(client, d) {
             '### 구매로그 설정',
             `구매자 ${mention(d.buyerId)}`,
             `판매자 ${mention(d.sellerId)}`,
-            `-# ${d.kind ? `${KIND_LABEL[d.kind]} 티켓` : '종류 미정'}`
+            `-# ${d.kind ? `${KIND_LABEL[d.kind]} 티켓` : '종류 미정'}${missingBuyer(d).length ? ` · 입력 필요: ${missingBuyer(d).map((k) => FIELD_NAME[k]).join(', ')}` : ''}`
         ];
     const text = { type: 10, content: lines.join('\n') };
     const avatar = d.buyerId ? await avatarUrl(client, d.buyerId) : null;
@@ -242,6 +260,7 @@ async function panelPayload(client, d) {
             { type: 2, style: 1, label: '추가 구매', custom_id: 'ttlog_more' }
         ]
         : [
+            { type: 2, style: 1, label: '구매 정보 입력', custom_id: 'ttlog_input' },
             { type: 2, style: 2, label: '구매로그 확인', custom_id: 'ttlog_view' },
             { type: 2, style: 2, label: '정보 수정', custom_id: 'ttlog_edit' },
             { type: 2, style: 3, label: '지급완료', custom_id: 'ttlog_done' }
@@ -305,6 +324,26 @@ function editModal(customId, title, d) {
     );
 }
 
+// 구매자용 입력창 (금액은 판매자가 [정보 수정]에서 적어요)
+function buyerModal(panelId, d) {
+    const spec = {
+        kind: ['종류 (로벅스 / 인게임 / 기타)', '로벅스', true],
+        item: [d.kind === 'ingame' ? '게임 / 상품 이름' : '상품 이름', d.kind === 'ingame' ? '블록스 피스 - 레오파드' : '구매할 상품', true],
+        count: [d.kind === 'robux' ? '로벅스 수량' : '수량', d.kind === 'robux' ? '1000' : '1', true],
+        roblox: ['로블록스 닉네임', '로블록스 닉네임 (디스플레이 이름 X)', d.kind !== 'etc']
+    };
+    const keys = d.kind === 'etc' ? ['item', 'count', 'roblox'] : buyerFields(d.kind).concat(d.kind ? [] : ['roblox']);
+    const modal = new ModalBuilder().setCustomId(`ttlog_inmodal:${panelId}`).setTitle('구매 정보 입력');
+    for (const k of keys) {
+        const [label, ph, req] = spec[k];
+        const t = new TextInputBuilder().setCustomId(k).setLabel(label).setStyle(TextInputStyle.Short).setRequired(req).setMaxLength(100).setPlaceholder(ph);
+        const cur = k === 'kind' ? (d.kind ? KIND_LABEL[d.kind] : '') : d[k];
+        if (cur) t.setValue(String(cur).slice(0, 100));
+        modal.addComponents(new ActionRowBuilder().addComponents(t));
+    }
+    return modal;
+}
+
 function applyModal(interaction, d) {
     const v = (k) => interaction.fields.getTextInputValue(k).trim();
     d.kind = parseKindInput(v('kind')) || d.kind;
@@ -360,11 +399,6 @@ async function handleInteraction(interaction) {
     if (!cid.startsWith('ttlog_')) return false;
     const [action, ref] = cid.split(':');
 
-    if (!deps.canUse(interaction.member)) {
-        await interaction.reply(eph('판매자 또는 관리자만 사용할 수 있어요.')).catch(() => {});
-        return true;
-    }
-
     const panelId = ref || (interaction.message && interaction.message.id);
     const d = getPanel(panelId);
     if (!d) {
@@ -372,6 +406,13 @@ async function handleInteraction(interaction) {
         return true;
     }
     const channel = interaction.channel;
+    const staff = deps.canUse(interaction.member);
+    const isBuyerAction = action === 'ttlog_input' || action === 'ttlog_inmodal';
+
+    if (!staff && !(isBuyerAction && interaction.user.id === d.buyerId)) {
+        await interaction.reply(eph(isBuyerAction ? '이 티켓의 구매자만 입력할 수 있어요.' : '판매자 또는 관리자만 사용할 수 있어요.')).catch(() => {});
+        return true;
+    }
 
     // 구매로그 확인
     if (action === 'ttlog_view') {
@@ -397,6 +438,25 @@ async function handleInteraction(interaction) {
 
     if (d.done) {
         await interaction.reply(eph('이미 지급완료 처리된 패널이에요. 추가 구매는 [추가 구매] 를 눌러주세요.')).catch(() => {});
+        return true;
+    }
+
+    // 구매 정보 입력 (구매자)
+    if (action === 'ttlog_input') {
+        await interaction.showModal(buyerModal(panelId, d));
+        return true;
+    }
+    if (action === 'ttlog_inmodal' && interaction.isModalSubmit()) {
+        const has = (k) => { try { return interaction.fields.getTextInputValue(k).trim(); } catch (e) { return null; } };
+        const kind = has('kind');
+        if (kind) d.kind = parseKindInput(kind);
+        for (const k of ['item', 'count', 'roblox']) {
+            const v = has(k);
+            if (v !== null) d[k] = v;
+        }
+        if (d.kind === 'robux' && !d.item) d.item = '로벅스';
+        await interaction.deferUpdate();
+        await refreshPanel(channel, panelId, d);
         return true;
     }
 
@@ -433,6 +493,7 @@ async function handleInteraction(interaction) {
         const missing = [
             !d.buyerId && '구매자', !d.kind && '종류', !d.item && '상품', !d.count && '수량', !d.price && '금액'
         ].filter(Boolean);
+        // 로블록스 닉네임이 비어 있으면 디스코드 프로필로 전송돼요 (지급완료는 막지 않음)
         if (missing.length) {
             await interaction.reply(eph(`아직 비어 있는 항목이 있어요: **${missing.join(', ')}**\n[정보 수정] 또는 [구매로그 확인]에서 채워주세요.`));
             return true;
