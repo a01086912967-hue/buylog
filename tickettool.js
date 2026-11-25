@@ -206,26 +206,73 @@ async function gatherFromChannel(channel) {
     return d;
 }
 
+// ---------- 입력값 해석 ----------
+// 로블록스 아이디 규칙: 3~20자, 영어/숫자/_ , _ 는 한 번만 + 처음/끝 불가
+const RBX_RE = /^(?=.{3,20}$)[A-Za-z0-9]+(?:_[A-Za-z0-9]+)?$/;
+const RBX_STOP = new Set(['roblox', 'id', 'nick', 'nickname', 'name', 'username', 'display', 'robux', 'rbx', 'ingame']);
+
+// 문장 속에서 로블록스 아이디 후보 찾기 (예: "제 닉은 Builderman입니다" → Builderman)
+function robloxCandidates(t) {
+    const out = [];
+    for (const raw of String(t).match(/[A-Za-z0-9_]{3,20}/g) || []) {
+        const c = raw.replace(/^_+|_+$/g, '');
+        if (!RBX_RE.test(c) || RBX_STOP.has(c.toLowerCase()) || out.includes(c)) continue;
+        out.push(c);
+    }
+    // 글자가 들어간 것 먼저, 숫자만 있는 건 나중에
+    return out.sort((a, b) => (/^\d+$/.test(a) ? 1 : 0) - (/^\d+$/.test(b) ? 1 : 0));
+}
+
+// 숫자 덩어리 해석: "2,400" "1.5만" "1만 5천" "천" "오천" "이만오천"
+const KO_DIGIT = { 일: 1, 이: 2, 삼: 3, 사: 4, 오: 5, 육: 6, 칠: 7, 팔: 8, 구: 9 };
+const UNIT = { 십: 10, 백: 100, 천: 1000, 만: 10000 };
+const PART_RE = /(\d[\d,]*(?:\.\d+)?)\s*([십백천만])?|([일이삼사오육칠팔구])?([십백천만])/g;
+function evalSegment(seg) {
+    let total = 0, m;
+    PART_RE.lastIndex = 0;
+    while ((m = PART_RE.exec(seg))) {
+        if (m[1] !== undefined) total += num(m[1]) * (m[2] ? UNIT[m[2]] : 1);
+        else total += (m[3] ? KO_DIGIT[m[3]] : 1) * UNIT[m[4]];
+    }
+    return total;
+}
+
+// 문장에서 수량만 찾기 (예: "1000 로벅스입니다" → 1000, "로벅스 1만5천개 12000원" → 15000)
+function parseCount(t) {
+    const segRe = /(?:\d[\d,]*(?:\.\d+)?\s*[십백천만]?|[일이삼사오육칠팔구]?[십백천만])(?:\s*(?:\d[\d,]*(?:\.\d+)?\s*[십백천만]?|[일이삼사오육칠팔구]?[십백천만]))*/g;
+    const cands = [];
+    let m;
+    while ((m = segRe.exec(t))) {
+        const seg = m[0].trim();
+        const after = t.slice(m.index + m[0].length);
+        const before = t.slice(0, m.index);
+        const hasDigit = /\d/.test(seg);
+        // 한글 숫자만 있는 경우(예: "만약", "천천히") 잘못 읽지 않게: 뒤에 단위가 오거나 메시지 전체일 때만
+        if (!hasDigit && !/^\s*(?:로벅스|robux|rbx|알|개|장|세트)/i.test(after) && seg !== t.trim()) continue;
+        if (/^\s*원/.test(after)) continue; // 금액은 수량이 아님
+        if (/[A-Za-z_]$/.test(before)) continue; // 닉네임 속 숫자 (예: abc123)
+        const v = evalSegment(seg);
+        if (v > 0) cands.push({ v, unit: /^\s*(?:로벅스|robux|rbx|알|개|장|세트)/i.test(after) });
+    }
+    if (!cands.length) return null;
+    return (cands.find((c) => c.unit) || cands[0]).v;
+}
+
 // ---------- 자동 질문 ----------
 // 티켓 종류별로 구매자에게 물어볼 항목 (순서대로)
 function questionKeys(d) {
-    if (!d.kind) return ['kind'];
     if (d.kind === 'robux') return ['roblox', 'count'];
-    if (d.kind === 'ingame') return ['item', 'count', 'roblox'];
     return ['item', 'count', 'roblox'];
 }
 const nextQuestion = (d) => questionKeys(d).find((k) => !d[k]) || null;
 
 function questionText(d, key, retry) {
-    if (retry) {
-        if (key === 'roblox') return '찾을 수 없는 로블록스 아이디예요. 다시 입력해 주세요. (없으면 X)';
-        if (key === 'count') return '숫자로 입력해 주세요. (예: 1000)';
-        if (key === 'kind') return '로벅스 / 인게임 / 기타 중 하나로 입력해 주세요.';
-    }
-    if (key === 'kind') return '구매하실 종류를 입력해 주세요. (로벅스 / 인게임 / 기타)';
+    if (retry === 'format') return '로블록스 아이디는 영어 · 숫자 · _ 로만 되어 있어요. 로블록스 프로필의 @ 뒤 아이디를 입력해 주세요.' + (d.kind === 'etc' ? ' (없으면 X)' : '');
+    if (retry === 'notfound') return '로블록스에 없는 아이디예요. 철자를 확인하고 다시 입력해 주세요.' + (d.kind === 'etc' ? ' (없으면 X)' : '');
+    if (retry === 'count') return '수량을 숫자로 입력해 주세요. (예: 1000)';
     if (key === 'roblox') return d.kind === 'etc'
         ? '로블록스 아이디를 입력해 주세요. (없으면 X)'
-        : '로블록스 아이디를 입력해 주세요. (디스플레이 이름 말고 아이디)';
+        : '로블록스 아이디를 입력해 주세요. (디스플레이 이름 말고 @ 뒤 아이디)';
     if (key === 'count') return d.kind === 'robux' ? '구매하실 로벅스 수량을 입력해 주세요. (예: 1000)' : '구매하실 수량을 입력해 주세요.';
     if (key === 'item') return d.kind === 'ingame'
         ? '구매하실 게임과 상품 이름을 입력해 주세요. (예: 블록스 피스 - 레오파드)'
@@ -238,7 +285,7 @@ const v2Text = (content, color = PANEL_COLOR) => ({
     components: [{ type: 17, accent_color: color, components: [{ type: 10, content }] }]
 });
 
-async function sendQuestion(channel, d, key, retry = false) {
+async function sendQuestion(channel, d, key, retry = null) {
     d.asking = key;
     await channel.send({
         ...v2Text(`<@${d.buyerId}> ${questionText(d, key, retry)}`),
@@ -258,48 +305,74 @@ async function askNext(channel, d) {
     });
 }
 
+// 질문 전에 구매 종류 고르기 (로벅스 티켓을 인게임으로 여는 실수 방지)
+const KIND_PICK = [
+    { kind: 'robux', label: '로벅스', desc: '로벅스를 구매할 때' },
+    { kind: 'ingame', label: '인게임 지급', desc: '게임 안의 아이템 · 재화 등을 지급받을 때' },
+    { kind: 'etc', label: '기타 상품 지급', desc: '로벅스 · 인게임 외 다른 상품을 구매할 때' }
+];
+function kindPickPayload(panelId, d) {
+    return {
+        flags: FLAG_V2,
+        components: [{
+            type: 17,
+            accent_color: PANEL_COLOR,
+            components: [
+                { type: 10, content: `### 구매 종류를 선택해 주세요\n<@${d.buyerId}> 맞는 종류를 골라야 구매로그가 정확하게 기록돼요.` },
+                { type: 14, divider: true, spacing: 1 },
+                { type: 10, content: KIND_PICK.map((k) => `**${k.label}**\n-# ${k.desc}`).join('\n') },
+                { type: 14, divider: true, spacing: 1 },
+                { type: 1, components: KIND_PICK.map((k, i) => ({ type: 2, style: i === 0 ? 1 : 2, label: k.label, custom_id: `ttlog_kind:${panelId}:${k.kind}` })) }
+            ]
+        }],
+        allowedMentions: { users: [d.buyerId] }
+    };
+}
+// 고른 뒤에는 한 줄로 깔끔하게
+const kindPickedPayload = (kind) => ({
+    components: [{ type: 17, accent_color: PANEL_COLOR, components: [{ type: 10, content: `**구매 종류** ${(KIND_PICK.find((k) => k.kind === kind) || { label: "선택 완료" }).label}` }] }],
+    allowedMentions: { parse: [] }
+});
+
 async function startQuestions(channel, panelId, d) {
     d.asked = false;
-    if (!nextQuestion(d)) {
-        d.asked = true;
-        return savePanel(panelId, d);
-    }
-    await channel.send({
-        ...v2Text(`### 구매하기 전 몇 가지만 여쭤볼게요\n<@${d.buyerId}> 질문에 채팅으로 답해 주세요.`),
-        allowedMentions: { users: [d.buyerId] }
-    });
-    await askNext(channel, d);
+    d.asking = 'pick';
+    await channel.send(kindPickPayload(panelId, d));
     savePanel(panelId, d);
+}
+
+async function retryQuestion(channel, panelId, d, key, why) {
+    await sendQuestion(channel, d, key, why);
+    savePanel(panelId, d);
+    return true;
 }
 
 // 구매자의 답변 처리. 처리했으면 true
 async function handleAnswer(message, panelId, d) {
     const key = d.asking;
     const t = message.content.trim().slice(0, 200);
-    if (!key || !t) return false;
+    if (!key || key === 'pick' || !t) return false;
 
-    if (key === 'kind') {
-        const k = detectKind(t);
-        if (!k) { await sendQuestion(message.channel, d, key, true); savePanel(panelId, d); return true; }
-        d.kind = k;
-        if (k === 'robux' && !d.item) d.item = '로벅스';
-    } else if (key === 'count') {
-        const m = t.match(/\d[\d,.]*/);
-        if (!m) { await sendQuestion(message.channel, d, key, true); savePanel(panelId, d); return true; }
-        d.count = /^[\d,.]+$/.test(t) || d.kind === 'robux' ? fmt(num(m[0])) : t;
+    if (key === 'count') {
+        const v = parseCount(t);
+        if (!v) return retryQuestion(message.channel, panelId, d, key, 'count');
+        d.count = fmt(v);
     } else if (key === 'roblox') {
-        const cand = t.split(/\s+/)[0].replace(/^@/, '');
-        if (cand.toLowerCase() === 'x') {
+        if (d.kind === 'etc' && /^(x|없음|없어요|없습니다)$/i.test(t)) {
             d.roblox = 'X';
         } else {
-            const r = deps.lookupRoblox ? await deps.lookupRoblox(cand).catch(() => null) : null;
-            if (r && r.status === 'ok') d.roblox = r.name || cand;
-            else if (r && r.status === 'notfound' && !d.robloxRetry) {
-                d.robloxRetry = true;
-                await sendQuestion(message.channel, d, key, true);
-                savePanel(panelId, d);
-                return true;
-            } else d.roblox = cand; // 두 번째도 못 찾으면 그대로 저장 → 지급완료 때 디스코드 프로필로 전송
+            const cands = robloxCandidates(t).slice(0, 3);
+            if (!cands.length) return retryQuestion(message.channel, panelId, d, key, 'format');
+            let found = null, apiDown = false;
+            for (const c of cands) {
+                const r = deps.lookupRoblox ? await deps.lookupRoblox(c).catch(() => null) : null;
+                if (r && r.status === 'ok') { found = r.name || c; break; }
+                if (!r || r.status === 'error') apiDown = true;
+            }
+            // 로블록스 서버 오류일 때만 형식이 맞는 아이디를 그대로 저장
+            if (!found && apiDown) found = cands[0];
+            if (!found) return retryQuestion(message.channel, panelId, d, key, 'notfound');
+            d.roblox = found;
         }
     } else if (key === 'item') {
         d.item = t;
@@ -572,15 +645,37 @@ const eph = (content) => ({ content, ephemeral: true });
 async function handleInteraction(interaction) {
     const cid = interaction.customId || '';
     if (!cid.startsWith('ttlog_')) return false;
-    const [action, ref] = cid.split(':');
-
-    if (!deps.canUse(interaction.member)) {
-        await interaction.reply(eph('판매자 또는 관리자만 사용할 수 있어요.')).catch(() => {});
-        return true;
-    }
+    const [action, ref, extra] = cid.split(':');
+    const staff = deps.canUse(interaction.member);
 
     const panelId = ref || (interaction.message && interaction.message.id);
     const d = getPanel(panelId);
+
+    // 구매 종류 선택 (구매자 또는 판매자/관리자)
+    if (action === 'ttlog_kind') {
+        if (!d || d.done || d.asking !== 'pick') {
+            await interaction.update(kindPickedPayload(d && d.kind && KIND_LABEL[d.kind] ? d.kind : extra)).catch(() => {});
+            return true;
+        }
+        if (!staff && interaction.user.id !== d.buyerId) {
+            await interaction.reply(eph('이 티켓의 구매자만 선택할 수 있어요.')).catch(() => {});
+            return true;
+        }
+        if (!KIND_LABEL[extra]) return true;
+        d.kind = extra;
+        if (extra === 'robux') d.item = '로벅스';
+        else if (d.item === '로벅스') d.item = '';
+        d.asking = null;
+        await interaction.update(kindPickedPayload(extra));
+        await askNext(interaction.channel, d);
+        await refreshPanel(interaction.channel, panelId, d);
+        return true;
+    }
+
+    if (!staff) {
+        await interaction.reply(eph('판매자 또는 관리자만 사용할 수 있어요.')).catch(() => {});
+        return true;
+    }
     if (!d) {
         await interaction.reply(eph('패널 정보를 찾을 수 없어요. 예전 버전 패널이면 /지급완료 명령어를 사용해 주세요.')).catch(() => {});
         return true;
