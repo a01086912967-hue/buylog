@@ -1,5 +1,5 @@
 // ==================== 후기 자동 수집 ====================
-// 지급완료 1시간 뒤 구매자에게 DM 으로 별점 버튼(1~5점)을 보내요.
+// 지급완료되면 바로 구매자에게 DM 으로 별점 버튼(1~5점)을 보내요.
 // 별점을 누르면 한 줄 후기 입력창이 뜨고(선택), 제출하면 후기 채널에 카드로 자동으로 올라가요.
 // 보낼 목록은 data.json 에 저장되므로 Railway 재배포 후에도 시간이 되면 그대로 보내요.
 
@@ -8,7 +8,7 @@ const store = require('./store');
 
 // ---------- 설정 ----------
 const REVIEW_CHANNEL_ID = '1457384179535712473'; // 후기 채널
-const REVIEW_DELAY_MS = 60 * 60 * 1000;           // 지급완료 후 1시간 뒤에 DM
+const REVIEW_DELAY_MS = 0;                        // 지급완료되면 바로 DM (1시간 뒤로 하려면 60 * 60 * 1000)
 const CHECK_EVERY_MS = 60 * 1000;                 // 1분마다 보낼 DM 확인
 const SHOP_NAME = 'SODDU SHOP';
 const COLOR = 0xA9D8FF;
@@ -42,6 +42,8 @@ function schedule({ guildId, buyerId, sellerId, kind, item, count, code }) {
     const id = code || `${Date.now()}${Math.floor(Math.random() * 1000)}`;
     map[id] = { guildId, buyerId, sellerId, kind, item, count, code, due: Date.now() + REVIEW_DELAY_MS, sent: false, done: false };
     save(map);
+    // 바로 보내기 (1분 확인 주기를 기다리지 않음)
+    if (!REVIEW_DELAY_MS && client) sendDue(client).catch((e) => console.error('[후기] 오류:', e.message));
 }
 
 const summary = (r) => r.kind === 'robux' ? `${r.count} 로벅스` : `${r.item || KIND_LABEL[r.kind] || '상품'}${r.count ? ` ${r.count}개` : ''}`;
@@ -152,7 +154,9 @@ async function handleInteraction(interaction) {
     return false;
 }
 
-function init(client) {
+let client = null;
+function init(c) {
+    client = c;
     sendDue(client).catch(() => {});
     setInterval(() => sendDue(client).catch((e) => console.error('[후기] 오류:', e.message)), CHECK_EVERY_MS);
 }
