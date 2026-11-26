@@ -308,8 +308,8 @@ async function askNext(channel, d) {
 // 질문 전에 구매 종류 고르기 (로벅스 티켓을 인게임으로 여는 실수 방지)
 const KIND_PICK = [
     { kind: 'robux', label: '로벅스', desc: '로벅스를 구매할 때' },
-    { kind: 'ingame', label: '인게임 지급', desc: '게임 안의 아이템 · 재화 등을 지급받을 때' },
-    { kind: 'etc', label: '기타 상품 지급', desc: '로벅스 · 인게임 외 다른 상품을 구매할 때' }
+    // 인게임 지급은 버튼에서 뺐어요 (인게임 티켓은 판매자가 [정보 수정]에서 종류를 바꿔주세요)
+    { kind: 'etc', label: '기타 상품 지급', desc: '로벅스 외 다른 상품을 구매할 때' }
 ];
 function kindPickPayload(panelId, d) {
     return {
@@ -473,6 +473,7 @@ async function panelPayload(client, d) {
         ? [{ type: 2, style: 1, label: '추가 구매', custom_id: 'ttlog_more' }]
         : [
             { type: 2, style: 2, label: '정보 수정', custom_id: 'ttlog_edit' },
+            ...(d.kind === 'robux' ? [{ type: 2, style: 2, label: '패스 계산', custom_id: 'ttlog_pass' }] : []),
             { type: 2, style: 3, label: '지급완료', custom_id: 'ttlog_done' }
         ];
 
@@ -555,6 +556,66 @@ function doneModal(panelId, d, miss) {
         ));
     }
     return modal;
+}
+
+// ---------- 패스 계산기 (로블록스 수수료 30%) ----------
+const ROBLOX_FEE = 0.3;
+const received = (price) => Math.floor(price * (1 - ROBLOX_FEE));
+// 원하는 로벅스를 받으려면 패스 가격을 얼마로 해야 하는지
+function priceFor(want) {
+    let p = Math.ceil(want / (1 - ROBLOX_FEE));
+    while (received(p) < want) p++;
+    while (p > 1 && received(p - 1) >= want) p--;
+    return p;
+}
+
+function passPayload(panelId, { want = null, price = null } = {}) {
+    let body;
+    if (price) {
+        const get = received(price);
+        body = [
+            '### 패스 계산',
+            `**패스 가격** ${fmt(price)} 로벅스`,
+            `**로블록스 수수료 (30%)** ${fmt(price - get)} 로벅스`,
+            `**실제로 받는 로벅스** ${fmt(get)} 로벅스`
+        ];
+    } else if (want) {
+        const p = priceFor(want);
+        body = [
+            '### 패스 계산',
+            `**받을 로벅스** ${fmt(want)} 로벅스`,
+            `**패스 가격** ${fmt(p)} 로벅스`,
+            `**로블록스 수수료 (30%)** ${fmt(p - received(p))} 로벅스`,
+            `**실제로 받는 로벅스** ${fmt(received(p))} 로벅스`,
+            `-# 패스 가격을 **${fmt(p)}** 로 설정하면 ${fmt(want)} 로벅스를 받아요.`
+        ];
+    } else {
+        body = ['### 패스 계산', '아직 수량이 없어요. 아래 버튼으로 직접 계산해 보세요.'];
+    }
+    const quick = [1000, 5000, 10000].map((w) => `${fmt(w)} → ${fmt(priceFor(w))}`).join(' · ');
+    body.push(`-# 로블록스가 패스 판매 금액의 30%를 수수료로 가져가요. 자주 쓰는 수량: ${quick}`);
+    return {
+        components: [{
+            type: 17,
+            accent_color: PANEL_COLOR,
+            components: [
+                { type: 10, content: body.join('\n') },
+                { type: 14, divider: true, spacing: 1 },
+                { type: 1, components: [{ type: 2, style: 2, label: '다른 수량 계산', custom_id: `ttlog_passin:${panelId}` }] }
+            ]
+        }],
+        allowedMentions: { parse: [] }
+    };
+}
+
+function passModal(panelId) {
+    const row = (cid, label, ph) => new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId(cid).setLabel(label).setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(20).setPlaceholder(ph)
+    );
+    return new ModalBuilder().setCustomId(`ttlog_passmodal:${panelId}`).setTitle('패스 계산').addComponents(
+        row('want', '받고 싶은 로벅스 (패스 가격을 알려줘요)', '1000'),
+        row('price', '또는 패스 가격 (받는 로벅스를 알려줘요)', '1429')
+    );
 }
 
 // ---------- 패널 생성 / 갱신 ----------
@@ -669,6 +730,25 @@ async function handleInteraction(interaction) {
         await interaction.update(kindPickedPayload(extra));
         await askNext(interaction.channel, d);
         await refreshPanel(interaction.channel, panelId, d);
+        return true;
+    }
+
+    // 패스 계산 (구매자도 사용 가능, 나만 보이게)
+    if (action === 'ttlog_pass') {
+        const want = d && d.count ? Math.round(num(d.count)) : null;
+        await interaction.reply({ flags: FLAG_V2 | FLAG_EPHEMERAL, ...passPayload(panelId, { want: want > 0 ? want : null }) });
+        return true;
+    }
+    if (action === 'ttlog_passin') {
+        await interaction.showModal(passModal(panelId));
+        return true;
+    }
+    if (action === 'ttlog_passmodal' && interaction.isModalSubmit()) {
+        const read = (k) => { const v = parseCount(interaction.fields.getTextInputValue(k) || ''); return v > 0 ? Math.round(v) : null; };
+        const want = read('want'), price = read('price');
+        const payload = passPayload(panelId, price && !want ? { price } : { want });
+        if (interaction.message && interaction.message.flags && interaction.message.flags.has(FLAG_EPHEMERAL)) await interaction.update(payload);
+        else await interaction.reply({ flags: FLAG_V2 | FLAG_EPHEMERAL, ...payload });
         return true;
     }
 
