@@ -34,6 +34,7 @@ const community = require('./community');
 const web = require('./web');
 const weekly = require('./weekly');
 const tickettool = require('./tickettool');
+const reviews = require('./reviews');
 const { renderProfileCard, renderStatsCard, renderRankCard, renderHistoryCard, renderSellerCard, ymd } = require('./infoCards');
 const { SERVER_ROLES, resolveGrade } = require('./roles');
 
@@ -255,6 +256,13 @@ async function completePurchase({ guild, channel, buyer, kind, item, count, pric
 
     await channel.send({ content: `${buyer}`, embeds: [replyEmbed], components: [row] });
 
+    // 1시간 뒤 구매자에게 후기 요청 DM 예약
+    try {
+        reviews.schedule({ guildId: guild.id, buyerId: buyer.id, sellerId: seller.id, kind, item, count, code: purchaseId ? store.purchaseCode(purchaseId) : null });
+    } catch (e) {
+        console.error('[후기] 예약 실패:', e.message);
+    }
+
     return { ok: true, purchaseId, warns };
 }
 
@@ -399,6 +407,7 @@ client.once('ready', async () => {
     web.start(client);
     weekly.start(client);
     // 티켓툴 티켓이 열리면 구매로그 설정 패널 자동 생성 (판매자 역할 / 관리자만 사용)
+    reviews.init(client); // 후기 자동 수집 (지급완료 1시간 뒤 DM)
     tickettool.init(client, {
         completePurchase,
         purchaseCode: (id) => store.purchaseCode(id),
@@ -409,6 +418,9 @@ client.once('ready', async () => {
 });
 
 client.on('interactionCreate', async interaction => {
+
+    // 후기 별점 버튼 / 후기 입력창 (DM)
+    if (await reviews.handleInteraction(interaction).catch((e) => { console.error('[후기] 오류:', e); return true; })) return;
 
     // 티켓 (패널 버튼·선택기 / 양식 / 닫기 / 다시 열기 / 삭제) - 대시보드에서 설정한 대로 동작
     if (await tickets.handleInteraction(interaction)) return;
