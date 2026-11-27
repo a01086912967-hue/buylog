@@ -187,18 +187,67 @@ async function buildLogMessage({ guild, buyer, seller, buyerMember = null, kind,
 }
 
 
+// 구매로그 채널에서 이 구매의 카드 메시지 찾기
+// - 새 구매로그: 저장해 둔 메시지 위치
+// - 예전 구매로그: 구매 시간 근처에서 "구매 ID" 가 맞는 메시지 → 없으면 같은 시간대에 구매자를 멘션한 봇 메시지
+// 찾으면 위치(+ 카드에 있던 로블록스 계정)를 저장해서 다음부터는 바로 찾아요.
+const snowflakeAt = (ts) => String((BigInt(Math.max(0, ts - 1420070400000)) << 22n));
+async function locatePurchaseLog(guild, p) {
+    if (p.logChannelId && p.logMessageId) {
+        const ch = guild.channels.cache.get(p.logChannelId) || await guild.channels.fetch(p.logChannelId).catch(() => null);
+        const msg = ch && await ch.messages.fetch(p.logMessageId).catch(() => null);
+        if (msg) return msg;
+    }
+    const ch = guild.channels.cache.get(LOG_CHANNEL_ID) || await guild.channels.fetch(LOG_CHANNEL_ID).catch(() => null);
+    if (!ch) return null;
+    const code = store.purchaseCode(p.id);
+    const mine = (m) => m.author && m.author.id === client.user.id;
+    const footerOf = (m) => (m.embeds[0] && m.embeds[0].footer && m.embeds[0].footer.text) || '';
+    let found = null;
+    // 구매 시간 앞뒤로 최대 300개 메시지 확인
+    let around = snowflakeAt(p.ts);
+    const seen = new Map();
+    for (let i = 0; i < 3 && !found; i++) {
+        const batch = await ch.messages.fetch(i === 0 ? { around, limit: 100 } : { before: around, limit: 100 }).catch(() => null);
+        if (!batch || !batch.size) break;
+        for (const m of batch.values()) seen.set(m.id, m);
+        found = [...batch.values()].find((m) => mine(m) && (footerOf(m).match(/구매 ID (\d+)/) || [])[1] === code) || null;
+        around = [...batch.keys()].sort((a, b) => (BigInt(a) < BigInt(b) ? -1 : 1))[0];
+    }
+    if (!found) {
+        // 구매 ID 가 없던 예전 카드: 구매 시간 ±10분 안에 구매자를 멘션한 봇 메시지 중 가장 가까운 것
+        const near = [...seen.values()]
+            .filter((m) => mine(m) && m.embeds.length && String(m.content || '').includes(p.buyerId) && Math.abs(m.createdTimestamp - p.ts) < 10 * 60 * 1000)
+            .sort((a, b) => Math.abs(a.createdTimestamp - p.ts) - Math.abs(b.createdTimestamp - p.ts));
+        found = near[0] || null;
+    }
+    if (!found) return null;
+    const extra = { logChannelId: ch.id, logMessageId: found.id };
+    const link = ((found.embeds[0] && found.embeds[0].description) || '').match(/roblox\.com\/users\/(\d+)/);
+    if (link && !p.robloxUserId) extra.robloxUserId = link[1];
+    store.setPurchaseExtra(p.id, extra);
+    Object.assign(p, extra);
+    console.log(`[구매로그 수정] 예전 구매로그 카드 찾음: ${code} → ${found.id}`);
+    return found;
+}
+
 // 수정된 구매 기록으로 구매로그 채널의 카드 다시 그리기
-// 반환: 'edited' (메시지 수정함) | 'nomsg' (예전 구매로그라 메시지 위치를 몰라요) | 'gone' (메시지가 지워짐)
+// 반환: 'edited' (메시지 수정함) | 'nomsg' (카드를 찾지 못함)
 async function rebuildPurchaseLog(guild, p) {
-    if (!p.logChannelId || !p.logMessageId) return 'nomsg';
-    const ch = guild.channels.cache.get(p.logChannelId) || await guild.channels.fetch(p.logChannelId).catch(() => null);
-    const msg = ch && await ch.messages.fetch(p.logMessageId).catch(() => null);
-    if (!msg) return 'gone';
+    const msg = await locatePurchaseLog(guild, p);
+    if (!msg) return 'nomsg';
     const buyer = await client.users.fetch(p.buyerId);
     const seller = p.sellerId ? await client.users.fetch(p.sellerId).catch(() => buyer) : buyer;
     const rbx = String(p.roblox || '').trim();
-    let roblox = !rbx || rbx.toLowerCase() === 'x' ? { status: 'skip' } : await lookupRobloxUser(rbx);
-    if (roblox.status !== 'ok') roblox = { status: 'skip' };
+    let roblox = { status: 'skip' };
+    if (rbx && rbx.toLowerCase() !== 'x') {
+        roblox = await lookupRobloxUser(rbx);
+        if (roblox.status === 'ok') store.setPurchaseExtra(p.id, { robloxUserId: String(roblox.id) });
+        else roblox = p.robloxUserId ? { status: 'ok', id: p.robloxUserId } : { status: 'skip' };
+    } else if (!rbx && p.robloxUserId) {
+        // 로블록스 아이디 기록이 없는 예전 구매로그: 카드에 있던 로블록스 계정 그대로 사용
+        roblox = { status: 'ok', id: p.robloxUserId };
+    }
     const built = await buildLogMessage({
         guild, buyer, seller, kind: p.kind, item: p.item, count: p.qty,
         price: p.price || `${(p.spent || 0).toLocaleString('ko-KR')}원`,
@@ -210,9 +259,7 @@ async function rebuildPurchaseLog(guild, p) {
 
 // 구매로그 삭제 시 구매로그 채널 메시지도 지우기
 async function deletePurchaseLogMessage(guild, p) {
-    if (!p.logChannelId || !p.logMessageId) return false;
-    const ch = guild.channels.cache.get(p.logChannelId) || await guild.channels.fetch(p.logChannelId).catch(() => null);
-    const msg = ch && await ch.messages.fetch(p.logMessageId).catch(() => null);
+    const msg = await locatePurchaseLog(guild, p);
     if (!msg) return false;
     await msg.delete().catch(() => {});
     return true;
@@ -286,6 +333,7 @@ async function completePurchase({ guild, channel, buyer, kind, item, count, pric
     if (purchaseId) {
         store.setPurchaseExtra(purchaseId, {
             roblox: skipRoblox ? 'X' : robloxInput,
+            robloxUserId: roblox.status === 'ok' ? String(roblox.id) : null,
             logChannelId: logChannel.id,
             logMessageId: logMsg.id
         });
