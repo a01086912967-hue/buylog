@@ -34,7 +34,7 @@ const community = require('./community');
 const web = require('./web');
 const weekly = require('./weekly');
 const tickettool = require('./tickettool');
-const reviews = require('./reviews');
+const purchaseEdit = require('./purchaseEdit');
 const { renderProfileCard, renderStatsCard, renderRankCard, renderHistoryCard, renderSellerCard, ymd } = require('./infoCards');
 const { SERVER_ROLES, resolveGrade } = require('./roles');
 
@@ -89,69 +89,12 @@ async function getGuildIconBuf(guild) {
 // ==================== 지급완료 처리 (공통) ====================
 // /지급완료 명령어와 티켓툴 구매로그 패널의 [지급완료] 버튼이 같이 사용해요.
 // 반환: { ok: true, purchaseId, warns: [] } 또는 { ok: false, error }
-// fallbackDiscord: true 면 로블록스 아이디를 못 찾았을 때 멈추지 않고 디스코드 프로필로 전송 (티켓툴 패널용)
-async function completePurchase({ guild, channel, buyer, kind, item, count, price, robloxInput, seller, fallbackDiscord = false }) {
+// 구매로그 카드 메시지 만들기 (/지급완료, 티켓 패널, /구매로그수정 이 같이 사용)
+// roblox: lookupRobloxUser 결과 ({ status: 'ok', id } 이면 로블록스 아바타 사용)
+async function buildLogMessage({ guild, buyer, seller, buyerMember = null, kind, item, count, price, roblox, skipRoblox, purchaseId }) {
     const warns = [];
-    robloxInput = String(robloxInput || '').trim();
-
-    // 1) 로블록스 아이디 확인 (/지급완료 는 없는 아이디면 아무것도 처리하지 않음)
-    let skipRoblox = !robloxInput || robloxInput.toLowerCase() === 'x'; // X 입력 시 로블록스 없이 디스코드 프사만
-    let roblox = skipRoblox ? { status: 'skip' } : await lookupRobloxUser(robloxInput);
-    if (roblox.status === 'notfound') {
-        if (!fallbackDiscord) {
-            return { ok: false, error: `❌ 로블록스 아이디 \`${robloxInput}\` 을(를) 찾을 수 없어요. 철자를 확인하고 다시 입력해 주세요. (아무것도 처리되지 않았어요)` };
-        }
-        skipRoblox = true;
-        roblox = { status: 'skip' };
-        warns.push(`로블록스 아이디 \`${robloxInput}\` 을(를) 찾지 못해 디스코드 프로필로 전송했어요.`);
-    }
-
-    const logChannel = guild.channels.cache.get(LOG_CHANNEL_ID);
-    if (!logChannel) return { ok: false, error: '로그 채널을 찾을 수 없습니다.' };
-
-    // 2) 역할 부여 (기존 동작 그대로)
-    let buyerMember = null;
-    try {
-        buyerMember = await guild.members.fetch(buyer.id);
-        if (buyerMember && !buyerMember.roles.cache.has(ROLE_ID)) {
-            await buyerMember.roles.add(ROLE_ID);
-        }
-    } catch (error) {
-        console.error('역할 부여 중 오류 발생:', error);
-    }
-
-    // 3) 구매 감사 카드 이미지 생성
     const summary = buildSummary(kind, item, count);
     let cardBuffer = null;
-
-    // 구매 정보 저장 ($정보 / $통계 / $랭킹에 사용)
-    let purchaseId = null;
-    try {
-        const rec = store.recordPurchase({ buyerId: buyer.id, kind, qty: count, price, sellerId: seller.id, item, guildId: guild.id });
-        purchaseId = rec.id;
-        // 티켓 채널에서 실행했다면 그 안의 대화 내용을 구매 기록에 같이 저장 (웹 대시보드 구매 로그에서 볼 수 있어요)
-        try {
-            // 릴리웨이 티켓 + 티켓툴(TicketTool) 등 다른 봇이 만든 티켓 채널(이름에 ticket/티켓/closed 포함)도 저장
-            const tk = store.findTicket(channel.id);
-            const chName = String(channel.name || '');
-            if (tk || /ticket|티켓|closed/i.test(chName) || tickettool.isTicketToolChannel(channel.id)) {
-                const messages = await tickets.collectChat(channel);
-                const num = tk ? tk.number : parseInt((chName.match(/\d+/) || [])[0], 10) || null;
-                const saved = store.attachChat(rec.id, { channelName: chName, ticketNumber: num, messages });
-                console.log(`[구매기록] ${store.purchaseCode(rec.id)} 대화 ${messages.length}줄 저장 (${chName}) ${saved ? '' : '실패'}`);
-            } else {
-                console.log(`[구매기록] ${store.purchaseCode(rec.id)} 티켓 채널이 아니라 대화를 저장하지 않았어요 (${chName})`);
-            }
-        } catch (e) {
-            console.error('티켓 대화 저장 실패:', e.message);
-        }
-        if (rec.spent === 0 || (kind === 'robux' && rec.robux === 0)) {
-            warns.push('⚠️ 금액/수량을 숫자로 읽지 못해 통계에 0으로 기록됐어요. /정보설정 으로 직접 고쳐주세요.');
-        }
-    } catch (e) {
-        console.error('구매 기록 저장 실패:', e);
-        warns.push('⚠️ 구매 기록을 저장하지 못했어요. (통계에 반영되지 않았어요)');
-    }
 
     try {
         let sellerMember = null;
@@ -198,7 +141,6 @@ async function completePurchase({ guild, channel, buyer, kind, item, count, pric
         console.error('구매 카드 이미지 생성 실패:', error);
     }
 
-    // 4) 구매 로그 전송
     const shopName = (SHOP_NAME_OVERRIDE || guild.name).toUpperCase();
     const guildIcon = guild.iconURL({ extension: 'png', size: 64 });
     const footer = () => {
@@ -219,11 +161,14 @@ async function completePurchase({ guild, channel, buyer, kind, item, count, pric
             .setFooter(footer())
             .setTimestamp();
 
-        await logChannel.send({
-            content: `${buyer}`,
-            embeds: [cardEmbed],
-            files: [new AttachmentBuilder(cardBuffer, { name: 'purchase.png' })]
-        });
+        return {
+            warns,
+            payload: {
+                content: `${buyer}`,
+                embeds: [cardEmbed],
+                files: [new AttachmentBuilder(cardBuffer, { name: 'purchase.png' })]
+            }
+        };
     } else {
         // 이미지 생성 실패 시 기존 임베드로 대체
         const logEmbed = new EmbedBuilder()
@@ -236,9 +181,122 @@ async function completePurchase({ guild, channel, buyer, kind, item, count, pric
             .setImage(IMAGE_URL);
         if (purchaseId) logEmbed.setFooter({ text: `구매 ID ${store.purchaseCode(purchaseId)}` });
 
-        await logChannel.send({ content: `${buyer}`, embeds: [logEmbed] });
         warns.push('⚠️ 구매 카드 이미지 생성에 실패해 기존 임베드로 전송했어요. (폰트 파일/패키지 설치를 확인해 주세요)');
+        return { warns, payload: { content: `${buyer}`, embeds: [logEmbed] } };
     }
+}
+
+
+// 수정된 구매 기록으로 구매로그 채널의 카드 다시 그리기
+// 반환: 'edited' (메시지 수정함) | 'nomsg' (예전 구매로그라 메시지 위치를 몰라요) | 'gone' (메시지가 지워짐)
+async function rebuildPurchaseLog(guild, p) {
+    if (!p.logChannelId || !p.logMessageId) return 'nomsg';
+    const ch = guild.channels.cache.get(p.logChannelId) || await guild.channels.fetch(p.logChannelId).catch(() => null);
+    const msg = ch && await ch.messages.fetch(p.logMessageId).catch(() => null);
+    if (!msg) return 'gone';
+    const buyer = await client.users.fetch(p.buyerId);
+    const seller = p.sellerId ? await client.users.fetch(p.sellerId).catch(() => buyer) : buyer;
+    const rbx = String(p.roblox || '').trim();
+    let roblox = !rbx || rbx.toLowerCase() === 'x' ? { status: 'skip' } : await lookupRobloxUser(rbx);
+    if (roblox.status !== 'ok') roblox = { status: 'skip' };
+    const built = await buildLogMessage({
+        guild, buyer, seller, kind: p.kind, item: p.item, count: p.qty,
+        price: p.price || `${(p.spent || 0).toLocaleString('ko-KR')}원`,
+        roblox, skipRoblox: roblox.status !== 'ok', purchaseId: p.id
+    });
+    await msg.edit({ ...built.payload, attachments: [] });
+    return 'edited';
+}
+
+// 구매로그 삭제 시 구매로그 채널 메시지도 지우기
+async function deletePurchaseLogMessage(guild, p) {
+    if (!p.logChannelId || !p.logMessageId) return false;
+    const ch = guild.channels.cache.get(p.logChannelId) || await guild.channels.fetch(p.logChannelId).catch(() => null);
+    const msg = ch && await ch.messages.fetch(p.logMessageId).catch(() => null);
+    if (!msg) return false;
+    await msg.delete().catch(() => {});
+    return true;
+}
+
+// fallbackDiscord: true 면 로블록스 아이디를 못 찾았을 때 멈추지 않고 디스코드 프로필로 전송 (티켓툴 패널용)
+async function completePurchase({ guild, channel, buyer, kind, item, count, price, robloxInput, seller, fallbackDiscord = false }) {
+    const warns = [];
+    robloxInput = String(robloxInput || '').trim();
+
+    // 1) 로블록스 아이디 확인 (/지급완료 는 없는 아이디면 아무것도 처리하지 않음)
+    let skipRoblox = !robloxInput || robloxInput.toLowerCase() === 'x'; // X 입력 시 로블록스 없이 디스코드 프사만
+    let roblox = skipRoblox ? { status: 'skip' } : await lookupRobloxUser(robloxInput);
+    if (roblox.status === 'notfound') {
+        if (!fallbackDiscord) {
+            return { ok: false, error: `❌ 로블록스 아이디 \`${robloxInput}\` 을(를) 찾을 수 없어요. 철자를 확인하고 다시 입력해 주세요. (아무것도 처리되지 않았어요)` };
+        }
+        skipRoblox = true;
+        roblox = { status: 'skip' };
+        warns.push(`로블록스 아이디 \`${robloxInput}\` 을(를) 찾지 못해 디스코드 프로필로 전송했어요.`);
+    }
+
+    const logChannel = guild.channels.cache.get(LOG_CHANNEL_ID);
+    if (!logChannel) return { ok: false, error: '로그 채널을 찾을 수 없습니다.' };
+
+    // 2) 역할 부여 (기존 동작 그대로)
+    let buyerMember = null;
+    try {
+        buyerMember = await guild.members.fetch(buyer.id);
+        if (buyerMember && !buyerMember.roles.cache.has(ROLE_ID)) {
+            await buyerMember.roles.add(ROLE_ID);
+        }
+    } catch (error) {
+        console.error('역할 부여 중 오류 발생:', error);
+    }
+
+    // 3) 구매 정보 저장
+    // 구매 정보 저장 ($정보 / $통계 / $랭킹에 사용)
+    let purchaseId = null;
+    try {
+        const rec = store.recordPurchase({ buyerId: buyer.id, kind, qty: count, price, sellerId: seller.id, item, guildId: guild.id });
+        purchaseId = rec.id;
+        // 티켓 채널에서 실행했다면 그 안의 대화 내용을 구매 기록에 같이 저장 (웹 대시보드 구매 로그에서 볼 수 있어요)
+        try {
+            // 릴리웨이 티켓 + 티켓툴(TicketTool) 등 다른 봇이 만든 티켓 채널(이름에 ticket/티켓/closed 포함)도 저장
+            const tk = store.findTicket(channel.id);
+            const chName = String(channel.name || '');
+            if (tk || /ticket|티켓|closed/i.test(chName) || tickettool.isTicketToolChannel(channel.id)) {
+                const messages = await tickets.collectChat(channel);
+                const num = tk ? tk.number : parseInt((chName.match(/\d+/) || [])[0], 10) || null;
+                const saved = store.attachChat(rec.id, { channelName: chName, ticketNumber: num, messages });
+                console.log(`[구매기록] ${store.purchaseCode(rec.id)} 대화 ${messages.length}줄 저장 (${chName}) ${saved ? '' : '실패'}`);
+            } else {
+                console.log(`[구매기록] ${store.purchaseCode(rec.id)} 티켓 채널이 아니라 대화를 저장하지 않았어요 (${chName})`);
+            }
+        } catch (e) {
+            console.error('티켓 대화 저장 실패:', e.message);
+        }
+        if (rec.spent === 0 || (kind === 'robux' && rec.robux === 0)) {
+            warns.push('⚠️ 금액/수량을 숫자로 읽지 못해 통계에 0으로 기록됐어요. /정보설정 으로 직접 고쳐주세요.');
+        }
+    } catch (e) {
+        console.error('구매 기록 저장 실패:', e);
+        warns.push('⚠️ 구매 기록을 저장하지 못했어요. (통계에 반영되지 않았어요)');
+    }
+
+    // 4) 구매 로그 전송 (메시지 위치를 저장해 두면 /구매로그수정 때 카드도 다시 그려요)
+    const built = await buildLogMessage({ guild, buyer, seller, buyerMember, kind, item, count, price, roblox, skipRoblox, purchaseId });
+    warns.push(...built.warns);
+    const logMsg = await logChannel.send(built.payload);
+    if (purchaseId) {
+        store.setPurchaseExtra(purchaseId, {
+            roblox: skipRoblox ? 'X' : robloxInput,
+            logChannelId: logChannel.id,
+            logMessageId: logMsg.id
+        });
+    }
+
+    const shopName = (SHOP_NAME_OVERRIDE || guild.name).toUpperCase();
+    const guildIcon = guild.iconURL({ extension: 'png', size: 64 });
+    const footer = () => {
+        const text = purchaseId ? `구매 ID ${store.purchaseCode(purchaseId)} · ${shopName}` : shopName;
+        return guildIcon ? { text, iconURL: guildIcon } : { text };
+    };
 
     // 5) 티켓(현재) 채널에 지급 완료 안내
     const replyEmbed = new EmbedBuilder()
@@ -255,13 +313,6 @@ async function completePurchase({ guild, channel, buyer, kind, item, count, pric
     );
 
     await channel.send({ content: `${buyer}`, embeds: [replyEmbed], components: [row] });
-
-    // 1시간 뒤 구매자에게 후기 요청 DM 예약
-    try {
-        reviews.schedule({ guildId: guild.id, buyerId: buyer.id, sellerId: seller.id, kind, item, count, code: purchaseId ? store.purchaseCode(purchaseId) : null });
-    } catch (e) {
-        console.error('[후기] 예약 실패:', e.message);
-    }
 
     return { ok: true, purchaseId, warns };
 }
@@ -365,6 +416,13 @@ client.once('ready', async () => {
         .addStringOption(option => option.setName('로블아이디').setDescription('구매자의 로블록스 아이디 (없으면 X 입력 → 디스코드 프사만 표시)').setRequired(true))
         .addUserOption(option => option.setName('판매자').setDescription('해당 관리 판매자').setRequired(false));
 
+    const editLogCommand = new SlashCommandBuilder()
+        .setName('구매로그수정')
+        .setDescription('구매로그를 수정/삭제합니다. (통계·정보·랭킹에 바로 반영)')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .addStringOption(option => option.setName('구매아이디').setDescription('구매로그 아래에 적힌 구매 ID').setRequired(false))
+        .addUserOption(option => option.setName('유저').setDescription('이 유저의 최근 구매 목록에서 고르기').setRequired(false));
+
     const panelCommand = new SlashCommandBuilder()
         .setName('패널')
         .setDescription('안내 패널을 생성합니다.')
@@ -395,6 +453,7 @@ client.once('ready', async () => {
         .addChannelOption(option => option.setName('채널').setDescription('대상 채널 (비우면 서버의 모든 채널·스레드)').addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement, ChannelType.GuildVoice, ChannelType.GuildForum, ChannelType.PublicThread, ChannelType.PrivateThread, ChannelType.AnnouncementThread).setRequired(false));
 
     await client.application.commands.create(logCommand);
+    await client.application.commands.create(editLogCommand);
     await client.application.commands.create(infoSetCommand);
     await client.application.commands.create(backupCommand);
     await client.application.commands.create(panelCommand);
@@ -407,8 +466,14 @@ client.once('ready', async () => {
     web.start(client);
     weekly.start(client);
     // 티켓툴 티켓이 열리면 구매로그 설정 패널 자동 생성 (판매자 역할 / 관리자만 사용)
-    reviews.init(client); // 후기 자동 수집 (지급완료 1시간 뒤 DM)
+    // 구매로그 수정 (/구매로그수정, 티켓 패널 [구매로그 수정] 버튼)
+    purchaseEdit.init({
+        canUse: (member) => isAdmin(member) || !!(member && member.roles.cache.has(CALCULATOR_ROLE_ID)),
+        rebuild: rebuildPurchaseLog,
+        deleteMsg: deletePurchaseLogMessage
+    });
     tickettool.init(client, {
+        openPurchaseEditor: (interaction, code) => purchaseEdit.openById(interaction, code),
         completePurchase,
         purchaseCode: (id) => store.purchaseCode(id),
         lookupRoblox: lookupRobloxUser, // 대화에서 로블록스 닉네임 확인용
@@ -419,11 +484,11 @@ client.once('ready', async () => {
 
 client.on('interactionCreate', async interaction => {
 
-    // 후기 별점 버튼 / 후기 입력창 (DM)
-    if (await reviews.handleInteraction(interaction).catch((e) => { console.error('[후기] 오류:', e); return true; })) return;
-
     // 티켓 (패널 버튼·선택기 / 양식 / 닫기 / 다시 열기 / 삭제) - 대시보드에서 설정한 대로 동작
     if (await tickets.handleInteraction(interaction)) return;
+
+    // 구매로그 수정 화면 (구매자/판매자 변경, 상품·수량·금액 수정, 삭제)
+    if (await purchaseEdit.handleInteraction(interaction).catch((e) => { console.error('[구매로그 수정] 오류:', e); return true; })) return;
 
     // 티켓툴 구매로그 설정 패널 (판매자 선택 / 정보 수정 / 지급완료)
     if (await tickettool.handleInteraction(interaction).catch((e) => { console.error('[티켓툴] 패널 오류:', e); return true; })) return;
@@ -782,6 +847,14 @@ client.on('interactionCreate', async interaction => {
         return interaction.editReply({
             content: result,
             allowedMentions: { parse: [] }
+        });
+    }
+
+    // /구매로그수정
+    if (interaction.commandName === '구매로그수정') {
+        return purchaseEdit.handleCommand(interaction).catch((e) => {
+            console.error('[구매로그 수정] 오류:', e);
+            return interaction.reply({ content: '오류가 났어요. 잠시 후 다시 시도해 주세요.', ephemeral: true }).catch(() => {});
         });
     }
 
