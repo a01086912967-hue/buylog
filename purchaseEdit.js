@@ -33,8 +33,7 @@ function detectKind(v) {
 
 const NOTE = {
     edited: '수정했어요. 구매로그 카드도 바꿨어요.',
-    nomsg: '수정했어요. (예전 구매로그라 카드 메시지는 그대로예요)',
-    gone: '수정했어요. (구매로그 카드 메시지가 지워져 있어요)',
+    nomsg: '수정했어요. (구매로그 채널에서 카드를 찾지 못해 카드는 그대로예요)',
     fail: '수정했어요. (카드를 다시 그리지 못했어요)'
 };
 
@@ -48,7 +47,7 @@ function viewPayload(p, note = '') {
         `**상품** ${p.item || '없음'}`,
         `**수량** ${p.qty || '없음'}`,
         `**금액** ${priceOf(p)}`,
-        `**로블록스 아이디** ${p.roblox || '기록 없음'}`
+        `**로블록스 아이디** ${p.roblox || (p.robloxUserId ? '카드에 있던 계정 유지' : '없음 (디스코드 프로필)')}`
     ];
     if (note) body.push(`-# ${note}`);
     const sel = (cid, ph, id) => ({
@@ -217,7 +216,7 @@ async function handleInteraction(interaction) {
             input('item', '상품', p.item, '로벅스는 "로벅스"'),
             input('qty', '수량 (로벅스는 로벅스 수량)', p.qty, '1000'),
             input('price', '금액', priceOf(p), '10000원'),
-            input('roblox', '로블록스 아이디 (없으면 X)', p.roblox, 'X', false)
+            input('roblox', '로블록스 아이디 (X = 디스코드 프로필)', p.roblox, '비우면 카드에 있던 계정 유지', false)
         ));
         return true;
     }
@@ -229,7 +228,7 @@ async function handleInteraction(interaction) {
             item: v('item'),
             qty: /^[\d,]+$/.test(v('qty')) ? fmtNum(Number(v('qty').replace(/,/g, ''))) : v('qty'),
             price: v('price'),
-            roblox: v('roblox') || 'X'
+            roblox: v('roblox') // 비우면 카드에 있던 로블록스 계정 유지 (없으면 디스코드 프로필)
         });
         const r = await rebuild(interaction.guild, np);
         const warn = np.spent === 0 || (np.kind === 'robux' && np.robux === 0) ? ' 금액/수량을 숫자로 읽지 못해 0으로 기록됐어요.' : '';
@@ -247,7 +246,7 @@ async function handleInteraction(interaction) {
         const removed = store.deletePurchase(p.id);
         const msgDeleted = removed ? await deps.deleteMsg(interaction.guild, removed).catch(() => false) : false;
         await interaction.editReply(textPayload(
-            `### 구매로그를 삭제했어요\n<@${removed.buyerId}> · ${summaryOf(removed)} · ${priceOf(removed)}\n-# 구매 ID ${store.purchaseCode(removed.id)} · ${msgDeleted ? '구매로그 카드도 지웠어요.' : '구매로그 카드는 직접 지워주세요. (예전 구매로그라 위치를 몰라요)'}`,
+            `### 구매로그를 삭제했어요\n<@${removed.buyerId}> · ${summaryOf(removed)} · ${priceOf(removed)}\n-# 구매 ID ${store.purchaseCode(removed.id)} · ${msgDeleted ? '구매로그 카드도 지웠어요.' : '구매로그 카드를 찾지 못했어요. 남아 있다면 직접 지워주세요.'}`,
             DANGER
         ));
         return true;
