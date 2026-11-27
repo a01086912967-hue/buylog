@@ -142,6 +142,7 @@ function recordPurchase({ buyerId, kind, qty, price, sellerId, item, guildId }) 
         sellerId: sellerId || null,
         item: String(item || '').slice(0, 80),
         qty: String(qty ?? '').slice(0, 30),
+        price: String(price ?? '').slice(0, 30),
         guildId: guildId || null,
     });
     const u = ensureUser(buyerId);
@@ -406,6 +407,65 @@ function getPurchase(id) {
     return db.purchases.find((p) => p.id === id) || null;
 }
 
+// ==================== 구매로그 수정 / 삭제 ====================
+// 구매 기록 하나가 유저 누적값(구매 로벅스/금액/거래횟수)에 준 영향을 빼거나(sign -1) 더해요(sign +1)
+function applyToUsers(p, sign) {
+    const b = ensureUser(p.buyerId);
+    b.count = Math.max(0, b.count + sign);
+    b.spent = Math.max(0, b.spent + sign * (p.spent || 0));
+    b.robux = Math.max(0, b.robux + sign * (p.robux || 0));
+    if (p.sellerId) {
+        const s = ensureUser(p.sellerId);
+        s.count = Math.max(0, s.count + sign);
+    }
+}
+
+// 구매 ID 문자열로 찾기 (예: "1234567890123")
+function findPurchaseByCode(code) {
+    const n = Number(String(code || '').replace(/[^\d]/g, ''));
+    return n ? getPurchase(n) : null;
+}
+
+// 구매로그 수정 → 유저 누적값도 같이 바뀌어서 $정보 / $통계 / $랭킹 / 주간 랭킹에 바로 반영돼요
+// patch: { buyerId, sellerId, kind, item, qty, price, roblox }
+function editPurchase(id, patch) {
+    const p = getPurchase(id);
+    if (!p) return null;
+    applyToUsers(p, -1);
+    if (patch.buyerId) p.buyerId = patch.buyerId;
+    if (patch.sellerId !== undefined) p.sellerId = patch.sellerId || null;
+    if (patch.kind) p.kind = patch.kind;
+    if (patch.item !== undefined) p.item = String(patch.item || '').slice(0, 80);
+    if (patch.qty !== undefined) p.qty = String(patch.qty ?? '').slice(0, 30);
+    if (patch.price !== undefined) p.price = String(patch.price ?? '').slice(0, 30);
+    if (patch.roblox !== undefined) p.roblox = String(patch.roblox || '').slice(0, 30);
+    p.robux = p.kind === 'robux' ? parseNumber(p.qty) : 0;
+    if (patch.price !== undefined) p.spent = parseNumber(patch.price);
+    p.editedTs = Date.now();
+    applyToUsers(p, +1);
+    save();
+    return p;
+}
+
+// 구매로그 삭제 → 유저 누적값에서도 빠져요
+function deletePurchase(id) {
+    const i = db.purchases.findIndex((x) => x.id === id);
+    if (i === -1) return null;
+    const [p] = db.purchases.splice(i, 1);
+    applyToUsers(p, -1);
+    save();
+    return p;
+}
+
+// 구매 기록에 추가 정보 저장 (로블록스 아이디, 구매로그 메시지 위치 등)
+function setPurchaseExtra(id, extra) {
+    const p = getPurchase(id);
+    if (!p) return null;
+    Object.assign(p, extra);
+    save();
+    return p;
+}
+
 // 티켓 안 대화 기록을 구매 기록에 붙여요 (최대 300줄)
 function attachChat(id, chat) {
     const p = getPurchase(id);
@@ -646,6 +706,10 @@ module.exports = {
     getMeta,
     setMeta,
     purchaseCode,
+    findPurchaseByCode,
+    editPurchase,
+    deletePurchase,
+    setPurchaseExtra,
     getPurchase,
     attachChat,
     setUser,
