@@ -470,7 +470,10 @@ async function panelPayload(client, d) {
     const head = avatar ? { type: 9, components: [text], accessory: { type: 11, media: { url: avatar } } } : text;
 
     const buttons = done
-        ? [{ type: 2, style: 1, label: '추가 구매', custom_id: 'ttlog_more' }]
+        ? [
+            { type: 2, style: 2, label: '구매로그 수정', custom_id: 'ttlog_fix' },
+            { type: 2, style: 1, label: '추가 구매', custom_id: 'ttlog_more' }
+        ]
         : [
             { type: 2, style: 2, label: '정보 수정', custom_id: 'ttlog_edit' },
             ...(d.kind === 'robux' ? [{ type: 2, style: 2, label: '패스 계산', custom_id: 'ttlog_pass' }] : []),
@@ -769,6 +772,16 @@ async function handleInteraction(interaction) {
             channelId: channel.id, buyerId: d.buyerId, sellerId: d.sellerId, kind: d.kind,
             item: d.kind === 'robux' ? '로벅스' : '', count: '', price: '', roblox: d.roblox, asked: true
         });
+        return true;
+    }
+
+    // 구매로그 수정 (지급완료된 패널) → /구매로그수정 과 같은 화면
+    if (action === 'ttlog_fix') {
+        if (!d.code) {
+            await interaction.reply(eph('구매 ID가 없어서 열 수 없어요. /구매로그수정 유저:(구매자) 로 찾아주세요.'));
+            return true;
+        }
+        await deps.openPurchaseEditor(interaction, d.code);
         return true;
     }
 
