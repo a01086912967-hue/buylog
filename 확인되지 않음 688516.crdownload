@@ -1,0 +1,720 @@
+// 봇 데이터 저장소 (JSON 파일)
+// - 저장 위치: DATA_DIR 환경변수 > Railway Volume(RAILWAY_VOLUME_MOUNT_PATH) > ./data
+// - Railway는 재배포/재시작하면 파일이 지워져요. 데이터를 유지하려면 Volume을 만들어서 연결해야 해요.
+//   (Railway 서비스 > Settings > Volumes > Mount Path: /data)
+
+const fs = require('fs');
+const path = require('path');
+
+// 모든 통계의 시작 시점: 2026-10-28 00:00 (한국 시간)
+const STATS_START_TS = Date.UTC(2026, 9, 27, 15, 0, 0);
+
+const DATA_DIR = process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH || path.join(__dirname, 'data');
+const FILE = path.join(DATA_DIR, 'data.json');
+
+const onRailway = !!(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID || process.env.RAILWAY_SERVICE_ID);
+const persistent = !!(process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH) || !onRailway;
+
+let db = { users: {}, purchases: [], purchaseSeq: 0, meta: {}, joins: [], guilds: {}, tickets: [], accounts: {}, loginLog: [], sessions: {}, site: {} };
+
+// 13자리 랜덤 숫자 (겹치지 않게)
+function genPurchaseId(used) {
+    for (;;) {
+        const n = Number(String(1 + Math.floor(Math.random() * 9)) + String(Math.floor(Math.random() * 1e12)).padStart(12, '0'));
+        if (!used.has(n)) {
+            used.add(n);
+            return n;
+        }
+    }
+}
+
+function load() {
+    try {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+    } catch (e) {
+        console.error('[데이터] 저장 폴더를 만들 수 없어요:', e.message);
+    }
+    if (fs.existsSync(FILE)) {
+        try {
+            const parsed = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+            db = {
+                users: parsed.users || {},
+                purchases: Array.isArray(parsed.purchases) ? parsed.purchases : [],
+                purchaseSeq: Number(parsed.purchaseSeq) || 0,
+                meta: parsed.meta && typeof parsed.meta === 'object' ? parsed.meta : {},
+                joins: Array.isArray(parsed.joins) ? parsed.joins : [],
+                guilds: parsed.guilds && typeof parsed.guilds === 'object' ? parsed.guilds : {},
+                tickets: Array.isArray(parsed.tickets) ? parsed.tickets : [],
+                accounts: parsed.accounts && typeof parsed.accounts === 'object' ? parsed.accounts : {},
+                loginLog: Array.isArray(parsed.loginLog) ? parsed.loginLog : [],
+                sessions: parsed.sessions && typeof parsed.sessions === 'object' ? parsed.sessions : {},
+                site: parsed.site && typeof parsed.site === 'object' ? parsed.site : {},
+            };
+            // 구매 아이디가 없는 예전 기록에 순서대로 번호 붙이기
+            // 구매 아이디는 13자리 긴 숫자 (예전 1,2,3.. 번호도 이때 긴 숫자로 바꿔요)
+            const used = new Set(db.purchases.filter((p) => p.id >= 1e12).map((p) => p.id));
+            let migrated = false;
+            for (const p of db.purchases) {
+                if (!(p.id >= 1e12)) {
+                    p.id = genPurchaseId(used);
+                    migrated = true;
+                }
+            }
+            // 지금까지의 /지급완료 기록으로 판매자 거래 횟수 한 번만 소급 적용
+            // (2026-11-12 22:04 배포본부터는 판매자≠구매자인 거래가 이미 +1 되어 있어서 그건 빼고 계산)
+            if (!db.meta.sellerCountBackfilled) {
+                const ALREADY_FROM = 1794488686000;
+                let added = 0;
+                for (const p of db.purchases) {
+                    if (!p.sellerId) continue;
+                    if (p.ts >= ALREADY_FROM && p.sellerId !== p.buyerId) continue;
+                    ensureUser(p.sellerId).count += 1;
+                    added++;
+                }
+                db.meta.sellerCountBackfilled = Date.now();
+                migrated = true;
+                console.log(`[데이터] 판매자 거래 횟수 소급 적용: ${added}건`);
+            }
+            if (migrated) setTimeout(save, 0);
+            console.log(`[데이터] 불러오기 완료 (유저 ${Object.keys(db.users).length}명, 구매 ${db.purchases.length}건) - ${FILE}`);
+        } catch (e) {
+            const bak = `${FILE}.corrupt-${Date.now()}`;
+            try {
+                fs.copyFileSync(FILE, bak);
+            } catch (_) {}
+            console.error(`[데이터] 파일이 손상되어 새로 시작해요. 원본은 ${bak} 에 남겨뒀어요:`, e.message);
+        }
+    } else {
+        console.log(`[데이터] 저장 파일이 없어 새로 시작해요 - ${FILE}`);
+    }
+    if (!persistent) {
+        console.warn(
+            '[데이터] ⚠️ Railway Volume이 연결되지 않은 것 같아요. 재배포/재시작하면 데이터가 사라져요!\n' +
+            '         Railway 서비스 > Settings > Volumes 에서 Volume을 만들고 Mount Path를 /data 로 설정하세요.'
+        );
+    }
+}
+
+function save() {
+    try {
+        const tmp = `${FILE}.tmp`;
+        fs.writeFileSync(tmp, JSON.stringify(db));
+        fs.renameSync(tmp, FILE);
+    } catch (e) {
+        console.error('[데이터] 저장 실패:', e.message);
+    }
+}
+
+// "10,000원" / "1만" / "700 로벅스" -> 숫자
+function parseNumber(s) {
+    const t = String(s ?? '').replace(/,/g, '');
+    const man = t.match(/(\d+(?:\.\d+)?)\s*만\s*(\d+)?/);
+    if (man) return Math.round(Number(man[1]) * 10000 + (man[2] ? Number(man[2]) : 0));
+    const m = t.match(/\d+(?:\.\d+)?/);
+    return m ? Math.round(Number(m[0])) : 0;
+}
+
+function emptyUser() {
+    return { robux: 0, spent: 0, count: 0, invites: 0 };
+}
+
+function getUser(id) {
+    return { ...emptyUser(), ...(db.users[id] || {}) };
+}
+
+function ensureUser(id) {
+    if (!db.users[id]) db.users[id] = emptyUser();
+    return db.users[id];
+}
+
+// 구매 1건 기록 (유저 누적 + 기간 통계용 기록)
+function recordPurchase({ buyerId, kind, qty, price, sellerId, item, guildId }) {
+    const robux = kind === 'robux' ? parseNumber(qty) : 0;
+    const spent = parseNumber(price);
+    const id = genPurchaseId(new Set(db.purchases.map((x) => x.id)));
+    db.purchases.push({
+        id,
+        ts: Date.now(),
+        buyerId,
+        kind,
+        robux,
+        spent,
+        sellerId: sellerId || null,
+        item: String(item || '').slice(0, 80),
+        qty: String(qty ?? '').slice(0, 30),
+        price: String(price ?? '').slice(0, 30),
+        guildId: guildId || null,
+    });
+    const u = ensureUser(buyerId);
+    u.count += 1;
+    u.spent += spent;
+    u.robux += robux;
+    // 판매자도 거래 횟수 +1 (/지급완료에서 판매자를 안 고르면 명령어 쓴 사람이 판매자)
+    if (sellerId) ensureUser(sellerId).count += 1;
+    save();
+    return { robux, spent, id };
+}
+
+// 기간 안에서 구매 금액이 많은 순서 (주간 TOP용)
+function weeklyTop(guildId, fromTs, toTs) {
+    const m = new Map();
+    for (const p of db.purchases) {
+        if (p.ts < fromTs || p.ts >= toTs) continue;
+        if (p.guildId && guildId && p.guildId !== guildId) continue;
+        const e = m.get(p.buyerId) || { id: p.buyerId, spent: 0, robux: 0, count: 0 };
+        e.spent += p.spent || 0;
+        e.robux += p.robux || 0;
+        e.count += 1;
+        m.set(p.buyerId, e);
+    }
+    return [...m.values()].filter((e) => e.spent > 0).sort((a, b) => b.spent - a.spent || b.robux - a.robux || b.count - a.count);
+}
+
+function hasPurchases(guildId) {
+    return db.purchases.some((p) => !p.guildId || p.guildId === guildId);
+}
+
+function getMeta(key) {
+    return db.meta[key];
+}
+
+function setMeta(key, value) {
+    db.meta[key] = value;
+    save();
+}
+
+// 한 사람의 거래 내역 (최신순)
+function purchasesOf(userId, limit = 8) {
+    const all = db.purchases.filter((p) => p.buyerId === userId);
+    return { total: all.length, list: all.slice(-limit).reverse() };
+}
+
+// 판매자 판매 정보 ($정보 > 판매 정보 버튼)
+function sellerStats(sellerId, recentLimit = 5) {
+    const KST = 9 * 60 * 60 * 1000;
+    const now = Date.now();
+    const k = new Date(now + KST);
+    const todayStart = Date.UTC(k.getUTCFullYear(), k.getUTCMonth(), k.getUTCDate()) - KST;
+    const monthStart = Date.UTC(k.getUTCFullYear(), k.getUTCMonth(), 1) - KST;
+    const weekStart = now - 7 * 24 * 60 * 60 * 1000;
+
+    const mine = db.purchases.filter((p) => p.sellerId === sellerId);
+    const s = {
+        count: 0, spent: 0, robux: 0,
+        today: { count: 0, spent: 0 },
+        week: { count: 0, spent: 0 },
+        month: { count: 0, spent: 0 },
+        byKind: { robux: { count: 0, spent: 0 }, ingame: { count: 0, spent: 0 }, etc: { count: 0, spent: 0 } },
+        buyers: 0, topBuyer: null, best: null, first: null, last: null, rank: null, rankTotal: 0,
+        recent: mine.slice(-recentLimit).reverse(),
+    };
+    const byBuyer = {};
+    for (const p of mine) {
+        s.count += 1;
+        s.spent += p.spent || 0;
+        s.robux += p.robux || 0;
+        const kd = s.byKind[p.kind] || s.byKind.etc;
+        kd.count += 1;
+        kd.spent += p.spent || 0;
+        if (p.ts >= todayStart) { s.today.count += 1; s.today.spent += p.spent || 0; }
+        if (p.ts >= weekStart) { s.week.count += 1; s.week.spent += p.spent || 0; }
+        if (p.ts >= monthStart) { s.month.count += 1; s.month.spent += p.spent || 0; }
+        if (!s.best || (p.spent || 0) > s.best.spent) s.best = { spent: p.spent || 0, ts: p.ts };
+        if (!s.first || p.ts < s.first) s.first = p.ts;
+        if (!s.last || p.ts > s.last) s.last = p.ts;
+        const b = byBuyer[p.buyerId] || (byBuyer[p.buyerId] = { id: p.buyerId, count: 0, spent: 0 });
+        b.count += 1;
+        b.spent += p.spent || 0;
+    }
+    const buyers = Object.values(byBuyer);
+    s.buyers = buyers.length;
+    s.repeatBuyers = buyers.filter((b) => b.count >= 2).length;
+    s.topBuyer = buyers.sort((a, b) => b.count - a.count || b.spent - a.spent)[0] || null;
+    s.avg = s.count ? Math.round(s.spent / s.count) : 0;
+
+    // 판매자 순위 (판매 금액 기준)
+    const totals = {};
+    for (const p of db.purchases) {
+        if (!p.sellerId) continue;
+        totals[p.sellerId] = (totals[p.sellerId] || 0) + (p.spent || 0);
+    }
+    const order = Object.entries(totals).sort((a, b) => b[1] - a[1]);
+    s.rankTotal = order.length;
+    const i = order.findIndex(([id]) => id === sellerId);
+    s.rank = i === -1 ? null : i + 1;
+    return s;
+}
+
+// 관리자가 직접 설정 (값을 준 항목만 덮어씀)
+function setUser(id, patch) {
+    const u = ensureUser(id);
+    for (const k of ['robux', 'spent', 'count', 'invites']) {
+        if (typeof patch[k] === 'number' && Number.isFinite(patch[k]) && patch[k] >= 0) u[k] = Math.round(patch[k]);
+    }
+    save();
+    return { ...u };
+}
+
+// 서버 가입 기록 (초대한 사람이 있으면 초대 수 +1)
+function recordJoin(userId, inviterId) {
+    db.joins.push({ ts: Date.now(), userId, inviterId: inviterId || null });
+    if (inviterId) ensureUser(inviterId).invites += 1;
+    save();
+}
+
+// 구매 금액 순 랭킹 [{ id, ...user }]
+function ranking() {
+    return Object.entries(db.users)
+        .map(([id, u]) => ({ id, ...emptyUser(), ...u }))
+        .filter((u) => u.spent > 0)
+        .sort((a, b) => b.spent - a.spent || b.robux - a.robux || b.count - a.count);
+}
+
+// 유저 순위 (구매 기록이 없으면 null)
+function rankOf(id) {
+    const list = ranking();
+    const i = list.findIndex((u) => u.id === id);
+    return { rank: i === -1 ? null : i + 1, total: list.length };
+}
+
+// sinceTs 이후 서버 통계
+function periodStats(sinceTs, guildId) {
+    const from = Math.max(sinceTs, STATS_START_TS);
+    let robux = 0;
+    let spent = 0;
+    let count = 0;
+    const byBuyer = {};
+    for (const p of db.purchases) {
+        if (p.ts < from) continue;
+        if (guildId && p.guildId && p.guildId !== guildId) continue;
+        robux += p.robux || 0;
+        spent += p.spent || 0;
+        count += 1;
+        byBuyer[p.buyerId] = (byBuyer[p.buyerId] || 0) + (p.spent || 0);
+    }
+    let topBuyer = null;
+    for (const [id, amount] of Object.entries(byBuyer)) {
+        if (!topBuyer || amount > topBuyer.spent) topBuyer = { id, spent: amount };
+    }
+
+    let joined = 0;
+    const byInviter = {};
+    for (const j of db.joins) {
+        if (j.ts < from) continue;
+        joined += 1;
+        if (j.inviterId) byInviter[j.inviterId] = (byInviter[j.inviterId] || 0) + 1;
+    }
+    let topInviter = null;
+    for (const [id, n] of Object.entries(byInviter)) {
+        if (!topInviter || n > topInviter.count) topInviter = { id, count: n };
+    }
+
+    return { from, robux, spent, count, topBuyer, joined, topInviter };
+}
+
+// ==================== 티켓 (대시보드 설정 + 기록) ====================
+const emptyTicketConfig = () => ({ counter: 0, panels: [] });
+
+// 서버의 티켓 설정 (복사본을 돌려줘요)
+function getTicketConfig(guildId) {
+    const g = db.guilds[guildId];
+    return JSON.parse(JSON.stringify(g && g.tickets ? g.tickets : emptyTicketConfig()));
+}
+
+function saveTicketConfig(guildId, cfg) {
+    if (!db.guilds[guildId]) db.guilds[guildId] = {};
+    db.guilds[guildId].tickets = cfg;
+    save();
+}
+
+// 티켓 번호 +1 (서버별)
+function nextTicketNumber(guildId) {
+    if (!db.guilds[guildId]) db.guilds[guildId] = {};
+    const g = db.guilds[guildId];
+    if (!g.tickets) g.tickets = emptyTicketConfig();
+    g.tickets.counter = (g.tickets.counter || 0) + 1;
+    save();
+    return g.tickets.counter;
+}
+
+function addTicket(t) {
+    db.tickets.push({ ...t, closed: false, deleted: false, claimedBy: null, closedBy: null, closedTs: null });
+    save();
+}
+
+function findTicket(channelId) {
+    return db.tickets.find((t) => t.channelId === channelId) || null;
+}
+
+function closeTicket(channelId, closedBy) {
+    const t = findTicket(channelId);
+    if (!t || t.closed || t.deleted) return null;
+    t.closed = true;
+    t.closedBy = closedBy || null;
+    t.closedTs = Date.now();
+    save();
+    return t;
+}
+
+function reopenTicket(channelId) {
+    const t = findTicket(channelId);
+    if (!t || t.deleted || !t.closed) return null;
+    t.closed = false;
+    t.closedBy = null;
+    t.closedTs = null;
+    save();
+    return t;
+}
+
+function markTicketDeleted(channelId, by) {
+    const t = findTicket(channelId);
+    if (!t) return null;
+    t.deleted = true;
+    t.closed = true;
+    t.closedBy = t.closedBy || by || null;
+    t.closedTs = t.closedTs || Date.now();
+    save();
+    return t;
+}
+
+function getOpenTickets(guildId) {
+    return db.tickets.filter((t) => t.guildId === guildId && !t.closed && !t.deleted);
+}
+
+function getRecentTickets(guildId, n = 20) {
+    return db.tickets.filter((t) => t.guildId === guildId).slice(-n).reverse();
+}
+
+
+// ==================== 서버별 커뮤니티 설정 (환영/퇴장/자동응답) ====================
+function getCommunity(guildId) {
+    const g = db.guilds[guildId];
+    return JSON.parse(JSON.stringify((g && g.community) || {}));
+}
+
+function saveCommunity(guildId, cfg) {
+    if (!db.guilds[guildId]) db.guilds[guildId] = {};
+    db.guilds[guildId].community = cfg;
+    save();
+}
+
+// ==================== 구매 기록 조회 (대시보드) ====================
+const inGuild = (p, guildId) => !guildId || !p.guildId || p.guildId === guildId;
+
+const purchaseCode = (id) => String(id || '');
+
+function getPurchase(id) {
+    return db.purchases.find((p) => p.id === id) || null;
+}
+
+// ==================== 구매로그 수정 / 삭제 ====================
+// 구매 기록 하나가 유저 누적값(구매 로벅스/금액/거래횟수)에 준 영향을 빼거나(sign -1) 더해요(sign +1)
+function applyToUsers(p, sign) {
+    const b = ensureUser(p.buyerId);
+    b.count = Math.max(0, b.count + sign);
+    b.spent = Math.max(0, b.spent + sign * (p.spent || 0));
+    b.robux = Math.max(0, b.robux + sign * (p.robux || 0));
+    if (p.sellerId) {
+        const s = ensureUser(p.sellerId);
+        s.count = Math.max(0, s.count + sign);
+    }
+}
+
+// 구매 ID 문자열로 찾기 (예: "1234567890123")
+function findPurchaseByCode(code) {
+    const n = Number(String(code || '').replace(/[^\d]/g, ''));
+    return n ? getPurchase(n) : null;
+}
+
+// 구매로그 수정 → 유저 누적값도 같이 바뀌어서 $정보 / $통계 / $랭킹 / 주간 랭킹에 바로 반영돼요
+// patch: { buyerId, sellerId, kind, item, qty, price, roblox }
+function editPurchase(id, patch) {
+    const p = getPurchase(id);
+    if (!p) return null;
+    applyToUsers(p, -1);
+    if (patch.buyerId) p.buyerId = patch.buyerId;
+    if (patch.sellerId !== undefined) p.sellerId = patch.sellerId || null;
+    if (patch.kind) p.kind = patch.kind;
+    if (patch.item !== undefined) p.item = String(patch.item || '').slice(0, 80);
+    if (patch.qty !== undefined) p.qty = String(patch.qty ?? '').slice(0, 30);
+    if (patch.price !== undefined) p.price = String(patch.price ?? '').slice(0, 30);
+    if (patch.roblox !== undefined) p.roblox = String(patch.roblox || '').slice(0, 30);
+    p.robux = p.kind === 'robux' ? parseNumber(p.qty) : 0;
+    if (patch.price !== undefined) p.spent = parseNumber(patch.price);
+    p.editedTs = Date.now();
+    applyToUsers(p, +1);
+    save();
+    return p;
+}
+
+// 구매로그 삭제 → 유저 누적값에서도 빠져요
+function deletePurchase(id) {
+    const i = db.purchases.findIndex((x) => x.id === id);
+    if (i === -1) return null;
+    const [p] = db.purchases.splice(i, 1);
+    applyToUsers(p, -1);
+    save();
+    return p;
+}
+
+// 구매 기록에 추가 정보 저장 (로블록스 아이디, 구매로그 메시지 위치 등)
+function setPurchaseExtra(id, extra) {
+    const p = getPurchase(id);
+    if (!p) return null;
+    Object.assign(p, extra);
+    save();
+    return p;
+}
+
+// 티켓 안 대화 기록을 구매 기록에 붙여요 (최대 300줄)
+function attachChat(id, chat) {
+    const p = getPurchase(id);
+    if (!p || !chat || !Array.isArray(chat.messages)) return false;
+    p.chat = {
+        channelName: String(chat.channelName || '').slice(0, 100),
+        ticketNumber: chat.ticketNumber || null,
+        messages: chat.messages.slice(0, 300).map((m) => ({
+            ts: Number(m.ts) || 0,
+            name: String(m.name || '').slice(0, 60),
+            bot: !!m.bot,
+            text: String(m.text || '').slice(0, 600),
+            files: (Array.isArray(m.files) ? m.files : []).slice(0, 5).map((f) => ({ name: String(f.name || '').slice(0, 80), url: String(f.url || '').slice(0, 400) })),
+        })),
+    };
+    save();
+    return true;
+}
+
+function getPurchases(guildId, { limit = 100, buyerId = null } = {}) {
+    const out = [];
+    for (let i = db.purchases.length - 1; i >= 0 && out.length < limit; i--) {
+        const p = db.purchases[i];
+        if (!inGuild(p, guildId)) continue;
+        if (buyerId && p.buyerId !== buyerId) continue;
+        out.push(p);
+    }
+    return out;
+}
+
+// 최근 N일(한국 시간 기준 날짜) 일별 합계
+function dailySeries(guildId, days = 14) {
+    const DAY = 24 * 60 * 60 * 1000;
+    const KST = 9 * 60 * 60 * 1000;
+    const todayStart = Math.floor((Date.now() + KST) / DAY) * DAY - KST;
+    const list = [];
+    for (let i = days - 1; i >= 0; i--) list.push({ ts: todayStart - i * DAY, spent: 0, robux: 0, count: 0 });
+    for (const p of db.purchases) {
+        if (!inGuild(p, guildId)) continue;
+        const idx = Math.floor((p.ts - (todayStart - (days - 1) * DAY)) / DAY);
+        if (idx >= 0 && idx < days) {
+            list[idx].spent += p.spent || 0;
+            list[idx].robux += p.robux || 0;
+            list[idx].count += 1;
+        }
+    }
+    return list;
+}
+
+function allUsers() {
+    return Object.entries(db.users).map(([id, u]) => ({ id, ...emptyUser(), ...u }));
+}
+
+function countJoinsSince(guildId, sinceTs) {
+    return db.joins.filter((j) => j.ts >= sinceTs).length;
+}
+
+// ==================== 계정 / 로그인 기록 / 세션 ====================
+const newId = () => require('crypto').randomBytes(8).toString('hex');
+const sha = (s) => require('crypto').createHash('sha256').update(String(s)).digest('hex');
+
+function getAccount(id) {
+    return db.accounts[id] || null;
+}
+function findAccountByUsername(username) {
+    const u = String(username || '').toLowerCase();
+    return Object.values(db.accounts).find((a) => a.username && a.username === u) || null;
+}
+function findAccountByDiscord(discordId) {
+    return Object.values(db.accounts).find((a) => a.discordId === discordId) || null;
+}
+function createAccount({ username = null, pw = null, discordId = null, name = '', avatar = null }) {
+    const id = newId();
+    db.accounts[id] = {
+        id,
+        username: username ? String(username).toLowerCase() : null,
+        name: String(name || username || '').slice(0, 40),
+        pw,
+        discordId,
+        avatar,
+        createdTs: Date.now(),
+        lastLoginTs: null,
+        lastIp: null,
+    };
+    save();
+    return db.accounts[id];
+}
+function updateAccount(id, patch) {
+    const a = db.accounts[id];
+    if (!a) return null;
+    Object.assign(a, patch);
+    save();
+    return a;
+}
+function deleteAccount(id) {
+    delete db.accounts[id];
+    for (const [k, s] of Object.entries(db.sessions)) if (s.accountId === id) delete db.sessions[k];
+    save();
+}
+function allAccounts() {
+    return Object.values(db.accounts);
+}
+
+const LOG_MAX = 3000;
+function addLog(entry) {
+    db.loginLog.push({ ts: Date.now(), ...entry });
+    if (db.loginLog.length > LOG_MAX) db.loginLog.splice(0, db.loginLog.length - LOG_MAX);
+    save();
+}
+function getLogs({ limit = 200, type = null, q = '' } = {}) {
+    const needle = String(q || '').toLowerCase();
+    const out = [];
+    for (let i = db.loginLog.length - 1; i >= 0 && out.length < limit; i--) {
+        const l = db.loginLog[i];
+        if (type && l.type !== type) continue;
+        if (needle && !`${l.username || ''} ${l.name || ''} ${l.discordId || ''} ${l.ip || ''} ${l.detail || ''}`.toLowerCase().includes(needle)) continue;
+        out.push(l);
+    }
+    return out;
+}
+// 최근 실패 횟수 (무차별 대입 방지용)
+function recentFails(key, sinceTs) {
+    let n = 0;
+    for (let i = db.loginLog.length - 1; i >= 0; i--) {
+        const l = db.loginLog[i];
+        if (l.ts < sinceTs) break;
+        if (l.type === 'fail' && (l.ip === key || l.username === key)) n++;
+    }
+    return n;
+}
+function recentCount(type, ip, sinceTs) {
+    let n = 0;
+    for (let i = db.loginLog.length - 1; i >= 0; i--) {
+        const l = db.loginLog[i];
+        if (l.ts < sinceTs) break;
+        if (l.type === type && l.ip === ip) n++;
+    }
+    return n;
+}
+
+const SESSION_MS = 7 * 24 * 60 * 60 * 1000;
+function createSession(accountId) {
+    const sid = require('crypto').randomBytes(32).toString('hex');
+    db.sessions[sha(sid)] = { accountId, exp: Date.now() + SESSION_MS };
+    save();
+    return sid;
+}
+function getSessionAccount(sid) {
+    if (!sid) return null;
+    const k = sha(sid);
+    const s = db.sessions[k];
+    if (!s) return null;
+    if (s.exp < Date.now()) {
+        delete db.sessions[k];
+        return null;
+    }
+    return db.accounts[s.accountId] || null;
+}
+function deleteSession(sid) {
+    if (!sid) return;
+    const k = sha(sid);
+    if (db.sessions[k]) {
+        delete db.sessions[k];
+        save();
+    }
+}
+function cleanSessions() {
+    const now = Date.now();
+    let changed = false;
+    for (const [k, s] of Object.entries(db.sessions)) {
+        if (s.exp < now) {
+            delete db.sessions[k];
+            changed = true;
+        }
+    }
+    if (changed) save();
+}
+
+const SITE_KEYS = ['supportUrl', 'contactUrl', 'inviteUrl'];
+function getSite() {
+    const out = {};
+    for (const k of SITE_KEYS) out[k] = db.site[k] || '';
+    return out;
+}
+function setSite(patch) {
+    for (const k of SITE_KEYS) if (typeof patch[k] === 'string') db.site[k] = patch[k];
+    save();
+    return getSite();
+}
+
+load();
+
+module.exports = {
+    getCommunity,
+    saveCommunity,
+    getPurchases,
+    dailySeries,
+    allUsers,
+    countJoinsSince,
+    getAccount,
+    findAccountByUsername,
+    findAccountByDiscord,
+    createAccount,
+    updateAccount,
+    deleteAccount,
+    allAccounts,
+    addLog,
+    getLogs,
+    recentFails,
+    recentCount,
+    createSession,
+    getSessionAccount,
+    deleteSession,
+    cleanSessions,
+    getSite,
+    setSite,
+    getTicketConfig,
+    saveTicketConfig,
+    nextTicketNumber,
+    addTicket,
+    findTicket,
+    closeTicket,
+    reopenTicket,
+    markTicketDeleted,
+    getOpenTickets,
+    getRecentTickets,
+    STATS_START_TS,
+    DATA_DIR,
+    FILE,
+    persistent,
+    parseNumber,
+    getUser,
+    recordPurchase,
+    purchasesOf,
+    sellerStats,
+    weeklyTop,
+    hasPurchases,
+    getMeta,
+    setMeta,
+    purchaseCode,
+    findPurchaseByCode,
+    editPurchase,
+    deletePurchase,
+    setPurchaseExtra,
+    getPurchase,
+    attachChat,
+    setUser,
+    recordJoin,
+    ranking,
+    rankOf,
+    periodStats,
+};
