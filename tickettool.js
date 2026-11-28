@@ -199,7 +199,14 @@ async function gatherFromChannel(channel) {
     if (d.sellerId === d.buyerId) d.sellerId = null;
 
     // 종류: 양식 답변 → 티켓 이름 → 카테고리 이름 → 티켓툴 메시지 내용
-    if (!d.kind) d.kind = detectKind(channel.name) || detectKind(parentName) || detectKind(allText);
+    // 티켓 카테고리 이름(로벅스 / 인게임 / 기타)으로 종류가 정해지면 그걸 우선 → 종류 선택 창 없이 바로 질문
+    const categoryKind = detectKind(parentName);
+    if (categoryKind) {
+        d.kind = categoryKind;
+        d.kindFixed = true;
+        if (categoryKind !== 'robux' && d.item === '로벅스') d.item = '';
+    }
+    if (!d.kind) d.kind = detectKind(channel.name) || detectKind(allText);
     if (d.kind === 'robux' && !d.item) d.item = '로벅스';
 
     console.log(`[티켓] ${channel.name} 정보 읽기 → ${JSON.stringify(d)}`);
@@ -285,18 +292,18 @@ const v2Text = (content, color = PANEL_COLOR) => ({
     components: [{ type: 17, accent_color: color, components: [{ type: 10, content }] }]
 });
 
-async function sendQuestion(channel, d, key, retry = null) {
+async function sendQuestion(channel, d, key, retry = null, intro = false) {
     d.asking = key;
     await channel.send({
-        ...v2Text(`<@${d.buyerId}> ${questionText(d, key, retry)}`),
+        ...v2Text(`${intro ? '### 구매하기 전 몇 가지만 여쭤볼게요\n' : ''}<@${d.buyerId}> ${questionText(d, key, retry)}`),
         allowedMentions: { users: [d.buyerId] }
     });
 }
 
 // 다음 질문 보내기. 다 끝났으면 완료 안내. (d 를 바꾸므로 호출한 쪽에서 저장)
-async function askNext(channel, d) {
+async function askNext(channel, d, intro = false) {
     const key = nextQuestion(d);
-    if (key) return sendQuestion(channel, d, key);
+    if (key) return sendQuestion(channel, d, key, null, intro);
     d.asking = null;
     d.asked = true;
     await channel.send({
@@ -336,6 +343,13 @@ const kindPickedPayload = (kind) => ({
 
 async function startQuestions(channel, panelId, d) {
     d.asked = false;
+    // 카테고리로 종류가 정해진 티켓은 종류 선택 없이 바로 질문
+    if (d.kindFixed && d.kind) {
+        d.asking = null;
+        await askNext(channel, d, true);
+        savePanel(panelId, d);
+        return;
+    }
     d.asking = 'pick';
     await channel.send(kindPickPayload(panelId, d));
     savePanel(panelId, d);
