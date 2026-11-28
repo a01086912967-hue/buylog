@@ -521,6 +521,7 @@ client.once('ready', async () => {
         deleteMsg: deletePurchaseLogMessage
     });
     tickettool.init(client, {
+        isAdmin: (member) => !!member && isAdmin(member), // .inp 대신 입력 (관리자만)
         openPurchaseEditor: (interaction, code) => purchaseEdit.openById(interaction, code),
         completePurchase,
         purchaseCode: (id) => store.purchaseCode(id),
