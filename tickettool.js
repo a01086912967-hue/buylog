@@ -348,9 +348,9 @@ async function retryQuestion(channel, panelId, d, key, why) {
 }
 
 // 구매자의 답변 처리. 처리했으면 true
-async function handleAnswer(message, panelId, d) {
+async function handleAnswer(message, panelId, d, text = null) {
     const key = d.asking;
-    const t = message.content.trim().slice(0, 200);
+    const t = String(text ?? message.content).trim().slice(0, 200);
     if (!key || key === 'pick' || !t) return false;
 
     if (key === 'count') {
@@ -381,6 +381,37 @@ async function handleAnswer(message, panelId, d) {
     await askNext(message.channel, d);
     await refreshPanel(message.channel, panelId, d);
     return true;
+}
+
+// ---------- 관리자 대신 입력 (.inp) ----------
+const noteReply = (message, content) =>
+    message.reply({ ...v2Text(content), allowedMentions: { parse: [] } }).catch(() => {});
+
+async function adminInput(message, panelId, d, text) {
+    if (!text) return noteReply(message, '`.inp (입력할 내용)` 처럼 써주세요. 예: `.inp Builderman`');
+    if (!d.buyerId) return noteReply(message, '아직 구매자가 없어요. [정보 수정]에서 구매자를 먼저 골라주세요.');
+
+    // 종류 선택 중이면: .inp 로벅스 / .inp 기타
+    if (d.asking === 'pick') {
+        const k = detectKind(text);
+        if (!k) return noteReply(message, '종류는 `.inp 로벅스` / `.inp 인게임` / `.inp 기타` 로 입력해 주세요.');
+        d.kind = k;
+        if (k === 'robux') d.item = '로벅스';
+        else if (d.item === '로벅스') d.item = '';
+        d.asking = null;
+        await message.react('✅').catch(() => {});
+        await message.channel.send({ ...kindPickedPayload(k), flags: FLAG_V2 });
+        await askNext(message.channel, d);
+        await refreshPanel(message.channel, panelId, d);
+        return;
+    }
+
+    if (!d.asking) return noteReply(message, '지금 받을 질문이 없어요. 내용을 고치려면 패널의 [정보 수정]을 써주세요.');
+
+    const before = d.asking;
+    await handleAnswer(message, panelId, d, text);
+    // 질문이 넘어갔으면 입력 성공
+    if (d.asking !== before || d.asked) await message.react('✅').catch(() => {});
 }
 
 // ---------- 티켓 대화에서 자동으로 채우기 ($가격 / $로벅스 / 금액) ----------
@@ -425,6 +456,13 @@ async function onChatMessage(message) {
         d.buyerId = message.author.id;
         await refreshPanel(message.channel, id, d);
         await startQuestions(message.channel, id, d);
+        return;
+    }
+
+    // 관리자 대신 입력: .inp (답) → 구매자가 답한 것처럼 지금 질문에 입력돼요
+    const inp = t.match(/^\.inp(?:\s+([\s\S]*))?$/i);
+    if (inp && deps.isAdmin(message.member)) {
+        await adminInput(message, id, d, (inp[1] || '').trim());
         return;
     }
 
